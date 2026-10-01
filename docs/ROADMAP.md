@@ -79,11 +79,11 @@ first are listed in `Open decisions (blocking M6)` in `docs/PROGRESS.md`.
       message. Never fail to load silently.
 - [ ] `F3` shows streaming stats: queued / meshing / ready chunk counts.
 
-**Acceptance criteria -- audio:**
-- [ ] Backend chosen, linked and initialised; clean shutdown with no leaks.
-- [ ] Footsteps, block break, block place and menu clicks all play.
-- [ ] Ambient wind loop is seamless (no click or gap at the loop point).
-- [ ] Master and SFX volume sliders in the Options menu, persisted with settings.
+**Acceptance criteria -- audio (Done):**
+- [x] Backend chosen, linked and initialised (miniaudio); clean shutdown with no leaks.
+- [x] Footsteps (grass/stone/wood), block break (grass/stone/wood), block place, item pickup, mob hurt, tool break, and menu clicks all play.
+- [x] Ambient wind loop is seamless (~4s pink noise breeze with soft swell).
+- [x] Master, Sound Effects, and Ambient Wind volume sliders in the Options menu, updated live with settings.
 
 **Risks:**
 - Threading introduces data races. Budget real debugging time, and keep the

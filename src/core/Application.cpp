@@ -84,6 +84,7 @@ bool Application::init() {
         log::error("Renderer initialisation failed");
         return false;
     }
+    m_audioEngine.init();
 
     log::info("VoxelMin v%s starting...", config::VERSION);
     log::info("Generating lightweight panorama world for main menu...");
@@ -152,23 +153,33 @@ void Application::run() {
             m_showDebugOverlay = !m_showDebugOverlay;
         }
 
+        m_audioEngine.setInGame(m_state == GameState::Playing || m_state == GameState::Inventory);
+
         if (m_state == GameState::Playing) {
             if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
                 pauseGame();
             } else {
                 handlePlayInput();
-                m_player.update(dt, m_input, m_world);
+                m_player.update(dt, m_input, m_world, &m_audioEngine);
                 m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
-                    return addItem(id, count);
+                    if (addItem(id, count)) {
+                        m_audioEngine.play(SoundId::ItemPickup, 0.9f);
+                        return true;
+                    }
+                    return false;
                 });
                 m_renderer.updateParticles(dt, m_world, m_player.position());
                 updateInteraction();
             }
         } else if (m_state == GameState::Inventory) {
             handleInventoryInput();
-            m_player.update(dt, m_input, m_world);
+            m_player.update(dt, m_input, m_world, &m_audioEngine);
             m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
-                return addItem(id, count);
+                if (addItem(id, count)) {
+                    m_audioEngine.play(SoundId::ItemPickup, 0.9f);
+                    return true;
+                }
+                return false;
             });
             m_renderer.updateParticles(dt, m_world, m_player.position());
         } else {
@@ -196,6 +207,7 @@ void Application::shutdown() {
         WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
                             m_world, m_player, m_selectedSlot, hb, inv);
     }
+    m_audioEngine.shutdown();
     m_renderer.shutdown();
     if (m_window) {
         glfwDestroyWindow(m_window);
@@ -341,6 +353,27 @@ void Application::buildMenus() {
         "Wireframe",
         [this] { return std::string(m_wireframe ? "ON" : "OFF"); },
         [this](int) { m_wireframe = !m_wireframe; });
+    m_optionsMenu.addOption(
+        "Master Volume",
+        [this] { return std::to_string(static_cast<int>(std::lround(m_masterVolume * 100.0f))) + "%"; },
+        [this](int d) {
+            m_masterVolume = std::clamp(m_masterVolume + 0.05f * static_cast<float>(d), 0.0f, 1.0f);
+            applySettings();
+        });
+    m_optionsMenu.addOption(
+        "Sound Effects",
+        [this] { return std::to_string(static_cast<int>(std::lround(m_sfxVolume * 100.0f))) + "%"; },
+        [this](int d) {
+            m_sfxVolume = std::clamp(m_sfxVolume + 0.05f * static_cast<float>(d), 0.0f, 1.0f);
+            applySettings();
+        });
+    m_optionsMenu.addOption(
+        "Ambient Wind",
+        [this] { return std::to_string(static_cast<int>(std::lround(m_ambientVolume * 100.0f))) + "%"; },
+        [this](int d) {
+            m_ambientVolume = std::clamp(m_ambientVolume + 0.05f * static_cast<float>(d), 0.0f, 1.0f);
+            applySettings();
+        });
     m_optionsMenu.addButton("Back", [this] { closeOptions(); });
     m_optionsMenu.resetSelection();
 }
@@ -536,22 +569,28 @@ void Application::handleMenuInput() {
 
     Menu& menu = activeMenu();
 
+    const int oldSel = menu.selection();
     if (m_input.keyPressed(GLFW_KEY_UP) || (m_input.keyPressed(GLFW_KEY_W) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
         menu.moveSelection(-1);
+        if (menu.selection() != oldSel) m_audioEngine.play(SoundId::Click, 0.45f, 1.25f);
     }
     if (m_input.keyPressed(GLFW_KEY_DOWN) || (m_input.keyPressed(GLFW_KEY_S) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
         menu.moveSelection(1);
+        if (menu.selection() != oldSel) m_audioEngine.play(SoundId::Click, 0.45f, 1.25f);
     }
     if (m_input.keyPressed(GLFW_KEY_LEFT) || (m_input.keyPressed(GLFW_KEY_A) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
         menu.adjustSelected(-1);
+        m_audioEngine.play(SoundId::Click, 0.55f, 1.15f);
     }
     if (m_input.keyPressed(GLFW_KEY_RIGHT) || (m_input.keyPressed(GLFW_KEY_D) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
         menu.adjustSelected(1);
+        m_audioEngine.play(SoundId::Click, 0.55f, 1.15f);
     }
 
     const bool confirm = m_input.keyPressed(GLFW_KEY_ENTER) ||
                          m_input.keyPressed(GLFW_KEY_KP_ENTER);
     if (confirm) {
+        m_audioEngine.play(SoundId::Click, 0.75f, 1.0f);
         menu.activate();
         return;
     }
@@ -572,7 +611,9 @@ void Application::handleMenuInput() {
             if (row->isOption()) {
                 const float midX = row->x + row->w * 0.5f;
                 menu.adjustSelected(mouse.x < midX ? -1 : 1);
+                m_audioEngine.play(SoundId::Click, 0.55f, 1.15f);
             } else {
+                m_audioEngine.play(SoundId::Click, 0.75f, 1.0f);
                 menu.activate();
             }
         }
@@ -581,6 +622,7 @@ void Application::handleMenuInput() {
         if (const Menu::Row* row = menu.getRow(clickedRight)) {
             if (row->isOption()) {
                 menu.adjustSelected(-1);
+                m_audioEngine.play(SoundId::Click, 0.55f, 1.15f);
             }
         }
     }
@@ -910,6 +952,7 @@ void Application::takeCraftResult() {
             }
         }
         updateCrafting();
+        m_audioEngine.play(SoundId::ItemPickup, 0.9f, 1.15f);
     } else if (m_heldItem.id == m_craftResult.id && !isTool(m_heldItem.id) &&
                m_heldItem.count + m_craftResult.count <= 64) {
         m_heldItem.count += m_craftResult.count;
@@ -920,6 +963,7 @@ void Application::takeCraftResult() {
             }
         }
         updateCrafting();
+        m_audioEngine.play(SoundId::ItemPickup, 0.9f, 1.15f);
     }
 }
 
@@ -1069,6 +1113,7 @@ void Application::handleInventoryInput() {
         if (hoveredResult) {
             takeCraftResult();
         } else if (hoveredCraftIdx >= 0) {
+            m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
             ItemSlot& target = m_craftGrid[hoveredCraftIdx];
             if (m_heldItem.empty()) {
                 m_heldItem = target;
@@ -1084,6 +1129,7 @@ void Application::handleInventoryInput() {
             }
             updateCrafting();
         } else if (hoveredInvIdx >= 0) {
+            m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
             ItemSlot& target = m_inventory[hoveredInvIdx];
             if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
                 const int canAdd = std::min(m_heldItem.count, 64 - target.count);
@@ -1094,6 +1140,7 @@ void Application::handleInventoryInput() {
                 std::swap(m_heldItem, target);
             }
         } else if (hoveredHotbarIdx >= 0) {
+            m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
             ItemSlot& target = m_hotbar[hoveredHotbarIdx];
             if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
                 const int canAdd = std::min(m_heldItem.count, 64 - target.count);
@@ -1109,6 +1156,7 @@ void Application::handleInventoryInput() {
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
         if (!m_heldItem.empty()) {
             if (hoveredCraftIdx >= 0) {
+                m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
                 ItemSlot& target = m_craftGrid[hoveredCraftIdx];
                 if (target.empty()) {
                     target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
@@ -1122,6 +1170,7 @@ void Application::handleInventoryInput() {
                     updateCrafting();
                 }
             } else if (hoveredInvIdx >= 0) {
+                m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
                 ItemSlot& target = m_inventory[hoveredInvIdx];
                 if (target.empty()) {
                     target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
@@ -1133,6 +1182,7 @@ void Application::handleInventoryInput() {
                     if (m_heldItem.count <= 0) m_heldItem.clear();
                 }
             } else if (hoveredHotbarIdx >= 0) {
+                m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
                 ItemSlot& target = m_hotbar[hoveredHotbarIdx];
                 if (target.empty()) {
                     target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
@@ -1185,10 +1235,12 @@ void Application::updateInteraction() {
         if (hitMob) {
             const int dmg = attackDamage(held.id);
             hitMob->takeDamage(dmg, m_player.position());
+            m_audioEngine.play3D(SoundId::MobHurt, hitMob->position(), camera.position(), camera.front(), 0.85f);
             if (isTool(held.id)) {
                 held.durability--;
                 if (held.durability <= 0) {
                     held.clear();
+                    m_audioEngine.play(SoundId::ToolBreak);
                 }
             }
             if (hitMob->type() == MobType::PigmanVillager) {
@@ -1208,14 +1260,30 @@ void Application::updateInteraction() {
         if (isBreakable(targetBlock)) {
             m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
             const BlockId drop = getDropForBlock(targetBlock);
+            const glm::vec3 dropPos = glm::vec3(m_target.block) + glm::vec3(0.5f, 0.4f, 0.5f);
             if (drop != BlockId::Air) {
-                const glm::vec3 dropPos = glm::vec3(m_target.block) + glm::vec3(0.5f, 0.4f, 0.5f);
                 m_entityManager.spawnItem(drop, dropPos, 1);
             }
+
+            SoundId digSnd = SoundId::DigStone;
+            if (targetBlock == BlockId::Wood || targetBlock == BlockId::WoodX ||
+                targetBlock == BlockId::WoodZ || targetBlock == BlockId::Planks ||
+                targetBlock == BlockId::CraftingTable) {
+                digSnd = SoundId::DigWood;
+            } else if (targetBlock == BlockId::Grass || targetBlock == BlockId::Dirt ||
+                       targetBlock == BlockId::Leaves || targetBlock == BlockId::TallGrass ||
+                       targetBlock == BlockId::Sand || targetBlock == BlockId::DirtPath) {
+                digSnd = SoundId::DigGrass;
+            } else {
+                digSnd = SoundId::DigStone;
+            }
+            m_audioEngine.play3D(digSnd, dropPos, camera.position(), camera.front(), 0.90f);
+
             if (isTool(held.id)) {
                 held.durability--;
                 if (held.durability <= 0) {
                     held.clear();
+                    m_audioEngine.play(SoundId::ToolBreak);
                 }
             }
         }
@@ -1249,6 +1317,8 @@ void Application::updateInteraction() {
                     }
                 }
                 m_world.setBlock(place.x, place.y, place.z, placed);
+                const glm::vec3 placedPos = glm::vec3(place) + glm::vec3(0.5f, 0.5f, 0.5f);
+                m_audioEngine.play3D(SoundId::PlaceBlock, placedPos, camera.position(), camera.front(), 0.85f);
                 held.count--;
                 if (held.count <= 0) {
                     held.clear();

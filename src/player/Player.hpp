@@ -10,6 +10,7 @@ namespace vox {
 
 class World;
 class Input;
+class AudioEngine;
 
 enum class Perspective {
     FirstPerson,
@@ -25,7 +26,7 @@ enum class Perspective {
 class Player {
 public:
     void spawnAt(const World& world, float x, float z);
-    void update(float dt, const Input& input, const World& world);
+    void update(float dt, const Input& input, const World& world, AudioEngine* audio = nullptr);
 
     Camera& camera() { return m_camera; }
     const Camera& camera() const { return m_camera; }
@@ -82,6 +83,7 @@ private:
     // View bobbing & dynamics
     float m_bobTimer = 0.0f;
     float m_bobIntensity = 0.0f;
+    float m_stepDistance = 0.0f;
 
     // Jump queueing & air control
     float m_jumpQueueTimer = 0.0f;

@@ -36,7 +36,7 @@ if(WIN32)
     endif()
 
     set(VOXELMIN_EXTRA_INCLUDES "${VOXELMIN_MINGW_ROOT}/include")
-    set(VOXELMIN_EXTRA_LIBS "${GLFW3_LIBRARY}" "${GLEW_LIBRARY}" gdi32 user32 shell32)
+    set(VOXELMIN_EXTRA_LIBS "${GLFW3_LIBRARY}" "${GLEW_LIBRARY}" gdi32 user32 shell32 ole32)
     set(VOXELMIN_EXTRA_DEFS GLEW_STATIC)
 else()
     # On Linux / UNIX, use CMake packages or pkg-config / system libraries.
@@ -83,11 +83,15 @@ else()
         list(APPEND VOXELMIN_EXTRA_INCLUDES "${STB_INCLUDE_DIR}")
     endif()
 
+    find_package(Threads REQUIRED)
+
     set(VOXELMIN_EXTRA_LIBS
         ${VOXELMIN_GLFW_TARGET}
         ${VOXELMIN_GLEW_TARGET}
         ${VOXELMIN_GLM_TARGET}
+        Threads::Threads
         ${CMAKE_DL_LIBS}
+        m
     )
     set(VOXELMIN_EXTRA_DEFS "")
 endif()

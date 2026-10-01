@@ -5,6 +5,7 @@
 #endif
 #include <GLFW/glfw3.h>
 
+#include "audio/AudioEngine.hpp"
 #include "core/Config.hpp"
 #include "entity/EntityManager.hpp"
 #include "input/Input.hpp"
@@ -175,6 +176,11 @@ private:
     int m_guiScale = 0; // 0 = auto, otherwise a fixed multiplier (1..4)
     bool m_vsync = true;
     bool m_fullscreen = false;
+    float m_masterVolume = 0.8f;
+    float m_sfxVolume = 0.8f;
+    float m_ambientVolume = 0.35f;
+
+    AudioEngine m_audioEngine;
 
     int m_fbWidth = config::WINDOW_WIDTH;
     int m_fbHeight = config::WINDOW_HEIGHT;

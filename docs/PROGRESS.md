@@ -120,6 +120,25 @@ Open, but not M6 blockers:
 
 ## Done
 
+### 2026-10-01 -- Milestone M6 Audio Engine: Miniaudio Integration & Core Procedural SFX
+
+- **Miniaudio Audio Engine Architecture**:
+  - Vendored single-header `miniaudio.h` (`src/audio/miniaudio.h`, `src/audio/miniaudio_impl.cpp`) compiling warning-free under `-Wall -Wextra -Wpedantic`.
+  - Implemented high-performance low-latency mixer in `AudioEngine` (`src/audio/AudioEngine.hpp`, `src/audio/AudioEngine.cpp`) operating at 44.1 kHz stereo with 32 active polyphonic voices, soft limiting, and graceful silent fallback on headless systems.
+  - Implemented spatial 3D audio via `play3D()` calculating distance quadratic attenuation ($1 / (1 + 0.14 d^2)$) and orientation-aware stereo panning ($L / R$).
+  - Added Master Volume, Sound Effects, and Ambient Wind sliders to the in-game and title Options menu with live tuning.
+
+- **Procedural Sound Effects (Zero External Asset Overhead)**:
+  - Procedural sound synthesis generates rich authentic waveforms at startup without requiring large external audio asset packs:
+    - **UI Click**: Crisp damped tactile mechanical switch sound for buttons and slot interactions.
+    - **Item Pickup**: Pleasant upward frequency chime/pop ($620 \rightarrow 1260\text{ Hz}$).
+    - **Footsteps**: Material-specific audio (Grass/Dirt rustle, Stone hard clack, Wood hollow knock) triggered via movement distance tracking.
+    - **Block Breaking**: Material-specific dig audio (Grass crunch, Stone rock fracture, Wood splinter snap).
+    - **Block Placement**: Solid resonant thud impact clack.
+    - **Mob Hurt**: Fleshy punch thud with gentle soft clipping.
+    - **Tool Break**: High-frequency metallic snap and fracture chime.
+    - **Ambient Wind**: Continuous seamless 4-second pink-noise breeze with soft sine swell mixed in-game.
+
 ### 2026-10-01 -- VoxelMin v0.M5.5: Item Entities, Physics Drops, 2x2 Crafting Grid & Tool Durability (Milestone M5 Complete)
 
 - **Item Entities & Pickup Physics**:

@@ -1,4 +1,5 @@
 #include "player/Player.hpp"
+#include "audio/AudioEngine.hpp"
 #include "core/Config.hpp"
 #include "input/Input.hpp"
 #include "world/Block.hpp"
@@ -81,7 +82,7 @@ void Player::moveAxis(const World& world, float delta, int axis) {
     m_position = candidate;
 }
 
-void Player::update(float dt, const Input& input, const World& world) {
+void Player::update(float dt, const Input& input, const World& world, AudioEngine* audio) {
     applyLook(input);
 
     m_timeSinceWPress += dt;
@@ -239,8 +240,35 @@ void Player::update(float dt, const Input& input, const World& world) {
         targetBobIntensity = m_sprinting ? 1.3f : 1.0f;
         const float freqMult = m_sprinting ? 1.25f : 1.0f;
         m_bobTimer += hSpeed * dt * 2.8f * freqMult;
+
+        m_stepDistance += hSpeed * dt;
+        const float stepInterval = m_sprinting ? 1.75f : 2.15f;
+        if (m_stepDistance >= stepInterval) {
+            m_stepDistance = 0.0f;
+            if (audio) {
+                const int bx = static_cast<int>(std::floor(m_position.x));
+                const int by = static_cast<int>(std::floor(m_position.y - 0.2f));
+                const int bz = static_cast<int>(std::floor(m_position.z));
+                const BlockId blockBelow = world.getBlock(bx, by, bz);
+                SoundId stepSnd = SoundId::StepGrass;
+                if (blockBelow == BlockId::Wood || blockBelow == BlockId::WoodX ||
+                    blockBelow == BlockId::WoodZ || blockBelow == BlockId::Planks ||
+                    blockBelow == BlockId::CraftingTable) {
+                    stepSnd = SoundId::StepWood;
+                } else if (blockBelow == BlockId::Stone || blockBelow == BlockId::Cobblestone ||
+                           blockBelow == BlockId::CoalOre || blockBelow == BlockId::IronOre ||
+                           blockBelow == BlockId::GoldOre || blockBelow == BlockId::DiamondOre ||
+                           blockBelow == BlockId::Bedrock) {
+                    stepSnd = SoundId::StepStone;
+                } else {
+                    stepSnd = SoundId::StepGrass;
+                }
+                audio->play(stepSnd, m_sprinting ? 0.70f : 0.50f);
+            }
+        }
     } else {
         targetBobIntensity = 0.0f;
+        m_stepDistance = std::min(m_stepDistance, 0.7f);
     }
     m_bobIntensity = glm::mix(m_bobIntensity, targetBobIntensity, std::min(1.0f, dt * 6.0f));
 
