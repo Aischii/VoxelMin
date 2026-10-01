@@ -1,8 +1,2 @@
 CompileFlags:
-  Compiler: C:/msys64/mingw64/bin/g++.exe
   CompilationDatabase: build
-  Add:
-    - "--target=x86_64-w64-mingw32"
-    - "-IC:/msys64/mingw64/include"
-    - "-IC:/Users/Ais-PC/VoxelMin/src"
-    - "-DGLEW_STATIC"
