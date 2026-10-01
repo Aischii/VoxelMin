@@ -85,6 +85,9 @@ private:
     void updateInteraction();
     void rebuildDirtyMeshes();
     bool playerOccupies(const glm::ivec3& block) const;
+    bool addItem(BlockId id, int count = 1);
+    void updateCrafting();
+    void takeCraftResult();
 
     // Settings / platform
     void applySettings();
@@ -139,20 +142,25 @@ private:
     std::string m_pendingDeleteWorldName;
     std::string m_pendingDeleteWorldPath;
 
-    BlockId m_hotbar[8] = {
-        BlockId::Grass, BlockId::Dirt, BlockId::DirtPath, BlockId::Wood,
-        BlockId::Leaves, BlockId::Planks, BlockId::Torch, BlockId::Water,
+    ItemSlot m_hotbar[8] = {
+        ItemSlot(BlockId::Grass, 64), ItemSlot(BlockId::Dirt, 64),
+        ItemSlot(BlockId::WoodPickaxe, 1, 60), ItemSlot(BlockId::Wood, 64),
+        ItemSlot(BlockId::Leaves, 64), ItemSlot(BlockId::Planks, 64),
+        ItemSlot(BlockId::Torch, 64), ItemSlot(BlockId::Water, 1),
     };
-    BlockId m_inventory[24] = {
-        BlockId::Grass,       BlockId::Dirt,        BlockId::DirtPath,    BlockId::Cobblestone,
-        BlockId::Wood,        BlockId::Leaves,      BlockId::Planks,      BlockId::Sand,
-        BlockId::Water,       BlockId::Torch,       BlockId::CoalOre,     BlockId::IronOre,
-        BlockId::GoldOre,     BlockId::DiamondOre,  BlockId::Bedrock,     BlockId::TallGrass,
-        BlockId::Grass,       BlockId::Dirt,        BlockId::Stone,       BlockId::Wood,
-        BlockId::Leaves,      BlockId::Planks,      BlockId::Torch,       BlockId::TallGrass,
+    ItemSlot m_inventory[24] = {
+        ItemSlot(BlockId::Grass, 64),       ItemSlot(BlockId::Dirt, 64),        ItemSlot(BlockId::DirtPath, 64),    ItemSlot(BlockId::Cobblestone, 64),
+        ItemSlot(BlockId::Wood, 64),        ItemSlot(BlockId::Leaves, 64),      ItemSlot(BlockId::Planks, 64),      ItemSlot(BlockId::Sand, 64),
+        ItemSlot(BlockId::Water, 1),        ItemSlot(BlockId::Torch, 64),       ItemSlot(BlockId::Coal, 64),        ItemSlot(BlockId::IronIngot, 64),
+        ItemSlot(BlockId::GoldOre, 64),     ItemSlot(BlockId::Diamond, 64),     ItemSlot(BlockId::Bedrock, 64),     ItemSlot(BlockId::CraftingTable, 64),
+        ItemSlot(BlockId::StonePickaxe, 1), ItemSlot(BlockId::WoodAxe, 1),      ItemSlot(BlockId::WoodShovel, 1),   ItemSlot(BlockId::WoodSword, 1),
+        ItemSlot(BlockId::Stick, 64),       ItemSlot(BlockId::Planks, 64),      ItemSlot(BlockId::Torch, 64),       ItemSlot(BlockId::StoneSword, 1),
     };
-    BlockId m_heldItem = BlockId::Air;
+    ItemSlot m_craftGrid[4];
+    ItemSlot m_craftResult;
+    ItemSlot m_heldItem;
     int m_selectedSlot = 0;
+
 
     RayHit m_target;
     double m_lastTime = 0.0;

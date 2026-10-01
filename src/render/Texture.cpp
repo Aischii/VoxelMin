@@ -572,6 +572,127 @@ void makePlayerShoe(std::vector<uint8_t>& pixels, int tile) {
     }
 }
 
+void makeStick(std::vector<uint8_t>& pixels, int tile) {
+    for (int i = 2; i <= 13; ++i) {
+        setPixel(pixels, tile, i, i, {0.55f, 0.40f, 0.22f});
+        if (i < 13) setPixel(pixels, tile, i, i + 1, {0.42f, 0.30f, 0.16f});
+    }
+}
+
+void makeCoalItem(std::vector<uint8_t>& pixels, int tile) {
+    for (int y = 4; y <= 11; ++y) {
+        for (int x = 4; x <= 11; ++x) {
+            const int dx = x - 7;
+            const int dy = y - 7;
+            if (dx * dx + dy * dy <= 16) {
+                const float n = (rnd(x, y, 77) - 0.5f) * 0.08f;
+                const float c = 0.16f + n + (x == 6 && y >= 8 ? 0.15f : 0.0f);
+                setPixel(pixels, tile, x, y, {c, c, c});
+            }
+        }
+    }
+}
+
+void makeIronIngotItem(std::vector<uint8_t>& pixels, int tile) {
+    for (int y = 5; y <= 10; ++y) {
+        const int inset = (y == 5 || y == 10) ? 1 : 0;
+        for (int x = 3 + inset; x <= 12 - inset; ++x) {
+            float bright = (y >= 9) ? 0.92f : ((y <= 6) ? 0.65f : 0.80f);
+            bright += (rnd(x, y, 88) - 0.5f) * 0.05f;
+            setPixel(pixels, tile, x, y, {bright, bright, bright * 1.05f});
+        }
+    }
+}
+
+void makeDiamondItem(std::vector<uint8_t>& pixels, int tile) {
+    for (int y = 3; y <= 12; ++y) {
+        for (int x = 3; x <= 12; ++x) {
+            const int dx = std::abs(x - 7);
+            const int dy = std::abs(y - 7);
+            if (dx + dy <= 5) {
+                float r = 0.25f, g = 0.85f, b = 0.95f;
+                if (y >= 8 && x <= 7) { r += 0.2f; g += 0.1f; }
+                if (y <= 5) { r -= 0.1f; g -= 0.15f; b -= 0.1f; }
+                setPixel(pixels, tile, x, y, {r, g, b});
+            }
+        }
+    }
+}
+
+void makeTool(std::vector<uint8_t>& pixels, int tile, int toolType, Rgb head) {
+    // Stick handle
+    for (int i = 2; i <= 10; ++i) {
+        setPixel(pixels, tile, i, i, {0.55f, 0.40f, 0.22f});
+    }
+
+    if (toolType == 0) { // Pickaxe
+        const int headPts[][2] = {
+            {6, 13}, {7, 13}, {8, 12}, {9, 12}, {10, 11}, {11, 10},
+            {12, 9}, {12, 8}, {13, 7}, {13, 6}, {9, 9}, {10, 10}
+        };
+        for (const auto& pt : headPts) {
+            const float n = (rnd(pt[0], pt[1], 101) - 0.5f) * 0.06f;
+            setPixel(pixels, tile, pt[0], pt[1], {head.r + n, head.g + n, head.b + n});
+        }
+    } else if (toolType == 1) { // Axe
+        for (int y = 8; y <= 13; ++y) {
+            for (int x = 8; x <= 13; ++x) {
+                if (x >= 9 && y >= 9 && (x >= 11 || y >= 11)) {
+                    const float n = (rnd(x, y, 102) - 0.5f) * 0.06f;
+                    setPixel(pixels, tile, x, y, {head.r + n, head.g + n, head.b + n});
+                }
+            }
+        }
+    } else if (toolType == 2) { // Shovel
+        for (int y = 9; y <= 13; ++y) {
+            for (int x = 9; x <= 13; ++x) {
+                if (std::abs(x - 11) + std::abs(y - 11) <= 2) {
+                    const float n = (rnd(x, y, 103) - 0.5f) * 0.06f;
+                    setPixel(pixels, tile, x, y, {head.r + n, head.g + n, head.b + n});
+                }
+            }
+        }
+    } else if (toolType == 3) { // Sword
+        // Guard
+        setPixel(pixels, tile, 4, 6, {head.r * 0.8f, head.g * 0.8f, head.b * 0.8f});
+        setPixel(pixels, tile, 5, 5, {head.r * 0.8f, head.g * 0.8f, head.b * 0.8f});
+        setPixel(pixels, tile, 6, 4, {head.r * 0.8f, head.g * 0.8f, head.b * 0.8f});
+        // Blade
+        for (int i = 6; i <= 13; ++i) {
+            const float n = (rnd(i, i, 104) - 0.5f) * 0.06f;
+            setPixel(pixels, tile, i, i, {head.r + n, head.g + n, head.b + n});
+            if (i <= 12) setPixel(pixels, tile, i, i + 1, {head.r * 0.9f + n, head.g * 0.9f + n, head.b * 0.9f + n});
+        }
+        setPixel(pixels, tile, 14, 14, {head.r * 1.1f, head.g * 1.1f, head.b * 1.1f});
+    }
+}
+
+void makeCraftingTable(std::vector<uint8_t>& pixels, int topTile, int sideTile, int frontTile) {
+    // Base wood planks
+    makePlanks(pixels, topTile);
+    makePlanks(pixels, sideTile);
+    makePlanks(pixels, frontTile);
+
+    // Top: 2x2 grid inlay
+    for (int y = 2; y <= 13; ++y) {
+        for (int x = 2; x <= 13; ++x) {
+            if (x == 7 || x == 8 || y == 7 || y == 8 || x == 2 || x == 13 || y == 2 || y == 13) {
+                setPixel(pixels, topTile, x, y, {0.30f, 0.20f, 0.10f});
+            } else {
+                setPixel(pixels, topTile, x, y, {0.75f, 0.58f, 0.35f});
+            }
+        }
+    }
+
+    // Side & Front: saw / hammer tool silhouette
+    for (int y = 4; y <= 11; ++y) {
+        setPixel(pixels, sideTile, 4, y, {0.40f, 0.40f, 0.42f});
+        setPixel(pixels, frontTile, 11, y, {0.40f, 0.40f, 0.42f});
+    }
+    setPixel(pixels, sideTile, 5, 11, {0.40f, 0.40f, 0.42f});
+    setPixel(pixels, frontTile, 10, 11, {0.40f, 0.40f, 0.42f});
+}
+
 } // namespace
 
 Texture::~Texture() {
@@ -617,6 +738,47 @@ void Texture::createAtlas() {
     const int playerArm = static_cast<int>(TextureTile::PlayerArm);
     const int playerPants = static_cast<int>(TextureTile::PlayerPants);
     const int playerShoe = static_cast<int>(TextureTile::PlayerShoe);
+    const int stick = static_cast<int>(TextureTile::Stick);
+    const int coal = static_cast<int>(TextureTile::Coal);
+    const int ironIngot = static_cast<int>(TextureTile::IronIngot);
+    const int diamond = static_cast<int>(TextureTile::Diamond);
+    const int woodPickaxe = static_cast<int>(TextureTile::WoodPickaxe);
+    const int stonePickaxe = static_cast<int>(TextureTile::StonePickaxe);
+    const int ironPickaxe = static_cast<int>(TextureTile::IronPickaxe);
+    const int diamondPickaxe = static_cast<int>(TextureTile::DiamondPickaxe);
+    const int woodAxe = static_cast<int>(TextureTile::WoodAxe);
+    const int stoneAxe = static_cast<int>(TextureTile::StoneAxe);
+    const int ironAxe = static_cast<int>(TextureTile::IronAxe);
+    const int woodShovel = static_cast<int>(TextureTile::WoodShovel);
+    const int stoneShovel = static_cast<int>(TextureTile::StoneShovel);
+    const int woodSword = static_cast<int>(TextureTile::WoodSword);
+    const int stoneSword = static_cast<int>(TextureTile::StoneSword);
+    const int craftingTableTop = static_cast<int>(TextureTile::CraftingTableTop);
+    const int craftingTableSide = static_cast<int>(TextureTile::CraftingTableSide);
+    const int craftingTableFront = static_cast<int>(TextureTile::CraftingTableFront);
+
+    const Rgb woodHead = {0.60f, 0.45f, 0.25f};
+    const Rgb stoneHead = {0.55f, 0.55f, 0.55f};
+    const Rgb ironHead = {0.85f, 0.85f, 0.88f};
+    const Rgb diamondHead = {0.35f, 0.88f, 0.95f};
+
+    makeStick(pixels, stick);
+    makeCoalItem(pixels, coal);
+    makeIronIngotItem(pixels, ironIngot);
+    makeDiamondItem(pixels, diamond);
+    makeTool(pixels, woodPickaxe, 0, woodHead);
+    makeTool(pixels, stonePickaxe, 0, stoneHead);
+    makeTool(pixels, ironPickaxe, 0, ironHead);
+    makeTool(pixels, diamondPickaxe, 0, diamondHead);
+    makeTool(pixels, woodAxe, 1, woodHead);
+    makeTool(pixels, stoneAxe, 1, stoneHead);
+    makeTool(pixels, ironAxe, 1, ironHead);
+    makeTool(pixels, woodShovel, 2, woodHead);
+    makeTool(pixels, stoneShovel, 2, stoneHead);
+    makeTool(pixels, woodSword, 3, woodHead);
+    makeTool(pixels, stoneSword, 3, stoneHead);
+    makeCraftingTable(pixels, craftingTableTop, craftingTableSide, craftingTableFront);
+
 
     const Rgb grassTint = {0.45f, 0.76f, 0.26f};
     const Rgb leavesTint = {0.32f, 0.68f, 0.22f};

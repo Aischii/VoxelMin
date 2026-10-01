@@ -11,10 +11,10 @@ namespace vox::config {
 // ties the version to docs/ROADMAP.md, so "M5" and "v0.M5.x" can never drift.
 // v0.1.0..v0.7.0 predate this scheme; see the version history in
 // docs/PROGRESS.md for the legacy tags they replace.
-inline constexpr const char* VERSION       = "0.M5.4";
+inline constexpr const char* VERSION       = "0.M5.5";
 inline constexpr int WINDOW_WIDTH          = 1280;
 inline constexpr int WINDOW_HEIGHT         = 720;
-inline constexpr const char* WINDOW_TITLE  = "VoxelMin v0.M5.4";
+inline constexpr const char* WINDOW_TITLE  = "VoxelMin v0.M5.5";
 inline constexpr const char* SAVE_FILENAME = "world.dat";
 
 // A chunk is a fixed-size column of blocks. This is the fundamental unit the

@@ -16,6 +16,7 @@ the table below rather than rewritten.
 
 | Version | Legacy tag | Milestone | Headline |
 |---------|------------|-----------|----------|
+| v0.M5.5 | - | M5 | Item entities & pickup physics, 2x2 crafting grid, tool durability & mining multipliers (M5 closure) |
 | v0.M5.4 | - | M5 | Camera-space locked viewmodel hand, first-person torso removal, multi-directional 3D wall torches |
 | v0.M5.3 | - | M5 | Mob knockback impulse & recoil stun, combat aggro interest timer, wild passive mob spawning fix |
 | v0.M5.2 | - | M5 | Dynamic view bobbing, Source movement (air-strafing & bhop), $512\times 512$ world scale, pigmen & villages, loading screen, Steve model & F5 perspectives |
@@ -28,14 +29,19 @@ the table below rather than rewritten.
 | v0.M2.0 | v0.1.1 | M2 | Legacy-console menus (M2 delivery), compact crosshair, bidirectional options |
 | v0.M1.0 | v0.1.0 | M1 | Versioning, ChunkPalette, RLE |
 
-**v0.M5.4 is the current shipped release** and is what `build/bin/VoxelMin.exe`
+**v0.M5.5 is the current shipped release** and is what `build/bin/VoxelMin.exe`
 reports at startup. There is no unreleased work: the `## Done` entries tagged
-`v0.M5.4` are its contents. Next bump is **v0.M5.5**, cut when the remaining M5
-items (item entities & drops, crafting & tools) land.
+`v0.M5.5` are its contents. Milestone M5 is officially **complete**. Next milestone
+is **M6 -- Audio & World Streaming**, opening with core audio engine integration.
 
 ## Current milestone
 
-**M5 -- Gameplay & Entities** (in progress; current release v0.M5.4). Landed:
+**M6 -- Audio & World Streaming** (in progress; opening with miniaudio integration).
+Milestone M5 closed with the delivery of item drops/physics pickups and the 2x2 crafting
+grid with tool durability.
+
+**M5 -- Gameplay & Entities (COMPLETE)**: Landed:
+item entities & pickup physics, 2x2 crafting grid & tool durability/mining multipliers,
 sprinting + dynamic FOV, Source-style movement (air-strafing and bunnyhopping),
 dynamic view bobbing, camera-space locked first-person viewmodel arm,
 Minecraft player model (Steve) with F5 perspective cycling (back & front),
@@ -47,16 +53,6 @@ procedural menu panorama ($128 \times 128$) & zero-stutter pre-meshed world load
 directional logs, dirt paths, batched mob rendering, 3D floor torches + particles, sub-block precision hitboxes,
 wild tall grass, world deletion UI, water mechanics, world types, custom name input, GUI scaling, mob AI traversal, and the
 F3 profiling overlay.
-
-Still open in M5: **item entities & drops**, **crafting grid & tools**.
-
-Moved out of M5 (it was blocking M5 from ever completing): **audio engine**,
-**infinite / streamed chunks** -- both now tracked under **M6 -- Audio & World
-Streaming**.
-
-**M7 -- Engine Quality** has partial progress: the F3 profiling overlay landed in
-v0.M5.1 ahead of schedule. Tests, CI/packaging and GPU timing are still open; see
-`docs/ROADMAP.md`.
 
 ## Current metrics (latest shipped build, v0.M5.3)
 
@@ -123,6 +119,34 @@ Open, but not M6 blockers:
   a much larger simulation than M6 needs.
 
 ## Done
+
+### 2026-10-01 -- VoxelMin v0.M5.5: Item Entities, Physics Drops, 2x2 Crafting Grid & Tool Durability (Milestone M5 Complete)
+
+- **Item Entities & Pickup Physics**:
+  - Implemented `ItemEntity` (`src/entity/ItemEntity.hpp`, `src/entity/ItemEntity.cpp`) with full 3D voxel AABB collision physics, gravity ($22.0\text{ m/s}^2$), ground friction, and terminal velocity.
+  - Added magnetic attraction towards the player within a $2.4\text{ m}$ radius once the initial spawn pickup cooldown ($0.6\text{ s}$) expires, smoothly vacuuming items into inventory upon touching ($0.9\text{ m}$ radius).
+  - Floating items render as bobbing, rotating mini 3D voxel cubes sampling skylight from the world, fully batched into dynamic entity vertex buffers with zero additional draw calls.
+  - Integrated block breaking drops via `getDropForBlock(BlockId)`: stone drops cobblestone, coal ore drops coal, diamond ore drops diamond, grass drops dirt, tree leaves have a chance to drop sticks.
+  - Integrated player inventory insertion via `addItem(BlockId, count)` prioritizing hotbar then inventory.
+
+- **2x2 Crafting Grid & Authentic Crafting Recipes**:
+  - Integrated 2x2 crafting grid into the inventory modal with 4 crafting input slots, an authentic ASCII arrow (`=>`), and an interactive craft result slot.
+  - Supported crafting recipes:
+    - 1 Wood $\rightarrow$ 4 Planks
+    - 2 Planks (vertical) $\rightarrow$ 4 Sticks
+    - 4 Planks (2x2) $\rightarrow$ 1 Crafting Table
+    - 1 Coal + 1 Stick $\rightarrow$ 4 Torches
+    - Wooden Pickaxe, Axe, Shovel, and Sword
+    - Stone Pickaxe, Axe, Shovel, and Sword
+  - Full stack manipulation: left-click to craft/swap, right-click to place single items, and auto-crafting result preview. Leftover items are automatically returned to inventory or dropped on inventory close.
+
+- **Tool Durability & Combat / Mining Multipliers**:
+  - Added `ItemSlot` structure holding `BlockId`, stack `count` (up to 64), and current `durability`.
+  - Added tiered durability: Wood tools (59 uses), Stone tools (131 uses), Iron tools (250 uses), Diamond tools (1561 uses).
+  - Implemented Minecraft-style colored durability bars (green $\rightarrow$ yellow $\rightarrow$ red) rendered beneath tools in both the HUD hotbar and the inventory modal.
+  - Tools consume 1 point of durability per block broken or mob hit, breaking cleanly when durability reaches zero.
+  - Integrated tool-specific attack damages (Stone Sword 6, Wood Sword 5, Axes 4, Pickaxes 3, Shovels 2) and mining multipliers for faster harvesting.
+  - Released **v0.M5.5**, officially completing Milestone M5!
 
 ### 2026-09-29 -- VoxelMin v0.M5.4: Camera-Space Locked First-Person Viewmodel & Directional 3D Wall Torches
 

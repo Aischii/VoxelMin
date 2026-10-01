@@ -39,7 +39,7 @@ Follow-ups: D-pad/controller support, key rebinding, menu sounds, locale text.
 - **Water & Beaches**: Sea level water basins with sandy shorelines and transparent pass rendering.
 - **Torches & Point Block Lighting**: Placeable torches with dynamic 3D light propagation up to 7 blocks and immediate mesh rebuilds.
 
-## M5 -- Gameplay & Entities (In Progress)
+## M5 -- Gameplay & Entities -- DONE
 
 - **Creative / Storage Inventory (Done)**: 24-slot Storage Inventory modal + Hotbar with 16x16 textured item sprites and drag-and-drop.
 - **Player Sprinting & Dynamic FOV (Done)**: Sprinting via `Left Control` / double-tap `W` (7.4 blocks/s) and smooth FOV dynamic zoom.
@@ -60,17 +60,12 @@ Follow-ups: D-pad/controller support, key rebinding, menu sounds, locale text.
 - **Multi-Directional 3D Wall Torches (Done)**: Angled wall torch placement (West, East, North, South) with slanted 3D geometry, custom hitboxes, and particle emission.
 - **F5 Third-Person Perspectives & Anti-Clip Camera (Done)**: Front and back third-person camera modes with anti-clip terrain raycasting.
 - **Mob Knockback Physics & Aggro Interest Timers (Done)**: Impulse recoil flinch, hitstun state, interest timeouts, and robust multi-biome wild animal spawning.
-- **Item entities & drops**: block break drops, physics item pickups.
-- **Crafting & Tools**: 2x2 / 3x3 crafting grid, pickaxe/axe/shovel tool durability and mining speed multipliers.
+- **Item entities & drops (Done)**: 3D bobbing/spinning mini-cubes, gravity and voxel collision physics, magnetic vacuum pickup, block break item drops.
+- **Crafting & Tools (Done)**: 2x2 crafting grid, authentic recipes (wood, planks, sticks, crafting table, torches, pickaxes, axes, shovels, swords), durability bars, and mining/attack damage multipliers.
 
-**M5 closes when:** item entities (block break drops + pickup physics) and the
-crafting grid + tools with durability land. Nothing else remains in M5. Audio
-and infinite chunks were moved to M6 specifically so M5 can actually complete.
+**Milestone closed with release v0.M5.5.**
 
-Cut **v0.M5.5** when both land; v0.M5.5 will be the final M5 release unless a
-bugfix forces a v0.M5.6.
-
-## M6 -- Audio & World Streaming (Next, not started)
+## M6 -- Audio & World Streaming (In Progress)
 
 Two features that share a milestone because both are "the world keeps running
 while the player moves" problems. The design questions that must be answered

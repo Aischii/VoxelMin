@@ -5,6 +5,7 @@
 #include "render/Shader.hpp"
 #include "render/Texture.hpp"
 #include "world/Block.hpp"
+#include "world/ItemSlot.hpp"
 
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -52,7 +53,7 @@ public:
     size_t particleCount() const { return m_particles.particleCount(); }
 
     // HUD shown while playing (crosshair + hotbar).
-    void drawHud(int selectedSlot, const BlockId* hotbar, int slotCount);
+    void drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount);
 
     // F3 debug overlay: dark panel with one text line per entry, drawn in the
     // top-left corner. Rendering only -- the caller owns the content.
@@ -63,14 +64,17 @@ public:
     const FrameStats& stats() const { return m_stats; }
     FrameStats& stats() { return m_stats; }
 
-    // Inventory modal UI overlay.
-    void drawInventory(int selectedHotbarSlot, const BlockId* hotbar, int hotbarCount,
-                       const BlockId* inventory, int invCount,
-                       BlockId heldItem, const glm::vec2& mousePos);
+    // Inventory modal UI overlay with 2x2 Crafting Grid.
+    void drawInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
+                       const ItemSlot* inventory, int invCount,
+                       const ItemSlot* craftGrid, const ItemSlot& craftResult,
+                       const ItemSlot& heldItem, const glm::vec2& mousePos);
 
+    void drawDurabilityBar(float x, float y, float w, float h, int durability, int maxDurability);
     void drawBlockIcon(float x, float y, float w, float h, BlockId id);
     void drawTexturedRect(float x, float y, float w, float h, TextureTile tile,
                           const glm::vec4& tint = glm::vec4(1.0f));
+
 
     void drawUnderwaterOverlay(float time);
 

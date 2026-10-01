@@ -14,11 +14,10 @@ window icon, and the splash-text list.
 
 ## Status
 
-**M5 "Gameplay & Entities" in progress; current release v0.M5.1** (legacy tag
-v0.7.0). See
+**M5 "Gameplay & Entities" complete; current release v0.M5.5**. See
 [`docs/PROGRESS.md`](docs/PROGRESS.md) for the living status -- including the
 version history and the current performance metrics -- and
-[`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next.
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next (opening M6: Audio & World Streaming).
 
 ## Features (current)
 

@@ -643,7 +643,16 @@ void Renderer::drawBlockIcon(float x, float y, float w, float h, BlockId id) {
     drawTexturedRect(x, y, w, h, def.side);
 }
 
-void Renderer::drawHud(int selectedSlot, const BlockId* hotbar, int slotCount) {
+void Renderer::drawDurabilityBar(float x, float y, float w, float h, int durability, int maxDurability) {
+    if (maxDurability <= 0 || durability <= 0) return;
+    const float pct = std::clamp(static_cast<float>(durability) / static_cast<float>(maxDurability), 0.0f, 1.0f);
+    drawRect(x, y, w, h, glm::vec4(0.04f, 0.04f, 0.05f, 1.0f));
+    glm::vec4 barCol = (pct > 0.5f) ? glm::vec4(0.2f, 0.85f, 0.25f, 1.0f) :
+                       ((pct > 0.2f) ? glm::vec4(0.9f, 0.8f, 0.15f, 1.0f) : glm::vec4(0.95f, 0.2f, 0.2f, 1.0f));
+    drawRect(x, y, w * pct, h, barCol);
+}
+
+void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount) {
     const float s = m_uiScale;
 
     beginUI();
@@ -680,7 +689,28 @@ void Renderer::drawHud(int selectedSlot, const BlockId* hotbar, int slotCount) {
             drawRect(x - gap, margin - gap, slot + 2.0f * gap, slot + 2.0f * gap, glm::vec4(1.0f));
         }
         drawRect(x, margin, slot, slot, glm::vec4(0.10f, 0.10f, 0.10f, 1.0f));
-        drawBlockIcon(x + border, margin + border, slot - 2.0f * border, slot - 2.0f * border, hotbar[i]);
+
+        if (!hotbar[i].empty()) {
+            drawBlockIcon(x + border, margin + border, slot - 2.0f * border, slot - 2.0f * border, hotbar[i].id);
+
+            // Stack count
+            if (hotbar[i].count > 1) {
+                const std::string cntStr = std::to_string(hotbar[i].count);
+                const float cntScale = std::max(1.0f, s * 0.60f);
+                const float cw = textWidth(cntStr, cntScale);
+                drawText(x + slot - cw - 1.0f * s + 1.0f, margin + textHeight(cntScale) + 1.0f * s - 1.0f,
+                         cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
+                drawText(x + slot - cw - 1.0f * s, margin + textHeight(cntScale) + 1.0f * s,
+                         cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            }
+
+            // Durability bar for tools
+            if (isTool(hotbar[i].id) && hotbar[i].durability > 0) {
+                const float barH = std::max(1.5f, 1.5f * s);
+                drawDurabilityBar(x + border, margin + border, slot - 2.0f * border, barH,
+                                  hotbar[i].durability, maxToolDurability(hotbar[i].id));
+            }
+        }
     }
 
     endUI();
@@ -729,9 +759,10 @@ void Renderer::drawDebugOverlay(const std::vector<std::string>& lines) {
     m_stats.triangles = savedTriangles;
 }
 
-void Renderer::drawInventory(int selectedHotbarSlot, const BlockId* hotbar, int hotbarCount,
-                             const BlockId* inventory, int invCount,
-                             BlockId heldItem, const glm::vec2& mousePos) {
+void Renderer::drawInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
+                             const ItemSlot* inventory, int invCount,
+                             const ItemSlot* craftGrid, const ItemSlot& craftResult,
+                             const ItemSlot& heldItem, const glm::vec2& mousePos) {
     const float s = m_uiScale;
     const float slot = 18.0f * s;
     const float gap = 2.5f * s;
@@ -745,13 +776,14 @@ void Renderer::drawInventory(int selectedHotbarSlot, const BlockId* hotbar, int 
     const float hotbarH = slot;
 
     const float pad = 12.0f * s;
-    const float headerH = 22.0f * s;
+    const float headerH = 20.0f * s;
+    const float craftSectionH = 2.0f * slot + gap + 16.0f * s;
     const float labelH = 12.0f * s;
-    const float sectionGap = 10.0f * s;
+    const float sectionGap = 8.0f * s;
     const float footerH = 14.0f * s;
 
     const float containerW = gridW + 2.0f * pad;
-    const float containerH = pad + headerH + mainH + sectionGap + labelH + hotbarH + footerH + pad;
+    const float containerH = pad + headerH + craftSectionH + sectionGap + mainH + sectionGap + labelH + hotbarH + footerH + pad;
 
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
@@ -761,101 +793,144 @@ void Renderer::drawInventory(int selectedHotbarSlot, const BlockId* hotbar, int 
 
     beginUI();
 
-    // 1. Fullscreen dark backdrop dimming (Legacy Console focus)
+    // 1. Fullscreen dark backdrop dimming
     drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight),
              glm::vec4(0.0f, 0.0f, 0.0f, 0.60f));
 
     // 2. Main Console Modal Container (3D Beveled Slate Frame)
-    // Outer black frame
     drawRect(left - 2.0f * s, bottom - 2.0f * s, containerW + 4.0f * s, containerH + 4.0f * s,
              glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
-    // Top/Left light bevel highlight
     drawRect(left - 1.0f * s, bottom, containerW + 2.0f * s, containerH + 1.0f * s,
              glm::vec4(0.38f, 0.38f, 0.44f, 1.0f));
-    // Bottom/Right shadow bevel
     drawRect(left, bottom - 1.0f * s, containerW + 1.0f * s, containerH,
              glm::vec4(0.12f, 0.12f, 0.15f, 1.0f));
-    // Inner slate plate
     drawGradientRect(left, bottom, containerW, containerH,
                      glm::vec4(0.17f, 0.17f, 0.21f, 0.98f),
                      glm::vec4(0.22f, 0.22f, 0.27f, 0.98f));
 
-    // 3. Header: Creative Inventory Tab Bar
+    // 3. Header: Survival Inventory & Crafting
     const float headerTop = bottom + containerH - pad;
     const float titleScale = std::max(1.0f, s * 0.85f);
-    drawText(left + pad, headerTop - 1.0f * s, "CREATIVE INVENTORY", titleScale, glm::vec4(1.0f, 0.86f, 0.32f, 1.0f));
-    // Golden accent underline
+    drawText(left + pad, headerTop - 1.0f * s, "SURVIVAL INVENTORY & CRAFTING", titleScale, glm::vec4(1.0f, 0.86f, 0.32f, 1.0f));
     drawRect(left + pad, headerTop - 14.0f * s, gridW, 1.5f * s, glm::vec4(0.98f, 0.78f, 0.22f, 0.85f));
 
     std::string hoveredName;
 
-    // 4. Main Creative Item Grid (3x8)
+    // 4. Crafting Section (2x2 Grid + Arrow + Result Slot)
+    const float craftSectionTop = headerTop - headerH;
+    const float craftSectionY = craftSectionTop - craftSectionH;
+    const float craftLabelScale = std::max(1.0f, s * 0.72f);
+    drawText(left + pad, craftSectionTop - 2.0f * s, "Crafting (2x2 Grid)", craftLabelScale, glm::vec4(0.85f, 0.85f, 0.88f, 1.0f));
+
+    const float craftGridLeft = left + pad + 24.0f * s;
+    const float craftGridTop = craftSectionTop - 14.0f * s;
+
+    // Helper lambda to draw any interactive item slot
+    auto drawSlot = [&](float x, float y, const ItemSlot& item, bool isHotbar, int hotbarIdx, bool isCraftResult) {
+        const bool hovered = (mousePos.x >= x && mousePos.x <= x + slot &&
+                              mousePos.y >= y && mousePos.y <= y + slot);
+        const bool active = (isHotbar && hotbarIdx == selectedHotbarSlot);
+
+        // Sunken bevel
+        drawRect(x, y, slot, slot, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
+        drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.32f, 0.32f, 0.38f, 1.0f));
+        drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border,
+                 isCraftResult ? glm::vec4(0.18f, 0.16f, 0.12f, 1.0f) : glm::vec4(0.13f, 0.13f, 0.16f, 1.0f));
+
+        if (isCraftResult) {
+            // Gold border highlight for craft result
+            drawRect(x - 1.0f * s, y - 1.0f * s, slot + 2.0f * s, slot + 2.0f * s, glm::vec4(0.85f, 0.70f, 0.20f, 0.6f));
+        }
+
+        if (hovered) {
+            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(1.0f, 0.84f, 0.22f, 1.0f));
+            drawRect(x, y, slot, slot, glm::vec4(1.0f, 1.0f, 1.0f, 0.25f));
+            if (!item.empty()) {
+                hoveredName = blockDef(item.id).name;
+                if (isHotbar) hoveredName += " (Slot " + std::to_string(hotbarIdx + 1) + ")";
+                if (isTool(item.id)) {
+                    hoveredName += " [" + std::to_string(item.durability) + "/" +
+                                   std::to_string(maxToolDurability(item.id)) + "]";
+                }
+            }
+        } else if (active) {
+            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(0.95f, 0.95f, 0.95f, 1.0f));
+        }
+
+        if (!item.empty()) {
+            const float iconPad = 2.0f * s;
+            drawBlockIcon(x + iconPad, y + iconPad, slot - 2.0f * iconPad, slot - 2.0f * iconPad, item.id);
+
+            // Stack count
+            if (item.count > 1) {
+                const std::string cntStr = std::to_string(item.count);
+                const float cntScale = std::max(1.0f, s * 0.60f);
+                const float cw = textWidth(cntStr, cntScale);
+                drawText(x + slot - cw - 1.0f * s + 1.0f, y + textHeight(cntScale) + 1.0f * s - 1.0f,
+                         cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
+                drawText(x + slot - cw - 1.0f * s, y + textHeight(cntScale) + 1.0f * s,
+                         cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            }
+
+            // Durability bar
+            if (isTool(item.id) && item.durability > 0) {
+                const float barH = std::max(1.5f, 1.5f * s);
+                drawDurabilityBar(x + border, y + border, slot - 2.0f * border, barH,
+                                  item.durability, maxToolDurability(item.id));
+            }
+        }
+    };
+
+    // Draw 2x2 Craft Grid
+    for (int r = 0; r < 2; ++r) {
+        for (int c = 0; c < 2; ++c) {
+            const int idx = r * 2 + c;
+            const float sx = craftGridLeft + c * (slot + gap);
+            const float sy = craftGridTop - (r + 1) * slot - r * gap;
+            drawSlot(sx, sy, craftGrid[idx], false, -1, false);
+        }
+    }
+
+    // Arrow pointing to Result
+    const float arrowX = craftGridLeft + 2.0f * (slot + gap) + 12.0f * s;
+    const float arrowY = craftGridTop - slot - gap * 0.5f - 6.0f * s;
+    drawText(arrowX, arrowY + 10.0f * s, "=>", std::max(1.0f, s * 1.0f), glm::vec4(0.95f, 0.85f, 0.35f, 0.95f));
+
+    // Result Slot
+    const float resultX = arrowX + 26.0f * s;
+    const float resultY = craftGridTop - slot - gap * 0.5f - slot * 0.5f;
+    drawSlot(resultX, resultY, craftResult, false, -1, true);
+
+    // 5. Main Inventory Grid (3x8)
     const float gridLeft = left + pad;
-    const float mainGridTop = headerTop - headerH;
+    const float mainGridTop = craftSectionY - sectionGap;
 
     for (int row = 0; row < mainRows; ++row) {
         for (int col = 0; col < cols; ++col) {
             const int idx = row * cols + col;
             if (idx >= invCount) break;
-
             const float x = gridLeft + col * (slot + gap);
             const float y = mainGridTop - (row + 1) * slot - row * gap;
-
-            const bool hovered = (mousePos.x >= x && mousePos.x <= x + slot &&
-                                  mousePos.y >= y && mousePos.y <= y + slot);
-
-            // 3D sunken slot bevels
-            drawRect(x, y, slot, slot, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f)); // Top/Left shadow
-            drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.32f, 0.32f, 0.38f, 1.0f)); // Bottom/Right bevel
-            drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.13f, 0.13f, 0.16f, 1.0f)); // Inner well
-
-            if (hovered) {
-                drawRect(x - 1.0f * s, y - 1.0f * s, slot + 2.0f * s, slot + 2.0f * s, glm::vec4(1.0f, 0.84f, 0.22f, 1.0f));
-                drawRect(x, y, slot, slot, glm::vec4(1.0f, 1.0f, 1.0f, 0.25f));
-                hoveredName = blockDef(inventory[idx]).name;
-            }
-
-            const float iconPad = 2.0f * s;
-            drawBlockIcon(x + iconPad, y + iconPad, slot - 2.0f * iconPad, slot - 2.0f * iconPad, inventory[idx]);
+            drawSlot(x, y, inventory[idx], false, -1, false);
         }
     }
 
-    // 5. Section Divider & Hotbar Header
+    // 6. Section Divider & Hotbar Header
     const float dividerY = mainGridTop - mainH - sectionGap * 0.5f;
     drawRect(gridLeft, dividerY, gridW, 1.0f * s, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
     drawRect(gridLeft, dividerY - 1.0f * s, gridW, 1.0f * s, glm::vec4(0.32f, 0.32f, 0.38f, 0.70f));
 
-    const float labelTop = dividerY - 3.0f * s;
-    const float subScale = std::max(1.0f, s * 0.72f);
-    drawText(gridLeft, labelTop, "Hotbar", subScale, glm::vec4(0.85f, 0.85f, 0.88f, 1.0f));
+    const float subLabelTop = dividerY - 3.0f * s;
+    drawText(gridLeft, subLabelTop, "Hotbar", craftLabelScale, glm::vec4(0.85f, 0.85f, 0.88f, 1.0f));
 
-    // 6. Hotbar Slots Grid (1x8)
-    const float hotbarY = labelTop - labelH - slot;
-
+    // 7. Hotbar Slots Grid (1x8)
+    const float hotbarY = subLabelTop - labelH - slot;
     for (int i = 0; i < hotbarCount && i < cols; ++i) {
         const float x = gridLeft + i * (slot + gap);
-        const bool hovered = (mousePos.x >= x && mousePos.x <= x + slot &&
-                              mousePos.y >= hotbarY && mousePos.y <= hotbarY + slot);
-        const bool active = (i == selectedHotbarSlot);
-
-        // 3D sunken slot bevels
-        drawRect(x, hotbarY, slot, slot, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
-        drawRect(x + border, hotbarY, slot - border, slot - border, glm::vec4(0.32f, 0.32f, 0.38f, 1.0f));
-        drawRect(x + border, hotbarY + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.13f, 0.13f, 0.16f, 1.0f));
-
-        if (hovered) {
-            drawRect(x - 1.5f * s, hotbarY - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(1.0f, 0.84f, 0.22f, 1.0f));
-            drawRect(x, hotbarY, slot, slot, glm::vec4(1.0f, 1.0f, 1.0f, 0.25f));
-            hoveredName = std::string(blockDef(hotbar[i]).name) + " (Slot " + std::to_string(i + 1) + ")";
-        } else if (active) {
-            drawRect(x - 1.5f * s, hotbarY - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(0.95f, 0.95f, 0.95f, 1.0f));
-        }
-
-        const float iconPad = 2.0f * s;
-        drawBlockIcon(x + iconPad, hotbarY + iconPad, slot - 2.0f * iconPad, slot - 2.0f * iconPad, hotbar[i]);
+        drawSlot(x, hotbarY, hotbar[i], true, i, false);
     }
 
-    // 7. Floating Hover Tooltip (Legacy Console tooltip box)
+    // 8. Floating Hover Tooltip
     if (!hoveredName.empty()) {
         const float tipScale = std::max(1.0f, s * 0.75f);
         const float tipW = textWidth(hoveredName, tipScale);
@@ -863,25 +938,29 @@ void Renderer::drawInventory(int selectedHotbarSlot, const BlockId* hotbar, int 
         const float tipX = std::min(mousePos.x + 10.0f * s, static_cast<float>(m_fbWidth) - tipW - 10.0f * s);
         const float tipY = std::max(mousePos.y + tipH + 4.0f * s, tipH + 10.0f * s);
 
-        // Dark purple/black tooltip background with violet/gold border
         drawRect(tipX - 4.0f * s, tipY - tipH - 4.0f * s, tipW + 8.0f * s, tipH + 8.0f * s, glm::vec4(0.08f, 0.04f, 0.12f, 0.96f));
         drawRect(tipX - 3.0f * s, tipY - tipH - 3.0f * s, tipW + 6.0f * s, tipH + 6.0f * s, glm::vec4(0.35f, 0.10f, 0.65f, 0.85f));
         drawRect(tipX - 2.0f * s, tipY - tipH - 2.0f * s, tipW + 4.0f * s, tipH + 4.0f * s, glm::vec4(0.08f, 0.04f, 0.12f, 0.96f));
         drawText(tipX, tipY, hoveredName, tipScale, glm::vec4(1.0f, 0.90f, 0.40f, 1.0f));
     }
 
-    // 8. Held Item on Mouse Cursor
-    if (!isAir(heldItem)) {
+    // 9. Held Item on Mouse Cursor
+    if (!heldItem.empty()) {
         const float itemSize = 16.0f * s;
-        // Floating drop shadow
         drawRect(mousePos.x - itemSize * 0.5f + 1.5f * s, mousePos.y - itemSize * 0.5f - 1.5f * s,
                  itemSize, itemSize, glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
         drawBlockIcon(mousePos.x - itemSize * 0.5f, mousePos.y - itemSize * 0.5f,
-                      itemSize, itemSize, heldItem);
+                      itemSize, itemSize, heldItem.id);
+        if (heldItem.count > 1) {
+            const std::string cntStr = std::to_string(heldItem.count);
+            const float cntScale = std::max(1.0f, s * 0.60f);
+            drawText(mousePos.x + itemSize * 0.3f, mousePos.y - itemSize * 0.3f,
+                     cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
     }
 
-    // 9. Footer Prompt
-    const std::string footerText = "Left Click: Take / Swap     1-8: Quick Assign     E / Esc: Close";
+    // 10. Footer Prompt
+    const std::string footerText = "Left Click: Swap/Craft     Right Click: Place 1     1-8: Quick Hotbar     E/Esc: Close";
     const float hintScale = std::max(1.0f, s * 0.70f);
     const float hintW = textWidth(footerText, hintScale);
     drawText((static_cast<float>(m_fbWidth) - hintW) * 0.5f, bottom + 6.0f * s,

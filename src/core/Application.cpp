@@ -158,14 +158,18 @@ void Application::run() {
             } else {
                 handlePlayInput();
                 m_player.update(dt, m_input, m_world);
-                m_entityManager.update(dt, m_world, m_player.position());
+                m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+                    return addItem(id, count);
+                });
                 m_renderer.updateParticles(dt, m_world, m_player.position());
                 updateInteraction();
             }
         } else if (m_state == GameState::Inventory) {
             handleInventoryInput();
             m_player.update(dt, m_input, m_world);
-            m_entityManager.update(dt, m_world, m_player.position());
+            m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+                return addItem(id, count);
+            });
             m_renderer.updateParticles(dt, m_world, m_player.position());
         } else {
             updateMenuCamera(dt);
@@ -185,8 +189,12 @@ void Application::run() {
 void Application::shutdown() {
     if (m_state == GameState::Playing || m_state == GameState::Paused || m_state == GameState::Inventory) {
         const std::string savePath = m_activeWorldPath.empty() ? WorldSave::getWorldPath(m_activeWorldName) : m_activeWorldPath;
+        BlockId hb[8];
+        for (int i = 0; i < 8; ++i) hb[i] = m_hotbar[i].id;
+        BlockId inv[24];
+        for (int i = 0; i < 24; ++i) inv[i] = m_inventory[i].id;
         WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
-                            m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
+                            m_world, m_player, m_selectedSlot, hb, inv);
     }
     m_renderer.shutdown();
     if (m_window) {
@@ -248,8 +256,12 @@ void Application::buildMenus() {
     m_mainMenu.addButton("Options", [this] { openOptions(GameState::MainMenu); });
     m_mainMenu.addButton("Quit Game", [this] {
         const std::string savePath = m_activeWorldPath.empty() ? WorldSave::getWorldPath(m_activeWorldName) : m_activeWorldPath;
+        BlockId hb[8];
+        for (int i = 0; i < 8; ++i) hb[i] = m_hotbar[i].id;
+        BlockId inv[24];
+        for (int i = 0; i < 24; ++i) inv[i] = m_inventory[i].id;
         WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
-                            m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
+                            m_world, m_player, m_selectedSlot, hb, inv);
         glfwSetWindowShouldClose(m_window, GLFW_TRUE);
     });
     m_mainMenu.resetSelection();
@@ -268,8 +280,12 @@ void Application::buildMenus() {
     m_pauseMenu.addButton("Options", [this] { openOptions(GameState::Paused); });
     m_pauseMenu.addButton("Save and Quit to Title", [this] {
         const std::string savePath = m_activeWorldPath.empty() ? WorldSave::getWorldPath(m_activeWorldName) : m_activeWorldPath;
+        BlockId hb[8];
+        for (int i = 0; i < 8; ++i) hb[i] = m_hotbar[i].id;
+        BlockId inv[24];
+        for (int i = 0; i < 24; ++i) inv[i] = m_inventory[i].id;
         WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
-                            m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
+                            m_world, m_player, m_selectedSlot, hb, inv);
         quitToTitle();
     });
     m_pauseMenu.resetSelection();
@@ -645,8 +661,12 @@ void Application::startNewWorld(const std::string& name, uint32_t seed, WorldTyp
     }
 
     onProgress(0.99f, "Saving initial world snapshot...");
+    BlockId hbInit[8];
+    for (int i = 0; i < 8; ++i) hbInit[i] = m_hotbar[i].id;
+    BlockId invInit[24];
+    for (int i = 0; i < 24; ++i) invInit[i] = m_inventory[i].id;
     WorldSave::saveGame(m_activeWorldPath, m_activeWorldName, m_activeWorldSeed,
-                        m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
+                        m_world, m_player, m_selectedSlot, hbInit, invInit);
 
     onProgress(1.00f, "Entering world...");
     m_state = GameState::Playing;
@@ -660,8 +680,13 @@ void Application::loadWorld(const std::string& path) {
     };
 
     onProgress(0.05f, "Reading saved world data...");
-    if (WorldSave::loadGame(path, m_activeWorldName, m_activeWorldSeed, m_world, m_player, m_selectedSlot, m_hotbar, m_inventory)) {
+    BlockId hb[8];
+    BlockId inv[24];
+    if (WorldSave::loadGame(path, m_activeWorldName, m_activeWorldSeed, m_world, m_player, m_selectedSlot, hb, inv)) {
+        for (int i = 0; i < 8; ++i) m_hotbar[i] = ItemSlot(hb[i], hb[i] == BlockId::Air ? 0 : 64);
+        for (int i = 0; i < 24; ++i) m_inventory[i] = ItemSlot(inv[i], inv[i] == BlockId::Air ? 0 : 64);
         m_world.setSeed(m_activeWorldSeed);
+
         onProgress(0.40f, "Populating fauna & entities...");
         m_entityManager.spawnDefaults(m_world, m_activeWorldSeed);
         m_renderer.clearParticles();
@@ -730,8 +755,215 @@ void Application::openInventory() {
 }
 
 void Application::closeInventory() {
+    for (int i = 0; i < 4; ++i) {
+        if (!m_craftGrid[i].empty()) {
+            if (!addItem(m_craftGrid[i].id, m_craftGrid[i].count)) {
+                m_entityManager.spawnItem(m_craftGrid[i].id, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), m_craftGrid[i].count);
+            }
+            m_craftGrid[i].clear();
+        }
+    }
+    m_craftResult.clear();
+
+    if (!m_heldItem.empty()) {
+        if (!addItem(m_heldItem.id, m_heldItem.count)) {
+            m_entityManager.spawnItem(m_heldItem.id, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), m_heldItem.count);
+        }
+        m_heldItem.clear();
+    }
+
     m_state = GameState::Playing;
     setCursorCaptured(true);
+}
+
+void Application::updateCrafting() {
+    m_craftResult.clear();
+
+    const BlockId c0 = m_craftGrid[0].id;
+    const BlockId c1 = m_craftGrid[1].id;
+    const BlockId c2 = m_craftGrid[2].id;
+    const BlockId c3 = m_craftGrid[3].id;
+
+    int nonAir = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (!m_craftGrid[i].empty()) nonAir++;
+    }
+    if (nonAir == 0) return;
+
+    // 1. Single Wood Log -> 4 Planks
+    if (nonAir == 1) {
+        for (int i = 0; i < 4; ++i) {
+            if (!m_craftGrid[i].empty()) {
+                const BlockId id = m_craftGrid[i].id;
+                if (id == BlockId::Wood || id == BlockId::WoodX || id == BlockId::WoodZ) {
+                    m_craftResult = ItemSlot(BlockId::Planks, 4);
+                    return;
+                }
+            }
+        }
+    }
+
+    // 2. Two item recipes
+    if (nonAir == 2) {
+        // Planks -> 4 Sticks (2 vertical Planks)
+        if ((c0 == BlockId::Planks && c2 == BlockId::Planks && c1 == BlockId::Air && c3 == BlockId::Air) ||
+            (c1 == BlockId::Planks && c3 == BlockId::Planks && c0 == BlockId::Air && c2 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::Stick, 4);
+            return;
+        }
+
+        // Coal + Stick -> 4 Torches (vertical)
+        if (((c0 == BlockId::Coal || c0 == BlockId::CoalOre) && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
+            ((c1 == BlockId::Coal || c1 == BlockId::CoalOre) && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::Torch, 4);
+            return;
+        }
+
+        // Wooden Shovel: 1 Plank on top, 1 Stick on bottom
+        if ((c0 == BlockId::Planks && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
+            (c1 == BlockId::Planks && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::WoodShovel, 1);
+            return;
+        }
+
+        // Stone Shovel: 1 Cobblestone on top, 1 Stick on bottom
+        if ((c0 == BlockId::Cobblestone && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
+            (c1 == BlockId::Cobblestone && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::StoneShovel, 1);
+            return;
+        }
+
+        // Wooden Sword: 1 Plank, 1 Stick diagonal
+        if ((c0 == BlockId::Planks && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
+            (c1 == BlockId::Planks && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::WoodSword, 1);
+            return;
+        }
+
+        // Stone Sword: 1 Cobblestone, 1 Stick diagonal
+        if ((c0 == BlockId::Cobblestone && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
+            (c1 == BlockId::Cobblestone && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::StoneSword, 1);
+            return;
+        }
+    }
+
+    // 3. Three-item recipes (Pickaxes and Axes in 2x2)
+    if (nonAir == 3) {
+        // Wooden Pickaxe: 2 Planks on top row (0 and 1), 1 Stick on bottom (2 or 3)
+        if (c0 == BlockId::Planks && c1 == BlockId::Planks && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::WoodPickaxe, 1);
+            return;
+        }
+        // Stone Pickaxe: 2 Cobblestone on top row, 1 Stick on bottom
+        if (c0 == BlockId::Cobblestone && c1 == BlockId::Cobblestone && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::StonePickaxe, 1);
+            return;
+        }
+        // Iron Pickaxe: 2 Iron Ingot on top row, 1 Stick on bottom
+        if (c0 == BlockId::IronIngot && c1 == BlockId::IronIngot && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::IronPickaxe, 1);
+            return;
+        }
+        // Diamond Pickaxe: 2 Diamond on top row, 1 Stick on bottom
+        if (c0 == BlockId::Diamond && c1 == BlockId::Diamond && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::DiamondPickaxe, 1);
+            return;
+        }
+
+        // Wooden Axe: 2 Planks vertical (0 and 2), 1 Stick (1 or 3)
+        if (c0 == BlockId::Planks && c2 == BlockId::Planks && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::WoodAxe, 1);
+            return;
+        }
+        // Stone Axe: 2 Cobblestone vertical (0 and 2), 1 Stick (1 or 3)
+        if (c0 == BlockId::Cobblestone && c2 == BlockId::Cobblestone && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::StoneAxe, 1);
+            return;
+        }
+        // Iron Axe: 2 Iron Ingot vertical (0 and 2), 1 Stick (1 or 3)
+        if (c0 == BlockId::IronIngot && c2 == BlockId::IronIngot && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::IronAxe, 1);
+            return;
+        }
+    }
+
+    // 4. Four Planks -> Crafting Table
+    if (nonAir == 4) {
+        if (c0 == BlockId::Planks && c1 == BlockId::Planks &&
+            c2 == BlockId::Planks && c3 == BlockId::Planks) {
+            m_craftResult = ItemSlot(BlockId::CraftingTable, 1);
+            return;
+        }
+    }
+}
+
+void Application::takeCraftResult() {
+    if (m_craftResult.empty()) return;
+
+    if (m_heldItem.empty()) {
+        m_heldItem = m_craftResult;
+        for (int i = 0; i < 4; ++i) {
+            if (!m_craftGrid[i].empty()) {
+                m_craftGrid[i].count--;
+                if (m_craftGrid[i].count <= 0) m_craftGrid[i].clear();
+            }
+        }
+        updateCrafting();
+    } else if (m_heldItem.id == m_craftResult.id && !isTool(m_heldItem.id) &&
+               m_heldItem.count + m_craftResult.count <= 64) {
+        m_heldItem.count += m_craftResult.count;
+        for (int i = 0; i < 4; ++i) {
+            if (!m_craftGrid[i].empty()) {
+                m_craftGrid[i].count--;
+                if (m_craftGrid[i].count <= 0) m_craftGrid[i].clear();
+            }
+        }
+        updateCrafting();
+    }
+}
+
+bool Application::addItem(BlockId id, int count) {
+    if (isAir(id) || count <= 0) return true;
+
+    // 1. Stack into existing hotbar
+    if (!isTool(id)) {
+        for (int i = 0; i < 8; ++i) {
+            if (m_hotbar[i].id == id && m_hotbar[i].count < 64) {
+                const int canAdd = std::min(count, 64 - m_hotbar[i].count);
+                m_hotbar[i].count += canAdd;
+                count -= canAdd;
+                if (count <= 0) return true;
+            }
+        }
+        // 2. Stack into existing inventory
+        for (int i = 0; i < 24; ++i) {
+            if (m_inventory[i].id == id && m_inventory[i].count < 64) {
+                const int canAdd = std::min(count, 64 - m_inventory[i].count);
+                m_inventory[i].count += canAdd;
+                count -= canAdd;
+                if (count <= 0) return true;
+            }
+        }
+    }
+
+    // 3. Put in empty hotbar slot
+    for (int i = 0; i < 8; ++i) {
+        if (m_hotbar[i].empty()) {
+            m_hotbar[i] = ItemSlot(id, count, maxToolDurability(id));
+            return true;
+        }
+    }
+
+    // 4. Put in empty inventory slot
+    for (int i = 0; i < 24; ++i) {
+        if (m_inventory[i].empty()) {
+            m_inventory[i] = ItemSlot(id, count, maxToolDurability(id));
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void Application::handleInventoryInput() {
@@ -743,7 +975,7 @@ void Application::handleInventoryInput() {
     const glm::vec2 mouse = mouseInFramebuffer();
     const float s = computeUiScale();
     const float slot = 18.0f * s;
-    const float gap = 3.0f * s;
+    const float gap = 2.5f * s;
     const int cols = 8;
     const int mainRows = 3;
 
@@ -752,24 +984,52 @@ void Application::handleInventoryInput() {
     const float hotbarH = slot;
     const float pad = 12.0f * s;
     const float headerH = 20.0f * s;
-    const float sectionGap = 10.0f * s;
+    const float craftSectionH = 2.0f * slot + gap + 16.0f * s;
+    const float labelH = 12.0f * s;
+    const float sectionGap = 8.0f * s;
+    const float footerH = 14.0f * s;
 
     const float containerW = gridW + 2.0f * pad;
-    const float containerH = headerH + mainH + sectionGap + hotbarH + 2.0f * pad + 16.0f * s;
+    const float containerH = pad + headerH + craftSectionH + sectionGap + mainH + sectionGap + labelH + hotbarH + footerH + pad;
 
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
     const float left = cx - containerW * 0.5f;
     const float bottom = cy - containerH * 0.5f;
 
+    const float headerTop = bottom + containerH - pad;
+    const float craftSectionTop = headerTop - headerH;
+    const float craftSectionY = craftSectionTop - craftSectionH;
+    const float craftGridLeft = left + pad + 24.0f * s;
+    const float craftGridTop = craftSectionTop - 14.0f * s;
+
+    const float arrowX = craftGridLeft + 2.0f * (slot + gap) + 12.0f * s;
+    const float resultX = arrowX + 26.0f * s;
+    const float resultY = craftGridTop - slot - gap * 0.5f - slot * 0.5f;
+
     const float gridLeft = left + pad;
-    const float mainGridTop = bottom + containerH - pad - headerH;
-    const float hotbarTop = mainGridTop - mainH - sectionGap * 0.5f;
-    const float hotbarY = hotbarTop - slot - 4.0f * s;
+    const float mainGridTop = craftSectionY - sectionGap;
+    const float dividerY = mainGridTop - mainH - sectionGap * 0.5f;
+    const float subLabelTop = dividerY - 3.0f * s;
+    const float hotbarY = subLabelTop - labelH - slot;
+
+    int hoveredCraftIdx = -1;
+    for (int r = 0; r < 2; ++r) {
+        for (int c = 0; c < 2; ++c) {
+            const int idx = r * 2 + c;
+            const float sx = craftGridLeft + c * (slot + gap);
+            const float sy = craftGridTop - (r + 1) * slot - r * gap;
+            if (mouse.x >= sx && mouse.x <= sx + slot && mouse.y >= sy && mouse.y <= sy + slot) {
+                hoveredCraftIdx = idx;
+                break;
+            }
+        }
+    }
+
+    const bool hoveredResult = (mouse.x >= resultX && mouse.x <= resultX + slot &&
+                                mouse.y >= resultY && mouse.y <= resultY + slot);
 
     int hoveredInvIdx = -1;
-    int hoveredHotbarIdx = -1;
-
     for (int row = 0; row < mainRows; ++row) {
         for (int col = 0; col < cols; ++col) {
             const int idx = row * cols + col;
@@ -783,6 +1043,7 @@ void Application::handleInventoryInput() {
         }
     }
 
+    int hoveredHotbarIdx = -1;
     for (int i = 0; i < 8; ++i) {
         const float x = gridLeft + i * (slot + gap);
         if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= hotbarY && mouse.y <= hotbarY + slot) {
@@ -795,7 +1056,7 @@ void Application::handleInventoryInput() {
     for (int i = 0; i < 8; ++i) {
         if (m_input.keyPressed(numKeys[i])) {
             if (hoveredInvIdx >= 0) {
-                m_hotbar[i] = m_inventory[hoveredInvIdx];
+                std::swap(m_hotbar[i], m_inventory[hoveredInvIdx]);
                 m_selectedSlot = i;
             } else if (hoveredHotbarIdx >= 0) {
                 std::swap(m_hotbar[i], m_hotbar[hoveredHotbarIdx]);
@@ -805,13 +1066,88 @@ void Application::handleInventoryInput() {
     }
 
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        if (hoveredInvIdx >= 0) {
-            std::swap(m_heldItem, m_inventory[hoveredInvIdx]);
+        if (hoveredResult) {
+            takeCraftResult();
+        } else if (hoveredCraftIdx >= 0) {
+            ItemSlot& target = m_craftGrid[hoveredCraftIdx];
+            if (m_heldItem.empty()) {
+                m_heldItem = target;
+                target.clear();
+            } else if (target.empty()) {
+                target = m_heldItem;
+                m_heldItem.clear();
+            } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count + m_heldItem.count <= 64) {
+                target.count += m_heldItem.count;
+                m_heldItem.clear();
+            } else {
+                std::swap(m_heldItem, target);
+            }
+            updateCrafting();
+        } else if (hoveredInvIdx >= 0) {
+            ItemSlot& target = m_inventory[hoveredInvIdx];
+            if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                const int canAdd = std::min(m_heldItem.count, 64 - target.count);
+                target.count += canAdd;
+                m_heldItem.count -= canAdd;
+                if (m_heldItem.count <= 0) m_heldItem.clear();
+            } else {
+                std::swap(m_heldItem, target);
+            }
         } else if (hoveredHotbarIdx >= 0) {
-            std::swap(m_heldItem, m_hotbar[hoveredHotbarIdx]);
+            ItemSlot& target = m_hotbar[hoveredHotbarIdx];
+            if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                const int canAdd = std::min(m_heldItem.count, 64 - target.count);
+                target.count += canAdd;
+                m_heldItem.count -= canAdd;
+                if (m_heldItem.count <= 0) m_heldItem.clear();
+            } else {
+                std::swap(m_heldItem, target);
+            }
+        }
+    }
+
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
+        if (!m_heldItem.empty()) {
+            if (hoveredCraftIdx >= 0) {
+                ItemSlot& target = m_craftGrid[hoveredCraftIdx];
+                if (target.empty()) {
+                    target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
+                    m_heldItem.count--;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                    updateCrafting();
+                } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                    target.count++;
+                    m_heldItem.count--;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                    updateCrafting();
+                }
+            } else if (hoveredInvIdx >= 0) {
+                ItemSlot& target = m_inventory[hoveredInvIdx];
+                if (target.empty()) {
+                    target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
+                    m_heldItem.count--;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                    target.count++;
+                    m_heldItem.count--;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                }
+            } else if (hoveredHotbarIdx >= 0) {
+                ItemSlot& target = m_hotbar[hoveredHotbarIdx];
+                if (target.empty()) {
+                    target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
+                    m_heldItem.count--;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                    target.count++;
+                    m_heldItem.count--;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                }
+            }
         }
     }
 }
+
 
 // ---------------------------------------------------------------------------
 // Gameplay
@@ -841,12 +1177,20 @@ void Application::handlePlayInput() {
 
 void Application::updateInteraction() {
     const Camera& camera = m_player.camera();
+    ItemSlot& held = m_hotbar[m_selectedSlot];
 
     if (m_input.cursorCaptured() && m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
         m_player.triggerSwing();
         Mob* hitMob = m_entityManager.hitTest(camera.position(), camera.front(), config::REACH_DISTANCE);
         if (hitMob) {
-            hitMob->takeDamage(2, m_player.position());
+            const int dmg = attackDamage(held.id);
+            hitMob->takeDamage(dmg, m_player.position());
+            if (isTool(held.id)) {
+                held.durability--;
+                if (held.durability <= 0) {
+                    held.clear();
+                }
+            }
             if (hitMob->type() == MobType::PigmanVillager) {
                 m_entityManager.alertNearbyPigmen(hitMob->position(), 16.0f);
             }
@@ -863,36 +1207,53 @@ void Application::updateInteraction() {
         const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
         if (isBreakable(targetBlock)) {
             m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
+            const BlockId drop = getDropForBlock(targetBlock);
+            if (drop != BlockId::Air) {
+                const glm::vec3 dropPos = glm::vec3(m_target.block) + glm::vec3(0.5f, 0.4f, 0.5f);
+                m_entityManager.spawnItem(drop, dropPos, 1);
+            }
+            if (isTool(held.id)) {
+                held.durability--;
+                if (held.durability <= 0) {
+                    held.clear();
+                }
+            }
         }
     }
 
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
         m_player.triggerSwing();
-        const glm::ivec3 place = m_target.block + m_target.normal;
-        if (!playerOccupies(place)) {
-            BlockId placed = m_hotbar[m_selectedSlot];
-            if (placed == BlockId::Wood || placed == BlockId::WoodX || placed == BlockId::WoodZ) {
-                if (m_target.normal.x != 0) {
-                    placed = BlockId::WoodX;
-                } else if (m_target.normal.z != 0) {
-                    placed = BlockId::WoodZ;
-                } else {
-                    placed = BlockId::Wood;
+        if (!held.empty() && isPlaceable(held.id)) {
+            const glm::ivec3 place = m_target.block + m_target.normal;
+            if (!playerOccupies(place)) {
+                BlockId placed = held.id;
+                if (placed == BlockId::Wood || placed == BlockId::WoodX || placed == BlockId::WoodZ) {
+                    if (m_target.normal.x != 0) {
+                        placed = BlockId::WoodX;
+                    } else if (m_target.normal.z != 0) {
+                        placed = BlockId::WoodZ;
+                    } else {
+                        placed = BlockId::Wood;
+                    }
+                } else if (isTorch(placed)) {
+                    if (m_target.normal.x > 0) {
+                        placed = BlockId::TorchWallWest; // Attached to West wall
+                    } else if (m_target.normal.x < 0) {
+                        placed = BlockId::TorchWallEast; // Attached to East wall
+                    } else if (m_target.normal.z > 0) {
+                        placed = BlockId::TorchWallNorth; // Attached to North wall
+                    } else if (m_target.normal.z < 0) {
+                        placed = BlockId::TorchWallSouth; // Attached to South wall
+                    } else {
+                        placed = BlockId::Torch; // Floor torch
+                    }
                 }
-            } else if (isTorch(placed)) {
-                if (m_target.normal.x > 0) {
-                    placed = BlockId::TorchWallWest; // Attached to West wall
-                } else if (m_target.normal.x < 0) {
-                    placed = BlockId::TorchWallEast; // Attached to East wall
-                } else if (m_target.normal.z > 0) {
-                    placed = BlockId::TorchWallNorth; // Attached to North wall
-                } else if (m_target.normal.z < 0) {
-                    placed = BlockId::TorchWallSouth; // Attached to South wall
-                } else {
-                    placed = BlockId::Torch; // Floor torch
+                m_world.setBlock(place.x, place.y, place.z, placed);
+                held.count--;
+                if (held.count <= 0) {
+                    held.clear();
                 }
             }
-            m_world.setBlock(place.x, place.y, place.z, placed);
         }
     }
 }
@@ -1217,8 +1578,8 @@ void Application::renderScene() {
         m_renderer.beginUI();
         m_renderer.drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight),
                             glm::vec4(0.0f, 0.0f, 0.0f, 0.60f));
-        m_renderer.endUI();
-        m_renderer.drawInventory(m_selectedSlot, m_hotbar, 8, m_inventory, 24, m_heldItem, mouseInFramebuffer());
+        m_renderer.drawInventory(m_selectedSlot, m_hotbar, 8, m_inventory, 24,
+                                 m_craftGrid, m_craftResult, m_heldItem, mouseInFramebuffer());
         return;
     }
 

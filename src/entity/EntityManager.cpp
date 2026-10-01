@@ -116,16 +116,38 @@ void EntityManager::addMob(std::unique_ptr<Mob> mob) {
     }
 }
 
-void EntityManager::clear() {
-    m_mobs.clear();
+void EntityManager::spawnItem(BlockId id, const glm::vec3& position, int count, const glm::vec3& initialVelocity) {
+    if (isAir(id) || count <= 0) return;
+    m_items.push_back(std::make_unique<ItemEntity>(id, position, count, initialVelocity));
 }
 
-void EntityManager::update(float dt, const World& world, const glm::vec3& playerPos) {
+void EntityManager::clear() {
+    m_mobs.clear();
+    m_items.clear();
+}
+
+void EntityManager::update(float dt, const World& world, const glm::vec3& playerPos,
+                           const std::function<bool(BlockId, int)>& onPickup) {
     for (auto it = m_mobs.begin(); it != m_mobs.end(); ) {
         if (!(*it)->isAlive()) {
             it = m_mobs.erase(it);
         } else {
             (*it)->update(dt, world, playerPos);
+            ++it;
+        }
+    }
+
+    for (auto it = m_items.begin(); it != m_items.end(); ) {
+        if (!(*it)->isAlive()) {
+            it = m_items.erase(it);
+        } else {
+            (*it)->update(dt, world, playerPos);
+            if ((*it)->isWithinPickupRange(playerPos)) {
+                if (onPickup && onPickup((*it)->blockId(), (*it)->count())) {
+                    it = m_items.erase(it);
+                    continue;
+                }
+            }
             ++it;
         }
     }
@@ -155,6 +177,11 @@ void EntityManager::buildMesh(std::vector<Vertex>& outVertices, const World& wor
         if (!mob || !mob->isAlive()) continue;
         mob->appendGeometry(outVertices, world);
     }
+    for (const auto& item : m_items) {
+        if (!item || !item->isAlive()) continue;
+        item->appendGeometry(outVertices, world);
+    }
 }
+
 
 } // namespace vox
