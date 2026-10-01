@@ -332,17 +332,22 @@ void Renderer::drawSky(const Camera& camera, float timeOfDay,
     const glm::vec3 moonDir = -sunDir;
     const float dist = 90.0f;
 
-    auto addCelestialQuad = [&](const glm::vec3& dir, float size, const glm::vec4& col) {
+    auto addCelestialQuad = [&](const glm::vec3& dir, float size, const glm::vec4& col,
+                                const glm::vec2& offset = glm::vec2(0.0f)) {
         const glm::vec3 center = dir * dist;
         glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
         if (std::abs(glm::dot(dir, up)) > 0.95f) up = glm::vec3(0.0f, 0.0f, 1.0f);
-        const glm::vec3 right = glm::normalize(glm::cross(dir, up)) * (size * 0.5f);
-        const glm::vec3 top = glm::normalize(glm::cross(right, dir)) * (size * 0.5f);
+        const glm::vec3 rUnit = glm::normalize(glm::cross(dir, up));
+        const glm::vec3 tUnit = glm::normalize(glm::cross(rUnit, dir));
 
-        const glm::vec3 p0 = center - right - top;
-        const glm::vec3 p1 = center + right - top;
-        const glm::vec3 p2 = center + right + top;
-        const glm::vec3 p3 = center - right + top;
+        const glm::vec3 offsetCenter = center + (rUnit * offset.x) + (tUnit * offset.y);
+        const glm::vec3 right = rUnit * (size * 0.5f);
+        const glm::vec3 top = tUnit * (size * 0.5f);
+
+        const glm::vec3 p0 = offsetCenter - right - top;
+        const glm::vec3 p1 = offsetCenter + right - top;
+        const glm::vec3 p2 = offsetCenter + right + top;
+        const glm::vec3 p3 = offsetCenter - right + top;
 
         celestialVertices.push_back({p0, col});
         celestialVertices.push_back({p1, col});
@@ -352,26 +357,38 @@ void Renderer::drawSky(const Camera& camera, float timeOfDay,
         celestialVertices.push_back({p3, col});
     };
 
-    // Sun (golden core + radiant corona)
-    if (sunDir.y > -0.30f) {
-        const float sunAlpha = glm::clamp((sunDir.y + 0.30f) / 0.30f, 0.0f, 1.0f);
-        addCelestialQuad(sunDir, 22.0f, glm::vec4(1.0f, 0.78f, 0.20f, 0.40f * sunAlpha));
-        addCelestialQuad(sunDir, 13.0f, glm::vec4(1.0f, 0.98f, 0.55f, 1.0f * sunAlpha));
+    // Sun (Minecraft-style brilliant square body + radiant golden halos)
+    if (sunDir.y > -0.35f) {
+        const float sunAlpha = glm::clamp((sunDir.y + 0.35f) / 0.35f, 0.0f, 1.0f);
+        // Outer soft celestial glow
+        addCelestialQuad(sunDir, 72.0f, glm::vec4(1.0f, 0.60f, 0.12f, 0.20f * sunAlpha));
+        // Golden corona halo
+        addCelestialQuad(sunDir, 46.0f, glm::vec4(1.0f, 0.82f, 0.20f, 0.52f * sunAlpha));
+        // Brilliant square Sun core
+        addCelestialQuad(sunDir, 28.0f, glm::vec4(1.0f, 1.0f, 0.95f, 1.0f * sunAlpha));
     }
 
-    // Moon (silver/white core + soft lunar glow)
-    if (moonDir.y > -0.30f) {
-        const float moonAlpha = glm::clamp((moonDir.y + 0.30f) / 0.30f, 0.0f, 1.0f);
-        addCelestialQuad(moonDir, 18.0f, glm::vec4(0.55f, 0.75f, 1.0f, 0.30f * moonAlpha));
-        addCelestialQuad(moonDir, 11.0f, glm::vec4(0.92f, 0.95f, 1.0f, 0.95f * moonAlpha));
+    // Moon (Minecraft-style square Moon + lunar crater detail + silver-blue aura)
+    if (moonDir.y > -0.35f) {
+        const float moonAlpha = glm::clamp((moonDir.y + 0.35f) / 0.35f, 0.0f, 1.0f);
+        // Outer soft lunar glow
+        addCelestialQuad(moonDir, 65.0f, glm::vec4(0.30f, 0.50f, 0.95f, 0.18f * moonAlpha));
+        // Glowing lunar aura
+        addCelestialQuad(moonDir, 42.0f, glm::vec4(0.48f, 0.68f, 1.0f, 0.32f * moonAlpha));
+        // Silver-white square Moon body
+        addCelestialQuad(moonDir, 24.0f, glm::vec4(0.92f, 0.95f, 1.0f, 0.98f * moonAlpha));
+        // Lunar crater details
+        addCelestialQuad(moonDir, 7.0f, glm::vec4(0.65f, 0.70f, 0.80f, 0.95f * moonAlpha), glm::vec2(-4.5f, 3.5f));
+        addCelestialQuad(moonDir, 8.5f, glm::vec4(0.62f, 0.68f, 0.78f, 0.95f * moonAlpha), glm::vec2(3.5f, -4.0f));
+        addCelestialQuad(moonDir, 5.5f, glm::vec4(0.68f, 0.74f, 0.84f, 0.95f * moonAlpha), glm::vec2(4.5f, 4.5f));
     }
 
     // Horizon Sunset / Sunrise Glow
     const float sunElev = std::sin(angle);
-    if (std::abs(sunElev) < 0.28f) {
-        const float glowFactor = 1.0f - (std::abs(sunElev) / 0.28f);
-        const glm::vec3 horizDir = glm::normalize(glm::vec3(sunDir.x, 0.05f, sunDir.z));
-        addCelestialQuad(horizDir, 55.0f, glm::vec4(0.95f, 0.42f, 0.18f, 0.45f * glowFactor));
+    if (std::abs(sunElev) < 0.30f) {
+        const float glowFactor = 1.0f - (std::abs(sunElev) / 0.30f);
+        const glm::vec3 horizDir = glm::normalize(glm::vec3(sunDir.x, 0.04f, sunDir.z));
+        addCelestialQuad(horizDir, 65.0f, glm::vec4(0.95f, 0.44f, 0.18f, 0.45f * glowFactor));
     }
 
     if (!celestialVertices.empty()) {

@@ -783,36 +783,53 @@ void setPixelRgba(std::vector<uint8_t>& pixels, int tile, int x, int y, uint8_t 
 }
 
 void makeDestroyTile(std::vector<uint8_t>& pixels, int tile, int stage) {
-    struct CrackLine {
+    struct CrackSegment {
         int x0, y0, x1, y1;
         int minStage;
     };
 
-    static const CrackLine lines[] = {
-        // Stage 0: initial center fissures
-        {7, 8, 9, 7, 0}, {8, 8, 8, 10, 0},
-        // Stage 1
-        {9, 7, 11, 6, 1}, {8, 10, 6, 11, 1}, {7, 8, 6, 6, 1},
-        // Stage 2
-        {11, 6, 13, 4, 2}, {6, 11, 4, 13, 2}, {6, 6, 4, 4, 2}, {8, 8, 10, 9, 2},
-        // Stage 3
-        {10, 9, 13, 11, 3}, {6, 6, 7, 3, 3}, {7, 8, 5, 8, 3},
-        // Stage 4
-        {13, 11, 14, 14, 4}, {4, 4, 2, 2, 4}, {5, 8, 2, 9, 4}, {10, 9, 11, 13, 4},
-        // Stage 5
-        {7, 3, 9, 2, 5}, {6, 11, 8, 13, 5}, {9, 7, 10, 4, 5}, {4, 13, 2, 14, 5},
-        // Stage 6
-        {10, 4, 13, 2, 6}, {8, 13, 10, 14, 6}, {5, 8, 4, 6, 6}, {11, 6, 13, 8, 6},
-        // Stage 7
-        {2, 9, 1, 11, 7}, {13, 8, 14, 10, 7}, {2, 2, 1, 5, 7}, {9, 2, 12, 1, 7},
-        // Stage 8
-        {4, 6, 2, 5, 8}, {8, 8, 6, 9, 8}, {9, 7, 11, 8, 8}, {13, 4, 15, 6, 8},
-        // Stage 9: total shattering
-        {6, 9, 3, 11, 9}, {11, 8, 14, 7, 9}, {1, 5, 1, 8, 9}, {14, 10, 15, 13, 9},
-        {10, 14, 12, 15, 9}, {12, 1, 15, 2, 9}, {4, 4, 5, 2, 9}, {10, 4, 8, 2, 9}
+    static const CrackSegment segments[] = {
+        // Stage 0: Central initial fracture seeds
+        {7, 8, 9, 8, 0}, {8, 7, 8, 10, 0},
+
+        // Stage 1: Expanding central star fissures
+        {9, 8, 11, 7, 1}, {7, 8, 5, 9, 1}, {8, 10, 7, 12, 1}, {8, 7, 9, 5, 1},
+
+        // Stage 2: Extending toward quadrants
+        {11, 7, 13, 5, 2}, {5, 9, 3, 11, 2}, {7, 12, 5, 13, 2}, {9, 5, 11, 3, 2},
+        {8, 8, 10, 10, 2}, {7, 8, 6, 6, 2},
+
+        // Stage 3: Diagonal forks & relief
+        {10, 10, 13, 12, 3}, {6, 6, 4, 3, 3}, {13, 5, 14, 3, 3}, {3, 11, 2, 13, 3},
+        {9, 8, 10, 6, 3}, {7, 8, 6, 10, 3},
+
+        // Stage 4: Connecting to borders
+        {13, 12, 15, 14, 4}, {4, 3, 2, 1, 4}, {14, 3, 15, 1, 4}, {2, 13, 1, 15, 4},
+        {5, 9, 2, 8, 4}, {11, 7, 14, 8, 4},
+
+        // Stage 5: Secondary cross-fissure web
+        {8, 10, 11, 12, 5}, {8, 7, 5, 4, 5}, {6, 10, 4, 12, 5}, {10, 6, 12, 4, 5},
+        {5, 13, 8, 15, 5}, {11, 3, 8, 1, 5},
+
+        // Stage 6: Heavy intersecting mesh
+        {4, 12, 2, 15, 6}, {12, 4, 15, 2, 6}, {11, 12, 14, 15, 6}, {5, 4, 1, 2, 6},
+        {2, 8, 1, 5, 6}, {14, 8, 15, 11, 6}, {7, 12, 10, 14, 6}, {9, 5, 6, 2, 6},
+
+        // Stage 7: Dense spiderweb fracturing
+        {6, 6, 9, 6, 7}, {6, 10, 10, 10, 7}, {2, 13, 5, 15, 7}, {14, 3, 11, 1, 7},
+        {4, 3, 7, 1, 7}, {12, 13, 15, 10, 7}, {3, 11, 1, 9, 7}, {13, 5, 15, 7, 7},
+
+        // Stage 8: Deep severe fragmentation
+        {2, 5, 4, 6, 8}, {14, 11, 12, 10, 8}, {7, 1, 9, 3, 8}, {9, 15, 7, 13, 8},
+        {6, 2, 4, 4, 8}, {10, 14, 12, 12, 8}, {1, 9, 3, 7, 8}, {15, 7, 13, 9, 8},
+
+        // Stage 9: Total catastrophic shattering
+        {3, 7, 5, 9, 9}, {13, 9, 11, 7, 9}, {5, 4, 7, 6, 9}, {11, 12, 9, 10, 9},
+        {1, 5, 1, 1, 9}, {15, 11, 15, 15, 9}, {5, 15, 1, 15, 9}, {11, 1, 15, 1, 9},
+        {4, 12, 4, 15, 9}, {12, 4, 12, 1, 9}, {8, 8, 8, 4, 9}, {8, 8, 8, 12, 9}
     };
 
-    for (const auto& cl : lines) {
+    for (const auto& cl : segments) {
         if (stage < cl.minStage) continue;
 
         int x0 = cl.x0, y0 = cl.y0, x1 = cl.x1, y1 = cl.y1;
@@ -821,9 +838,10 @@ void makeDestroyTile(std::vector<uint8_t>& pixels, int tile, int stage) {
         int err = dx + dy;
 
         while (true) {
-            setPixelRgba(pixels, tile, x0, y0, 18, 18, 22, 230);
-            setPixelRgba(pixels, tile, x0 + 1, y0, 240, 240, 245, 95);
-            setPixelRgba(pixels, tile, x0, y0 - 1, 220, 220, 230, 75);
+            // Authentic Minecraft crack: pitch black fissure core + stark white fracture highlight
+            setPixelRgba(pixels, tile, x0, y0, 10, 10, 12, 255);
+            setPixelRgba(pixels, tile, x0 + 1, y0, 245, 245, 252, 255);
+            setPixelRgba(pixels, tile, x0, y0 - 1, 230, 230, 240, 255);
 
             if (x0 == x1 && y0 == y1) break;
             int e2 = 2 * err;
