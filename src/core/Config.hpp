@@ -39,8 +39,9 @@ inline constexpr uint32_t WORLD_SEED = 1337u;
 inline constexpr float PLAYER_EYE_HEIGHT = 1.62f;
 inline constexpr float REACH_DISTANCE    = 6.0f;
 
-// Rendering.
+// Rendering & Day/Night.
 inline constexpr float FOG_START = 80.0f;
 inline constexpr float FOG_END   = 160.0f;
+inline constexpr float DAY_CYCLE_SECONDS = 600.0f; // 10 minutes per full 24h cycle
 
 } // namespace vox::config

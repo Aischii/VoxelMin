@@ -156,6 +156,11 @@ void Application::run() {
 
         m_audioEngine.setInGame(m_state == GameState::Playing || m_state == GameState::Inventory);
 
+        if (m_state == GameState::Playing || m_state == GameState::Inventory) {
+            m_timeOfDay += dt / config::DAY_CYCLE_SECONDS;
+            if (m_timeOfDay >= 1.0f) m_timeOfDay -= 1.0f;
+        }
+
         if (m_state == GameState::Playing) {
             if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
                 pauseGame();
@@ -1005,6 +1010,80 @@ bool Application::addItem(BlockId id, int count) {
     return false;
 }
 
+void Application::populateCreativeCatalog() {
+    const BlockId catalog[32] = {
+        // Hotbar (8 items)
+        BlockId::Dirt, BlockId::Stone, BlockId::Cobblestone, BlockId::Planks,
+        BlockId::Torch, BlockId::DiamondPickaxe, BlockId::StoneSword, BlockId::Water,
+        // Main inventory (24 items)
+        BlockId::Grass, BlockId::Sand, BlockId::Wood, BlockId::Leaves,
+        BlockId::TallGrass, BlockId::DirtPath, BlockId::Bedrock, BlockId::CraftingTable,
+        BlockId::CoalOre, BlockId::IronOre, BlockId::GoldOre, BlockId::DiamondOre,
+        BlockId::Coal, BlockId::IronIngot, BlockId::Diamond, BlockId::Stick,
+        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::WoodAxe,
+        BlockId::StoneAxe, BlockId::IronAxe, BlockId::WoodShovel, BlockId::StoneShovel
+    };
+
+    for (int i = 0; i < 8; ++i) {
+        m_hotbar[i] = ItemSlot(catalog[i], isTool(catalog[i]) ? 1 : 64, maxToolDurability(catalog[i]));
+    }
+    for (int i = 0; i < 24; ++i) {
+        m_inventory[i] = ItemSlot(catalog[8 + i], isTool(catalog[8 + i]) ? 1 : 64, maxToolDurability(catalog[8 + i]));
+    }
+}
+
+void Application::toggleCreativeMode() {
+    m_creativeMode = !m_creativeMode;
+    if (m_creativeMode) {
+        populateCreativeCatalog();
+        m_audioEngine.play(SoundId::ItemPickup, 1.0f, 1.3f);
+        log::info("Creative mode ENABLED");
+    } else {
+        m_audioEngine.play(SoundId::Click, 0.8f, 0.9f);
+        log::info("Creative mode DISABLED (Survival mode)");
+    }
+}
+
+float Application::computeSunlight() const {
+    const float angle = m_timeOfDay * 2.0f * 3.14159265f;
+    const float sunSin = std::sin(angle);
+    if (sunSin > 0.0f) {
+        return std::clamp(0.12f + 0.88f * (sunSin * 1.35f), 0.12f, 1.0f);
+    }
+    return 0.12f;
+}
+
+glm::vec3 Application::computeSkyColor() const {
+    const float t = m_timeOfDay;
+    if (t < 0.05f) {
+        const float f = (t + 0.05f) / 0.10f;
+        return glm::mix(glm::vec3(0.08f, 0.08f, 0.18f), glm::vec3(0.92f, 0.50f, 0.32f), f);
+    } else if (t < 0.15f) {
+        const float f = (t - 0.05f) / 0.10f;
+        return glm::mix(glm::vec3(0.92f, 0.50f, 0.32f), glm::vec3(0.54f, 0.72f, 0.98f), f);
+    } else if (t < 0.40f) {
+        return glm::vec3(0.54f, 0.72f, 0.98f);
+    } else if (t < 0.50f) {
+        const float f = (t - 0.40f) / 0.10f;
+        return glm::mix(glm::vec3(0.54f, 0.72f, 0.98f), glm::vec3(0.95f, 0.42f, 0.20f), f);
+    } else if (t < 0.58f) {
+        const float f = (t - 0.50f) / 0.08f;
+        return glm::mix(glm::vec3(0.95f, 0.42f, 0.20f), glm::vec3(0.12f, 0.08f, 0.22f), f);
+    } else if (t < 0.90f) {
+        const float f = std::clamp((t - 0.58f) / 0.12f, 0.0f, 1.0f);
+        return glm::mix(glm::vec3(0.12f, 0.08f, 0.22f), glm::vec3(0.02f, 0.03f, 0.06f), f);
+    } else {
+        const float f = (t - 0.90f) / 0.05f;
+        return glm::mix(glm::vec3(0.02f, 0.03f, 0.06f), glm::vec3(0.08f, 0.08f, 0.18f), f);
+    }
+}
+
+glm::vec3 Application::computeFogColor() const {
+    const glm::vec3 sky = computeSkyColor();
+    const float sunlight = computeSunlight();
+    return glm::mix(sky * 0.85f, sky, sunlight);
+}
+
 void Application::handleInventoryInput() {
     if (m_input.keyPressed(GLFW_KEY_E) || m_input.keyPressed(GLFW_KEY_ESCAPE)) {
         closeInventory();
@@ -1203,6 +1282,9 @@ void Application::handlePlayInput() {
         openInventory();
         return;
     }
+    if (m_input.keyPressed(GLFW_KEY_F4) || m_input.keyPressed(GLFW_KEY_C)) {
+        toggleCreativeMode();
+    }
     if (m_input.keyPressed(GLFW_KEY_F))  m_player.toggleFlying();
     if (m_input.keyPressed(GLFW_KEY_F5)) m_player.cyclePerspective();
     if (m_input.keyPressed(GLFW_KEY_G))  m_wireframe = !m_wireframe;
@@ -1231,7 +1313,7 @@ void Application::updateInteraction() {
             const int dmg = attackDamage(held.id);
             hitMob->takeDamage(dmg, m_player.position());
             m_audioEngine.play3D(SoundId::MobHurt, hitMob->position(), camera.position(), camera.front(), 0.85f);
-            if (isTool(held.id)) {
+            if (!m_creativeMode && isTool(held.id)) {
                 held.durability--;
                 if (held.durability <= 0) {
                     held.clear();
@@ -1252,11 +1334,11 @@ void Application::updateInteraction() {
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
         m_player.triggerSwing();
         const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
-        if (isBreakable(targetBlock)) {
+        if (isBreakable(targetBlock) || (m_creativeMode && targetBlock != BlockId::Air)) {
             m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
             const BlockId drop = getDropForBlock(targetBlock);
             const glm::vec3 dropPos = glm::vec3(m_target.block) + glm::vec3(0.5f, 0.4f, 0.5f);
-            if (drop != BlockId::Air) {
+            if (!m_creativeMode && drop != BlockId::Air) {
                 m_entityManager.spawnItem(drop, dropPos, 1);
             }
 
@@ -1274,7 +1356,7 @@ void Application::updateInteraction() {
             }
             m_audioEngine.play3D(digSnd, dropPos, camera.position(), camera.front(), 0.90f);
 
-            if (isTool(held.id)) {
+            if (!m_creativeMode && isTool(held.id)) {
                 held.durability--;
                 if (held.durability <= 0) {
                     held.clear();
@@ -1314,9 +1396,11 @@ void Application::updateInteraction() {
                 m_world.setBlock(place.x, place.y, place.z, placed);
                 const glm::vec3 placedPos = glm::vec3(place) + glm::vec3(0.5f, 0.5f, 0.5f);
                 m_audioEngine.play3D(SoundId::PlaceBlock, placedPos, camera.position(), camera.front(), 0.85f);
-                held.count--;
-                if (held.count <= 0) {
-                    held.clear();
+                if (!m_creativeMode) {
+                    held.count--;
+                    if (held.count <= 0) {
+                        held.clear();
+                    }
                 }
             }
         }
@@ -1588,6 +1672,16 @@ void Application::drawDebugOverlayIfEnabled() {
                   eye.x, eye.y, eye.z, m_player.yaw());
     lines.emplace_back(buffer);
 
+    const int totalMinutes = static_cast<int>((m_timeOfDay * 24.0f + 6.0f) * 60.0f) % 1440;
+    const int hours = (totalMinutes / 60) % 24;
+    const int minutes = totalMinutes % 60;
+    const float sunlight = computeSunlight();
+
+    std::snprintf(buffer, sizeof(buffer), "Mode: %s [F4/C]   Time: %02d:%02d   Sunlight: %.0f%%",
+                  m_creativeMode ? "Creative" : "Survival",
+                  hours, minutes, sunlight * 100.0f);
+    lines.emplace_back(buffer);
+
     m_renderer.drawDebugOverlay(lines);
 }
 
@@ -1604,25 +1698,34 @@ void Application::renderScene() {
     const int ez = static_cast<int>(std::floor(eye.z));
     const bool underwater = isLiquid(m_world.getBlock(ex, ey, ez));
 
-    const glm::vec3 skyColor = underwater ? glm::vec3(0.06f, 0.18f, 0.44f) : glm::vec3(0.54f, 0.72f, 0.98f);
+    const float sunlight = computeSunlight();
+    const glm::vec3 rawSky = computeSkyColor();
+    const glm::vec3 rawFog = computeFogColor();
+
+    const glm::vec3 skyColor = underwater ? glm::vec3(0.06f, 0.18f, 0.44f) : rawSky;
+    const glm::vec3 fogColor = underwater ? glm::vec3(0.04f, 0.12f, 0.30f) : rawFog;
     const float fogEnd = underwater ? 15.0f : static_cast<float>(m_viewDistanceChunks) * 16.0f;
     const float fogStart = underwater ? 1.0f : fogEnd * 0.45f;
 
     m_renderer.setUIScale(computeUiScale());
     m_renderer.beginFrame(skyColor);
 
+    if (!underwater) {
+        m_renderer.drawSky(camera, m_timeOfDay, skyColor, fogColor, sunlight);
+    }
+
     if (m_state == GameState::Playing) {
         glPolygonMode(GL_FRONT_AND_BACK, m_wireframe ? GL_LINE : GL_FILL);
-        m_renderer.drawWorld(m_world, m_player.camera(), skyColor, fogStart, fogEnd);
-        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), skyColor, fogStart, fogEnd);
-        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), skyColor, fogStart, fogEnd);
+        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
 
         if (m_target.hit) {
             const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
             m_renderer.drawSelection(m_player.camera(), m_target.block, targetBlock);
         }
 
-        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera());
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         if (underwater) {
@@ -1634,10 +1737,10 @@ void Application::renderScene() {
     }
 
     if (m_state == GameState::Inventory) {
-        m_renderer.drawWorld(m_world, m_player.camera(), skyColor, fogStart, fogEnd);
-        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), skyColor, fogStart, fogEnd);
-        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), skyColor, fogStart, fogEnd);
-        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera());
+        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
         if (underwater) {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
         }
@@ -1649,11 +1752,11 @@ void Application::renderScene() {
         return;
     }
 
-    m_renderer.drawWorld(m_world, camera, skyColor, fogStart, fogEnd);
-    m_renderer.drawEntities(m_entityManager, m_world, camera, skyColor, fogStart, fogEnd);
+    m_renderer.drawWorld(m_world, camera, fogColor, fogStart, fogEnd, sunlight);
+    m_renderer.drawEntities(m_entityManager, m_world, camera, fogColor, fogStart, fogEnd, sunlight);
     if (pausedBackground) {
-        m_renderer.drawPlayer(m_player, m_world, camera, skyColor, fogStart, fogEnd);
-        m_renderer.drawFirstPersonArm(m_player, m_world, camera);
+        m_renderer.drawPlayer(m_player, m_world, camera, fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawFirstPersonArm(m_player, m_world, camera, sunlight);
     }
     if (underwater && pausedBackground) {
         m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));

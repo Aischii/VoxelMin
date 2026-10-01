@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <random>
 #include <vector>
 
 namespace vox {
@@ -52,10 +53,15 @@ bool Renderer::init() {
                                           resolveAsset("assets/shaders/underwater.frag"))) {
         return false;
     }
+    if (!m_skyShader.loadFromFiles(resolveAsset("assets/shaders/sky.vert"),
+                                   resolveAsset("assets/shaders/sky.frag"))) {
+        return false;
+    }
 
     m_atlas.createAtlas();
     if (!m_font.build()) return false;
     if (!m_particles.init()) return false;
+    initSky();
 
     // --- Block selection outline: a slightly enlarged unit-cube wireframe. ---
     const float lo = -0.002f;
@@ -186,6 +192,7 @@ bool Renderer::init() {
 
 void Renderer::shutdown() {
     m_chunkShader.destroy();
+    m_skyShader.destroy();
     m_lineShader.destroy();
     m_uiShader.destroy();
     m_textShader.destroy();
@@ -207,6 +214,60 @@ void Renderer::shutdown() {
     if (m_entityVao)     { glDeleteVertexArrays(1, &m_entityVao); m_entityVao = 0; }
     if (m_underwaterVbo) { glDeleteBuffers(1, &m_underwaterVbo); m_underwaterVbo = 0; }
     if (m_underwaterVao) { glDeleteVertexArrays(1, &m_underwaterVao); m_underwaterVao = 0; }
+    if (m_skyVbo)        { glDeleteBuffers(1, &m_skyVbo); m_skyVbo = 0; }
+    if (m_skyVao)        { glDeleteVertexArrays(1, &m_skyVao); m_skyVao = 0; }
+    if (m_starVbo)       { glDeleteBuffers(1, &m_starVbo); m_starVbo = 0; }
+    if (m_starVao)       { glDeleteVertexArrays(1, &m_starVao); m_starVao = 0; }
+}
+
+void Renderer::initSky() {
+    glGenVertexArrays(1, &m_skyVao);
+    glGenBuffers(1, &m_skyVbo);
+    glBindVertexArray(m_skyVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_skyVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(SkyVertex) * 64, nullptr, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(SkyVertex),
+                          reinterpret_cast<void*>(offsetof(SkyVertex, pos)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(SkyVertex),
+                          reinterpret_cast<void*>(offsetof(SkyVertex, color)));
+    glBindVertexArray(0);
+
+    std::vector<SkyVertex> stars;
+    stars.reserve(450);
+    std::mt19937 rng(54321);
+    std::uniform_real_distribution<float> distTheta(0.0f, glm::two_pi<float>());
+    std::uniform_real_distribution<float> distPhi(0.05f, glm::half_pi<float>() * 0.95f);
+    std::uniform_real_distribution<float> distBrightness(0.60f, 1.0f);
+
+    for (int i = 0; i < 450; ++i) {
+        const float theta = distTheta(rng);
+        const float phi = distPhi(rng);
+        const float b = distBrightness(rng);
+        const float radius = 95.0f;
+
+        const float x = radius * std::sin(phi) * std::cos(theta);
+        const float y = radius * std::cos(phi);
+        const float z = radius * std::sin(phi) * std::sin(theta);
+
+        stars.push_back({{x, y, z}, glm::vec4(b, b, b * 1.15f, 1.0f)});
+    }
+
+    m_starCount = stars.size();
+    glGenVertexArrays(1, &m_starVao);
+    glGenBuffers(1, &m_starVbo);
+    glBindVertexArray(m_starVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_starVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(stars.size() * sizeof(SkyVertex)),
+                 stars.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(SkyVertex),
+                          reinterpret_cast<void*>(offsetof(SkyVertex, pos)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(SkyVertex),
+                          reinterpret_cast<void*>(offsetof(SkyVertex, color)));
+    glBindVertexArray(0);
 }
 
 void Renderer::setViewport(int width, int height) {
@@ -229,8 +290,109 @@ void Renderer::beginFrame(const glm::vec3& clearColor) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+void Renderer::drawSky(const Camera& camera, float timeOfDay,
+                       const glm::vec3& /*skyColor*/, const glm::vec3& /*fogColor*/, float sunlight) {
+    const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
+    const glm::mat4 viewNoTrans = glm::mat4(glm::mat3(camera.viewMatrix()));
+    const glm::mat4 vp = camera.projectionMatrix(aspect) * viewNoTrans;
+
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    m_skyShader.use();
+    m_skyShader.setMat4("uVP", vp);
+
+    // 1. Draw Stars at night
+    const float starVisibility = glm::clamp((1.0f - sunlight * 1.4f), 0.0f, 1.0f);
+    if (starVisibility > 0.01f && m_starCount > 0) {
+        const float starAngle = timeOfDay * glm::two_pi<float>();
+        const glm::mat4 starRot = glm::rotate(glm::mat4(1.0f), starAngle * 0.5f, glm::vec3(0.0f, 1.0f, 0.2f));
+        m_skyShader.setMat4("uVP", vp * starRot);
+
+        glPointSize(2.5f);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE); // Additive blending for crisp twinkling stars
+        glBindVertexArray(m_starVao);
+        glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(m_starCount));
+        glBindVertexArray(0);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        m_skyShader.setMat4("uVP", vp);
+    }
+
+    // 2. Build and draw celestial billboards (Sun, Moon, Sunset/Sunrise Horizon Glow)
+    std::vector<SkyVertex> celestialVertices;
+    celestialVertices.reserve(36);
+
+    const float angle = timeOfDay * glm::two_pi<float>();
+    // Sun arcs East (X > 0) to West (X < 0) with a slight celestial tilt
+    const glm::vec3 sunDir = glm::normalize(glm::vec3(std::cos(angle), std::sin(angle), 0.22f));
+    const glm::vec3 moonDir = -sunDir;
+    const float dist = 90.0f;
+
+    auto addCelestialQuad = [&](const glm::vec3& dir, float size, const glm::vec4& col) {
+        const glm::vec3 center = dir * dist;
+        glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+        if (std::abs(glm::dot(dir, up)) > 0.95f) up = glm::vec3(0.0f, 0.0f, 1.0f);
+        const glm::vec3 right = glm::normalize(glm::cross(dir, up)) * (size * 0.5f);
+        const glm::vec3 top = glm::normalize(glm::cross(right, dir)) * (size * 0.5f);
+
+        const glm::vec3 p0 = center - right - top;
+        const glm::vec3 p1 = center + right - top;
+        const glm::vec3 p2 = center + right + top;
+        const glm::vec3 p3 = center - right + top;
+
+        celestialVertices.push_back({p0, col});
+        celestialVertices.push_back({p1, col});
+        celestialVertices.push_back({p2, col});
+        celestialVertices.push_back({p0, col});
+        celestialVertices.push_back({p2, col});
+        celestialVertices.push_back({p3, col});
+    };
+
+    // Sun (golden core + radiant corona)
+    if (sunDir.y > -0.30f) {
+        const float sunAlpha = glm::clamp((sunDir.y + 0.30f) / 0.30f, 0.0f, 1.0f);
+        addCelestialQuad(sunDir, 22.0f, glm::vec4(1.0f, 0.78f, 0.20f, 0.40f * sunAlpha));
+        addCelestialQuad(sunDir, 13.0f, glm::vec4(1.0f, 0.98f, 0.55f, 1.0f * sunAlpha));
+    }
+
+    // Moon (silver/white core + soft lunar glow)
+    if (moonDir.y > -0.30f) {
+        const float moonAlpha = glm::clamp((moonDir.y + 0.30f) / 0.30f, 0.0f, 1.0f);
+        addCelestialQuad(moonDir, 18.0f, glm::vec4(0.55f, 0.75f, 1.0f, 0.30f * moonAlpha));
+        addCelestialQuad(moonDir, 11.0f, glm::vec4(0.92f, 0.95f, 1.0f, 0.95f * moonAlpha));
+    }
+
+    // Horizon Sunset / Sunrise Glow
+    const float sunElev = std::sin(angle);
+    if (std::abs(sunElev) < 0.28f) {
+        const float glowFactor = 1.0f - (std::abs(sunElev) / 0.28f);
+        const glm::vec3 horizDir = glm::normalize(glm::vec3(sunDir.x, 0.05f, sunDir.z));
+        addCelestialQuad(horizDir, 55.0f, glm::vec4(0.95f, 0.42f, 0.18f, 0.45f * glowFactor));
+    }
+
+    if (!celestialVertices.empty()) {
+        glBindVertexArray(m_skyVao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_skyVbo);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(celestialVertices.size() * sizeof(SkyVertex)),
+                     celestialVertices.data(), GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(celestialVertices.size()));
+        glBindVertexArray(0);
+
+        ++m_stats.drawCalls;
+        m_stats.triangles += static_cast<uint32_t>(celestialVertices.size() / 3);
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_CULL_FACE);
+}
+
 void Renderer::drawWorld(const World& world, const Camera& camera,
-                         const glm::vec3& fogColor, float fogStart, float fogEnd) {
+                         const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
     const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
     const glm::mat4 viewProjection = camera.projectionMatrix(aspect) * camera.viewMatrix();
 
@@ -243,6 +405,7 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
     m_chunkShader.setVec3("uFogColor", fogColor);
     m_chunkShader.setFloat("uFogStart", fogStart);
     m_chunkShader.setFloat("uFogEnd", fogEnd);
+    m_chunkShader.setFloat("uSunlight", sunlight);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -305,7 +468,7 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
 }
 
 void Renderer::drawEntities(const EntityManager& entityManager, const World& world, const Camera& camera,
-                            const glm::vec3& fogColor, float fogStart, float fogEnd) {
+                            const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
     if (entityManager.mobs().empty()) return;
 
     static std::vector<Vertex> entityVertices;
@@ -323,6 +486,7 @@ void Renderer::drawEntities(const EntityManager& entityManager, const World& wor
     m_chunkShader.setVec3("uFogColor", fogColor);
     m_chunkShader.setFloat("uFogStart", fogStart);
     m_chunkShader.setFloat("uFogEnd", fogEnd);
+    m_chunkShader.setFloat("uSunlight", sunlight);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -345,7 +509,7 @@ void Renderer::drawEntities(const EntityManager& entityManager, const World& wor
 }
 
 void Renderer::drawPlayer(const Player& player, const World& world, const Camera& camera,
-                          const glm::vec3& fogColor, float fogStart, float fogEnd) {
+                          const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
     static std::vector<Vertex> playerVertices;
     playerVertices.clear();
     player.appendGeometry(playerVertices, world);
@@ -361,6 +525,7 @@ void Renderer::drawPlayer(const Player& player, const World& world, const Camera
     m_chunkShader.setVec3("uFogColor", fogColor);
     m_chunkShader.setFloat("uFogStart", fogStart);
     m_chunkShader.setFloat("uFogEnd", fogEnd);
+    m_chunkShader.setFloat("uSunlight", sunlight);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -382,7 +547,7 @@ void Renderer::drawPlayer(const Player& player, const World& world, const Camera
     m_stats.triangles += static_cast<uint32_t>(playerVertices.size() / 3);
 }
 
-void Renderer::drawFirstPersonArm(const Player& player, const World& world, const Camera& /*camera*/) {
+void Renderer::drawFirstPersonArm(const Player& player, const World& world, const Camera& /*camera*/, float sunlight) {
     if (player.perspective() != Perspective::FirstPerson) return;
 
     static std::vector<Vertex> armVertices;
@@ -401,6 +566,7 @@ void Renderer::drawFirstPersonArm(const Player& player, const World& world, cons
     m_chunkShader.setVec3("uFogColor", glm::vec3(0.0f));
     m_chunkShader.setFloat("uFogStart", 999.0f);
     m_chunkShader.setFloat("uFogEnd", 1000.0f);
+    m_chunkShader.setFloat("uSunlight", sunlight);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);

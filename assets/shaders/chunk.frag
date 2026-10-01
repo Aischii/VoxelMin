@@ -13,6 +13,7 @@ uniform vec3 uCamPos;
 uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
+uniform float uSunlight;
 
 out vec4 FragColor;
 
@@ -34,9 +35,10 @@ void main() {
     else if (abs(vNormal.z) > 0.5) shade = 0.85;
     else                           shade = 0.75;
 
-    // Combine sky light + vertex ambient occlusion + directional shading smoothly
-    float lightFloor = 0.35;
-    float skyFactor = lightFloor + (1.0 - lightFloor) * vLight;
+    // Combine dynamic sky light + vertex ambient occlusion + directional shading smoothly
+    float lightFloor = 0.08;
+    float sun = clamp(uSunlight, 0.05, 1.0);
+    float skyFactor = lightFloor + (1.0 - lightFloor) * vLight * sun;
     float aoClamped = max(vAO, 0.0);
     float aoFactor = 0.35 + 0.65 * aoClamped;
     float lightLevel = skyFactor * aoFactor * shade;

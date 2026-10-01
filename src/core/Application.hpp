@@ -89,6 +89,13 @@ private:
     bool addItem(BlockId id, int count = 1);
     void updateCrafting();
     void takeCraftResult();
+    void toggleCreativeMode();
+    void populateCreativeCatalog();
+
+    // Day / Night cycle & Celestial lighting
+    float computeSunlight() const;
+    glm::vec3 computeSkyColor() const;
+    glm::vec3 computeFogColor() const;
 
     // Settings / platform
     void applySettings();
@@ -143,24 +150,15 @@ private:
     std::string m_pendingDeleteWorldName;
     std::string m_pendingDeleteWorldPath;
 
-    ItemSlot m_hotbar[8] = {
-        ItemSlot(BlockId::Grass, 64), ItemSlot(BlockId::Dirt, 64),
-        ItemSlot(BlockId::WoodPickaxe, 1, 60), ItemSlot(BlockId::Wood, 64),
-        ItemSlot(BlockId::Leaves, 64), ItemSlot(BlockId::Planks, 64),
-        ItemSlot(BlockId::Torch, 64), ItemSlot(BlockId::Water, 1),
-    };
-    ItemSlot m_inventory[24] = {
-        ItemSlot(BlockId::Grass, 64),       ItemSlot(BlockId::Dirt, 64),        ItemSlot(BlockId::DirtPath, 64),    ItemSlot(BlockId::Cobblestone, 64),
-        ItemSlot(BlockId::Wood, 64),        ItemSlot(BlockId::Leaves, 64),      ItemSlot(BlockId::Planks, 64),      ItemSlot(BlockId::Sand, 64),
-        ItemSlot(BlockId::Water, 1),        ItemSlot(BlockId::Torch, 64),       ItemSlot(BlockId::Coal, 64),        ItemSlot(BlockId::IronIngot, 64),
-        ItemSlot(BlockId::GoldOre, 64),     ItemSlot(BlockId::Diamond, 64),     ItemSlot(BlockId::Bedrock, 64),     ItemSlot(BlockId::CraftingTable, 64),
-        ItemSlot(BlockId::StonePickaxe, 1), ItemSlot(BlockId::WoodAxe, 1),      ItemSlot(BlockId::WoodShovel, 1),   ItemSlot(BlockId::WoodSword, 1),
-        ItemSlot(BlockId::Stick, 64),       ItemSlot(BlockId::Planks, 64),      ItemSlot(BlockId::Torch, 64),       ItemSlot(BlockId::StoneSword, 1),
-    };
-    ItemSlot m_craftGrid[4];
+    ItemSlot m_hotbar[8] = {};
+    ItemSlot m_inventory[24] = {};
+    ItemSlot m_craftGrid[4] = {};
     ItemSlot m_craftResult;
     ItemSlot m_heldItem;
     int m_selectedSlot = 0;
+
+    bool m_creativeMode = false;
+    float m_timeOfDay = 0.22f; // Starts in the morning (~08:30 AM)
 
 
     RayHit m_target;

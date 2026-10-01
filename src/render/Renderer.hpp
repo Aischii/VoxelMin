@@ -37,13 +37,15 @@ public:
     float uiScale() const { return m_uiScale; }
 
     void beginFrame(const glm::vec3& clearColor);
+    void drawSky(const Camera& camera, float timeOfDay,
+                 const glm::vec3& skyColor, const glm::vec3& fogColor, float sunlight);
     void drawWorld(const World& world, const Camera& camera,
-                   const glm::vec3& fogColor, float fogStart, float fogEnd);
+                   const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
     void drawEntities(const EntityManager& entityManager, const World& world, const Camera& camera,
-                      const glm::vec3& fogColor, float fogStart, float fogEnd);
+                      const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
     void drawPlayer(const Player& player, const World& world, const Camera& camera,
-                    const glm::vec3& fogColor, float fogStart, float fogEnd);
-    void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera);
+                    const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
+    void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera, float sunlight = 1.0f);
     void drawSelection(const Camera& camera, const glm::ivec3& block, BlockId blockId = BlockId::Grass);
 
     void updateParticles(float dt, const World& world, const glm::vec3& playerPos) {
@@ -108,10 +110,16 @@ private:
         glm::vec2 pos;
         glm::vec2 uv;
     };
+    struct SkyVertex {
+        glm::vec3 pos;
+        glm::vec4 color;
+    };
 
     void uploadUI(const UIVertex* vertices, int count);
+    void initSky();
 
     Shader m_chunkShader;
+    Shader m_skyShader;
     Shader m_lineShader;
     Shader m_uiShader;
     Shader m_textShader;
@@ -133,6 +141,11 @@ private:
     uint32_t m_entityVbo = 0;
     uint32_t m_underwaterVao = 0;
     uint32_t m_underwaterVbo = 0;
+    uint32_t m_skyVao = 0;
+    uint32_t m_skyVbo = 0;
+    uint32_t m_starVao = 0;
+    uint32_t m_starVbo = 0;
+    size_t m_starCount = 0;
 
     int m_fbWidth = 1;
     int m_fbHeight = 1;
