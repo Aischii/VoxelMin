@@ -63,78 +63,41 @@ Follow-ups: D-pad/controller support, key rebinding, menu sounds, locale text.
 - **Item entities & drops (Done)**: 3D bobbing/spinning mini-cubes, gravity and voxel collision physics, magnetic vacuum pickup, block break item drops.
 - **Crafting & Tools (Done)**: 2x2 crafting grid, authentic recipes (wood, planks, sticks, crafting table, torches, pickaxes, axes, shovels, swords), durability bars, and mining/attack damage multipliers.
 
-**Milestone closed with release v0.M5.5.**
+**Milestone closed with release v0.M5.6.**
 
-## M6 -- Audio & World Streaming (In Progress)
+## M6 -- Audio & Save Persistence (DONE)
 
-Two features that share a milestone because both are "the world keeps running
-while the player moves" problems. The design questions that must be answered
-first are listed in `Open decisions (blocking M6)` in `docs/PROGRESS.md`.
+- **Audio Engine Core**: Procedural 44.1kHz stereo audio engine powered by `miniaudio`, zero external sound asset dependencies.
+- **Sound Banks & Spatial 3D Audio**: Footsteps, block dig/place/break, item pickups, mob hit/grunt, tool break, and crisp UI clicks with distance attenuation & stereo panning.
+- **Background Music (BGM)**: Multi-format disk track streaming (`.mp3`, `.wav`, `.flac`, `.ogg`) from `assets/music/` and `assets/audio/`, with 16-second procedural ambient chord loop synthesizer fallback.
+- **Future-Proof Saves & Protection**: Persistent project-level `saves/` storage, automated clean-script preservation, legacy folder auto-migration, and forward-compatible block ID sanitization.
 
-**Acceptance criteria -- streaming:**
-- [ ] Chunks generate, mesh, load and unload within a configurable radius.
-- [ ] Meshing runs off the main thread; no frame exceeds 16 ms while streaming.
-- [ ] Walking 1000 blocks in one direction never blocks a frame.
-- [ ] Existing VOXS v2 saves either migrate to v3 or are rejected with a clear
-      message. Never fail to load silently.
-- [ ] `F3` shows streaming stats: queued / meshing / ready chunk counts.
+## M7 -- Lighting & Visual Immersion (Planned / Next)
 
-**Acceptance criteria -- audio (Done):**
-- [x] Backend chosen, linked and initialised (miniaudio); clean shutdown with no leaks.
-- [x] Footsteps (grass/stone/wood), block break (grass/stone/wood), block place, item pickup, mob hurt, tool break, and menu clicks all play.
-- [x] Ambient wind loop is seamless (~4s pink noise breeze with soft swell).
-- [x] Master, Sound Effects, and Ambient Wind volume sliders in the Options menu, updated live with settings.
+- **4-Corner Vertex Ambient Occlusion (AO)**: Smooth 4-level corner occlusion shading per quad vertex, adding authentic depth to block corners and crevices.
+- **BFS Flood-Fill Light Engine**: Nibble-packed Sunlight (0–15) and Blocklight (0–15) per voxel with breadth-first search light propagation and dynamic torch place/break updates.
+- **Dynamic Flowing Fluids**: Water block height levels (1–8), decaying fluid spread, sloped top surface quads, and underwater fog immersion.
+- **Atmospheric Celestial Shading**: Dynamic horizon dusk/dawn color transitions, night darkness curve, and starry night sky dome.
 
-**Risks:**
-- Threading introduces data races. Budget real debugging time, and keep the
-  single-threaded path working behind a flag so a race is always bisectable.
-- Save v3 is a breaking format change. Decide migrate-vs-reject before writing
-  the streaming code, not after.
-- The audio backend choice changes the build system and MSYS2 dependencies.
+## M8 -- Async World Streaming & ChunkSections
 
-**Non-goals for M6:**
-- Biomes (needs generation work that is not streaming work).
-- Music tracks.
-- Positional / 3D audio (mono or simple stereo panning only).
+- **16x16x16 Sub-Chunk Architecture (ChunkSections)**: Vertical subdivision of chunks into 16x16x16 sections, speeding up block edits $5\times$, dropping empty air sections from GPU RAM, and preparing for expanded world heights ($Y=256$).
+- **Multi-Threaded Chunk Worker Pool**: Background worker threads running terrain noise and mesh calculations off-thread; main thread only performs fast sub-millisecond GPU uploads.
+- **Dynamic Render Distance Radius**: Configurable render radius (4 to 16 chunks) with ring loading and unloader queue.
+- **Stutter-Free Traversal**: Sustained 60+ FPS when sprinting/flying across 1,000+ blocks in any direction.
 
-## M7 -- Engine Quality (Partially started)
+## M9 -- Survival Mechanics & Hostile Entities
 
-**Partial: the F3 profiling overlay landed in v0.M5.1, ahead of schedule.**
-Everything else below is still not started.
+- **RPG Survival HUD**: Top-left / configurable Health hearts, Armor defense, Hunger bar with starvation/regeneration mechanics.
+- **Hostile Mobs & Night Spawning**: Zombies and Skeletons spawning at low light levels (Light $< 7$), with 3D pathfinding and melee combat attacks.
+- **Furnace & Smelting System**: 3-slot Furnace UI (Input, Fuel, Output) with burning animation timer for smelting raw ores and cooking meats.
+- **Beds & Day-Skipping**: Craftable wooden beds enabling sleeping through the dangerous night cycle.
 
-- Automated tests (mesh validation, raycast unit tests, terrain determinism). *Not started.*
-- CMake `install`/packaging, CI build on push. *Not started.*
-- ~~Profiling overlay~~ (**Done, pulled forward into v0.M5.1**): `F3` shows frame
-  time, FPS, draw calls, triangles, chunk visible/drawn/culled, mobs and
-  particles. Measured baseline is in the `Current metrics` table in
-  `docs/PROGRESS.md`. Still missing: real GPU timing via `glFinish()` or
-  `GL_TIME_ELAPSED` queries, since the current frame time is CPU-side only.
-- Config file and command-line arguments (`--seed`, `--width`, `--height`). *Not started.*
+## M10 -- Biomes, Weather & World Archetypes
 
-## Explicitly out of scope
-
-Not "not now" -- out of scope for this project. Do not schedule these.
-
-- **Multiplayer.** The project goal is a single-player voxel sandbox.
-- **Redstone / complex block logic** (pipes, doors, power, contraptions).
-- **Modding API.**
-- **Mobile or console ports.**
-- **Full survival progression** (Nether, End, ender dragon, boss mobs).
-
-## Deferred
-
-Worth doing, but deliberately not scheduled. Each names what it waits on.
-
-- **Day/night cycle** with a moving sun and coloured fog. Waits on sky rendering
-  plus a second lighting pass over the whole world.
-- **Weather** (rain/snow). Depends on the particle system, which now exists, so
-  this is the cheapest item in this list.
-- **Structural generation** (villages, dungeons).
-- **Biome-dependent ambient audio.** Waits on M6 audio *and* biomes.
-- **Hostile mobs** and a mob spawn/cap system. Depends on the M6 threading model
-  for spawning outside the view frustum.
-- **Item persistence and mob persistence** -- see the open decisions in
-  `docs/PROGRESS.md`.
+- **Multi-Biome Terrain Generation**: Continuous 2D biome maps (Plains, Deserts with cacti, Snowy Taiga with frosted leaves, Mountains with steep cliff faces).
+- **Dynamic Weather System**: Rainfall and Snowstorms with localized particle emitters, overcast cloud cover, and altered sound ambiance.
+- **Underground Dungeons**: Cobblestone dungeon rooms with loot chests and spawner cages buried deep within cavern systems.
 
 ## Backlog (unscoped)
 

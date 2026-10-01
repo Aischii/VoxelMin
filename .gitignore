@@ -25,6 +25,13 @@ saves/
 *.bmp
 capture.png
 
+# Agent skills & local assistant metadata
+.agents/
+.opencode/
+AGENTS.md
+AGENT.md
+[Aa][Gg][Ee][Nn][Tt]*.md
+
 # OS
 Thumbs.db
 .DS_Store

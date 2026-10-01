@@ -81,9 +81,9 @@ private:
     void openInventory();
     void closeInventory();
 
-    // Gameplay
     void handlePlayInput();
     void handleInventoryInput();
+    void handleCreativeInventoryInput();
     void handleGameOverInput();
     void respawnPlayer();
     void updateInteraction(float dt);
@@ -161,6 +161,7 @@ private:
     int m_selectedSlot = 0;
 
     bool m_creativeMode = false;
+    int m_creativeTab = 0;
     float m_timeOfDay = 0.22f; // Starts in the morning (~08:30 AM)
 
     // Mining / Block breaking state

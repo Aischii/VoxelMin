@@ -163,6 +163,9 @@ bool Renderer::init() {
     glEnableVertexAttribArray(6);
     glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                           reinterpret_cast<void*>(offsetof(Vertex, light)));
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          reinterpret_cast<void*>(offsetof(Vertex, torchLight)));
     glBindVertexArray(0);
 
     // --- Underwater fullscreen quad buffer: pos (vec2) + uv (vec2) ---------
@@ -675,12 +678,12 @@ void Renderer::drawBlockBreak(const Camera& camera, const glm::ivec3& block, Blo
 
     auto addQuad = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3,
                        const glm::vec3& n) {
-        v[idx++] = Vertex{p0, n, {u0, v0}, tileMin, tileSize, 1.0f, 1.0f};
-        v[idx++] = Vertex{p1, n, {u1, v0}, tileMin, tileSize, 1.0f, 1.0f};
-        v[idx++] = Vertex{p2, n, {u1, v1}, tileMin, tileSize, 1.0f, 1.0f};
-        v[idx++] = Vertex{p0, n, {u0, v0}, tileMin, tileSize, 1.0f, 1.0f};
-        v[idx++] = Vertex{p2, n, {u1, v1}, tileMin, tileSize, 1.0f, 1.0f};
-        v[idx++] = Vertex{p3, n, {u0, v1}, tileMin, tileSize, 1.0f, 1.0f};
+        v[idx++] = Vertex{p0, n, {0.0f, 0.0f}, tileMin, tileSize, 1.0f, 1.0f, 0.0f};
+        v[idx++] = Vertex{p1, n, {1.0f, 0.0f}, tileMin, tileSize, 1.0f, 1.0f, 0.0f};
+        v[idx++] = Vertex{p2, n, {1.0f, 1.0f}, tileMin, tileSize, 1.0f, 1.0f, 0.0f};
+        v[idx++] = Vertex{p0, n, {0.0f, 0.0f}, tileMin, tileSize, 1.0f, 1.0f, 0.0f};
+        v[idx++] = Vertex{p2, n, {1.0f, 1.0f}, tileMin, tileSize, 1.0f, 1.0f, 0.0f};
+        v[idx++] = Vertex{p3, n, {0.0f, 1.0f}, tileMin, tileSize, 1.0f, 1.0f, 0.0f};
     };
 
     // +Y (Top)
@@ -1476,6 +1479,241 @@ void Renderer::drawInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int
     const float hintW = textWidth(footerText, hintScale);
     drawText((static_cast<float>(m_fbWidth) - hintW) * 0.5f, bottom + 6.0f * s,
              footerText, hintScale, glm::vec4(0.85f, 0.85f, 0.88f, 0.85f));
+
+    endUI();
+}
+
+void Renderer::drawCreativeInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
+                                     const ItemSlot& heldItem, const glm::vec2& mousePos, int activeTab) {
+    const float s = m_uiScale;
+    const float slot = 18.0f * s;
+    const float gap = 2.5f * s;
+    const float border = 1.5f * s;
+
+    const int cols = 8;
+    const int catalogRows = 6;
+
+    const float gridW = cols * slot + (cols - 1) * gap;
+    const float catalogH = catalogRows * slot + (catalogRows - 1) * gap;
+    const float hotbarH = slot;
+
+    const float pad = 12.0f * s;
+    const float headerH = 22.0f * s;
+    const float tabsH = 16.0f * s;
+    const float labelH = 12.0f * s;
+    const float sectionGap = 8.0f * s;
+    const float footerH = 14.0f * s;
+
+    const float containerW = gridW + 2.0f * pad + 24.0f * s;
+    const float containerH = pad + headerH + tabsH + sectionGap + catalogH + sectionGap + labelH + hotbarH + footerH + pad;
+
+    const float cx = static_cast<float>(m_fbWidth) * 0.5f;
+    const float cy = static_cast<float>(m_fbHeight) * 0.5f;
+
+    const float left = cx - containerW * 0.5f;
+    const float bottom = cy - containerH * 0.5f;
+
+    beginUI();
+
+    // 1. Fullscreen dark backdrop dimming
+    drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight),
+             glm::vec4(0.0f, 0.0f, 0.0f, 0.65f));
+
+    // 2. Main Modal Container Frame (Gothic Slate & Gold Trim)
+    drawRect(left - 2.0f * s, bottom - 2.0f * s, containerW + 4.0f * s, containerH + 4.0f * s,
+             glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
+    drawRect(left - 1.0f * s, bottom, containerW + 2.0f * s, containerH + 1.0f * s,
+             glm::vec4(0.35f, 0.45f, 0.55f, 1.0f));
+    drawRect(left, bottom - 1.0f * s, containerW + 1.0f * s, containerH,
+             glm::vec4(0.12f, 0.12f, 0.15f, 1.0f));
+    drawGradientRect(left, bottom, containerW, containerH,
+                     glm::vec4(0.14f, 0.16f, 0.20f, 0.98f),
+                     glm::vec4(0.20f, 0.22f, 0.28f, 0.98f));
+
+    // 3. Header: Creative Item Catalog & Badge
+    const float headerTop = bottom + containerH - pad;
+    const float titleScale = std::max(1.0f, s * 0.85f);
+    drawText(left + pad, headerTop - 1.0f * s, "CREATIVE ITEM CATALOG", titleScale, glm::vec4(0.35f, 0.92f, 1.0f, 1.0f));
+    
+    // Creative mode badge
+    const std::string badge = "[CREATIVE]";
+    const float badgeScale = std::max(1.0f, s * 0.70f);
+    const float badgeW = textWidth(badge, badgeScale);
+    drawRect(left + containerW - pad - badgeW - 8.0f * s, headerTop - 2.0f * s, badgeW + 8.0f * s, 12.0f * s, glm::vec4(0.12f, 0.40f, 0.35f, 0.90f));
+    drawText(left + containerW - pad - badgeW - 4.0f * s, headerTop, badge, badgeScale, glm::vec4(0.40f, 1.0f, 0.80f, 1.0f));
+
+    drawRect(left + pad, headerTop - 15.0f * s, containerW - 2.0f * pad, 1.5f * s, glm::vec4(0.35f, 0.85f, 0.95f, 0.85f));
+
+    // 4. Category Tabs
+    const char* tabNames[4] = { "All Items", "Blocks", "Tools", "Items & Food" };
+    const float tabY = headerTop - headerH;
+    const float tabW = (gridW - 3.0f * 4.0f * s) / 4.0f;
+    const float tabH = 13.0f * s;
+    const float gridLeft = left + pad + 12.0f * s;
+
+    for (int t = 0; t < 4; ++t) {
+        const float tx = gridLeft + t * (tabW + 4.0f * s);
+        const bool active = (t == activeTab);
+        const bool hovered = (mousePos.x >= tx && mousePos.x <= tx + tabW &&
+                              mousePos.y >= tabY - tabH && mousePos.y <= tabY);
+
+        if (active) {
+            drawRect(tx, tabY - tabH, tabW, tabH, glm::vec4(0.25f, 0.40f, 0.55f, 1.0f));
+            drawRect(tx + 1.0f * s, tabY - tabH + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.18f, 0.28f, 0.40f, 1.0f));
+        } else if (hovered) {
+            drawRect(tx, tabY - tabH, tabW, tabH, glm::vec4(0.30f, 0.32f, 0.38f, 1.0f));
+            drawRect(tx + 1.0f * s, tabY - tabH + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.16f, 0.17f, 0.22f, 1.0f));
+        } else {
+            drawRect(tx, tabY - tabH, tabW, tabH, glm::vec4(0.12f, 0.13f, 0.16f, 1.0f));
+            drawRect(tx + 1.0f * s, tabY - tabH + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.10f, 0.11f, 0.14f, 1.0f));
+        }
+
+        const float tScale = std::max(1.0f, s * 0.65f);
+        const float tw = textWidth(tabNames[t], tScale);
+        const glm::vec4 tCol = active ? glm::vec4(0.40f, 0.95f, 1.0f, 1.0f) :
+                               (hovered ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.70f, 0.72f, 0.78f, 0.85f));
+        drawText(tx + (tabW - tw) * 0.5f, tabY - 2.0f * s, tabNames[t], tScale, tCol);
+    }
+
+    std::string hoveredName;
+    const auto& catalog = getCreativeCatalog(activeTab);
+    const float catalogTop = tabY - tabH - sectionGap;
+
+    // Helper to draw slots
+    auto drawSlot = [&](float x, float y, BlockId item, int count, int durability, int maxDur,
+                        bool isHotbar, int hotbarIdx, bool isTrash) {
+        const bool hovered = (mousePos.x >= x && mousePos.x <= x + slot &&
+                              mousePos.y >= y && mousePos.y <= y + slot);
+        const bool active = (isHotbar && hotbarIdx == selectedHotbarSlot);
+
+        // Sunken bevel
+        if (isTrash) {
+            drawRect(x, y, slot, slot, glm::vec4(0.20f, 0.08f, 0.08f, 1.0f));
+            drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.45f, 0.20f, 0.20f, 1.0f));
+            drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.25f, 0.10f, 0.10f, 1.0f));
+        } else {
+            drawRect(x, y, slot, slot, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
+            drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.32f, 0.32f, 0.38f, 1.0f));
+            drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.13f, 0.13f, 0.16f, 1.0f));
+        }
+
+        if (hovered) {
+            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s,
+                     isTrash ? glm::vec4(1.0f, 0.30f, 0.30f, 1.0f) : glm::vec4(0.40f, 0.90f, 1.0f, 1.0f));
+            drawRect(x, y, slot, slot, glm::vec4(1.0f, 1.0f, 1.0f, 0.25f));
+            if (isTrash) {
+                hoveredName = "Destroy Item / Clear";
+            } else if (item != BlockId::Air) {
+                hoveredName = blockDef(item).name;
+                if (isHotbar) hoveredName += " (Slot " + std::to_string(hotbarIdx + 1) + ")";
+                if (isTool(item)) {
+                    hoveredName += " [" + std::to_string(durability) + "/" + std::to_string(maxDur) + "]";
+                }
+            }
+        } else if (active) {
+            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(0.95f, 0.95f, 0.95f, 1.0f));
+        }
+
+        if (isTrash) {
+            const float tScale = std::max(1.0f, s * 0.70f);
+            const float tw = textWidth("X", tScale);
+            drawText(x + (slot - tw) * 0.5f, y + slot * 0.5f + 4.0f * s, "X", tScale, glm::vec4(0.95f, 0.35f, 0.35f, 1.0f));
+        } else if (item != BlockId::Air) {
+            const float iconPad = 2.0f * s;
+            drawBlockIcon(x + iconPad, y + iconPad, slot - 2.0f * iconPad, slot - 2.0f * iconPad, item);
+
+            // Stack count
+            if (count > 1) {
+                const std::string cntStr = std::to_string(count);
+                const float cntScale = std::max(1.0f, s * 0.60f);
+                const float cw = textWidth(cntStr, cntScale);
+                drawText(x + slot - cw - 1.0f * s + 1.0f, y + textHeight(cntScale) + 1.0f * s - 1.0f,
+                         cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
+                drawText(x + slot - cw - 1.0f * s, y + textHeight(cntScale) + 1.0f * s,
+                         cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            }
+
+            // Durability bar
+            if (isTool(item) && durability > 0) {
+                const float barH = std::max(1.5f, 1.5f * s);
+                drawDurabilityBar(x + border, y + border, slot - 2.0f * border, barH,
+                                  durability, maxDur);
+            }
+        }
+    };
+
+    // 5. Draw Catalog Grid (6 rows x 8 cols)
+    for (int row = 0; row < catalogRows; ++row) {
+        for (int col = 0; col < cols; ++col) {
+            const int idx = row * cols + col;
+            const float x = gridLeft + col * (slot + gap);
+            const float y = catalogTop - (row + 1) * slot - row * gap;
+            if (idx < static_cast<int>(catalog.size())) {
+                const BlockId bId = catalog[idx];
+                const int dur = isTool(bId) ? maxToolDurability(bId) : 0;
+                drawSlot(x, y, bId, 1, dur, dur, false, -1, false);
+            } else {
+                drawSlot(x, y, BlockId::Air, 0, 0, 0, false, -1, false);
+            }
+        }
+    }
+
+    // 6. Section Divider & Hotbar Header
+    const float dividerY = catalogTop - catalogH - sectionGap * 0.5f;
+    drawRect(gridLeft, dividerY, gridW + slot + gap, 1.0f * s, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
+    drawRect(gridLeft, dividerY - 1.0f * s, gridW + slot + gap, 1.0f * s, glm::vec4(0.35f, 0.45f, 0.55f, 0.70f));
+
+    const float subLabelTop = dividerY - 3.0f * s;
+    const float craftLabelScale = std::max(1.0f, s * 0.72f);
+    drawText(gridLeft, subLabelTop, "Hotbar & Quick Access", craftLabelScale, glm::vec4(0.85f, 0.88f, 0.95f, 1.0f));
+
+    // 7. Hotbar Slots Grid (1x8) + Trash Slot
+    const float hotbarY = subLabelTop - labelH - slot;
+    for (int i = 0; i < hotbarCount && i < cols; ++i) {
+        const float x = gridLeft + i * (slot + gap);
+        drawSlot(x, hotbarY, hotbar[i].id, hotbar[i].count, hotbar[i].durability,
+                 maxToolDurability(hotbar[i].id), true, i, false);
+    }
+
+    // Trash / Destroy Item Slot next to Hotbar
+    const float trashX = gridLeft + 8 * (slot + gap);
+    drawSlot(trashX, hotbarY, BlockId::Air, 0, 0, 0, false, -1, true);
+
+    // 8. Floating Hover Tooltip
+    if (!hoveredName.empty()) {
+        const float tipScale = std::max(1.0f, s * 0.75f);
+        const float tipW = textWidth(hoveredName, tipScale);
+        const float tipH = textHeight(tipScale);
+        const float tipX = std::min(mousePos.x + 10.0f * s, static_cast<float>(m_fbWidth) - tipW - 10.0f * s);
+        const float tipY = std::max(mousePos.y + tipH + 4.0f * s, tipH + 10.0f * s);
+
+        drawRect(tipX - 4.0f * s, tipY - tipH - 4.0f * s, tipW + 8.0f * s, tipH + 8.0f * s, glm::vec4(0.06f, 0.08f, 0.12f, 0.96f));
+        drawRect(tipX - 3.0f * s, tipY - tipH - 3.0f * s, tipW + 6.0f * s, tipH + 6.0f * s, glm::vec4(0.20f, 0.50f, 0.70f, 0.85f));
+        drawRect(tipX - 2.0f * s, tipY - tipH - 2.0f * s, tipW + 4.0f * s, tipH + 4.0f * s, glm::vec4(0.06f, 0.08f, 0.12f, 0.96f));
+        drawText(tipX, tipY, hoveredName, tipScale, glm::vec4(0.40f, 0.95f, 1.0f, 1.0f));
+    }
+
+    // 9. Held Item on Mouse Cursor
+    if (!heldItem.empty()) {
+        const float itemSize = 16.0f * s;
+        drawRect(mousePos.x - itemSize * 0.5f + 1.5f * s, mousePos.y - itemSize * 0.5f - 1.5f * s,
+                 itemSize, itemSize, glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
+        drawBlockIcon(mousePos.x - itemSize * 0.5f, mousePos.y - itemSize * 0.5f,
+                      itemSize, itemSize, heldItem.id);
+        if (heldItem.count > 1) {
+            const std::string cntStr = std::to_string(heldItem.count);
+            const float cntScale = std::max(1.0f, s * 0.60f);
+            drawText(mousePos.x + itemSize * 0.3f, mousePos.y - itemSize * 0.3f,
+                     cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
+    }
+
+    // 10. Footer Prompt
+    const std::string footerText = "Left Click: Pick Stack (64)   Right Click: Pick 1   1-8: Quick Hotbar   Trash: Destroy   E/Esc: Close";
+    const float hintScale = std::max(1.0f, s * 0.70f);
+    const float hintW = textWidth(footerText, hintScale);
+    drawText((static_cast<float>(m_fbWidth) - hintW) * 0.5f, bottom + 6.0f * s,
+             footerText, hintScale, glm::vec4(0.75f, 0.85f, 0.95f, 0.85f));
 
     endUI();
 }

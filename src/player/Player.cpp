@@ -502,6 +502,7 @@ void addOrientedBox(std::vector<Vertex>& vertices,
                     TextureTile tileBottom,
                     TextureTile tileFront,
                     float light,
+                    float torchLight,
                     float ao) {
     const glm::vec3 half = size * 0.5f;
     const glm::vec2 tSize = tileSizeUV();
@@ -545,13 +546,13 @@ void addOrientedBox(std::vector<Vertex>& vertices,
         const glm::vec3 v3 = glm::vec3(transform * glm::vec4(center + f.c4, 1.0f));
         const glm::vec3 norm = glm::normalize(glm::mat3(transform) * f.normal);
 
-        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v1, norm, {1.0f, 0.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light });
+        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v1, norm, {1.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
 
-        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v3, norm, {0.0f, 1.0f}, tMin, tSize, ao, light });
+        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v3, norm, {0.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
     }
 }
 
@@ -564,7 +565,8 @@ void Player::appendGeometry(std::vector<Vertex>& vertices, const World& world) c
     const int bx = static_cast<int>(std::floor(m_position.x));
     const int by = static_cast<int>(std::floor(m_position.y + 0.5f));
     const int bz = static_cast<int>(std::floor(m_position.z));
-    const float light = world.skyLight(bx, by, bz);
+    const float light = static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f;
+    const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
     const float ao = 1.0f;
 
     // Body transform: Position + Yaw (align local +Z forward with camera yaw where yaw=0 is +X, yaw=90 is +Z)
@@ -579,28 +581,28 @@ void Player::appendGeometry(std::vector<Vertex>& vertices, const World& world) c
     // 1. Torso: 0.48w x 0.72h x 0.24l (Center Y = 1.08, spans [0.72, 1.44])
     addOrientedBox(vertices, {0.0f, 1.08f, 0.0f}, {0.48f, 0.72f, 0.24f}, rootMat,
                    TextureTile::PlayerTorso, TextureTile::PlayerTorso,
-                   TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, ao);
+                   TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, ao);
 
     // 2. Left Leg: 0.24w x 0.72h x 0.24l (Hip pivot at Y = 0.72, X = -0.12)
     glm::mat4 lLegMat = glm::translate(rootMat, glm::vec3(-0.12f, 0.72f, 0.0f));
     lLegMat = glm::rotate(lLegMat, legSwing, glm::vec3(1, 0, 0));
     addOrientedBox(vertices, {0.0f, -0.36f, 0.0f}, {0.24f, 0.72f, 0.24f}, lLegMat,
                    TextureTile::PlayerPants, TextureTile::PlayerPants,
-                   TextureTile::PlayerShoe, TextureTile::PlayerPants, light, ao);
+                   TextureTile::PlayerShoe, TextureTile::PlayerPants, light, torchLight, ao);
 
     // 3. Right Leg: 0.24w x 0.72h x 0.24l (Hip pivot at Y = 0.72, X = +0.12)
     glm::mat4 rLegMat = glm::translate(rootMat, glm::vec3(0.12f, 0.72f, 0.0f));
     rLegMat = glm::rotate(rLegMat, -legSwing, glm::vec3(1, 0, 0));
     addOrientedBox(vertices, {0.0f, -0.36f, 0.0f}, {0.24f, 0.72f, 0.24f}, rLegMat,
                    TextureTile::PlayerPants, TextureTile::PlayerPants,
-                   TextureTile::PlayerShoe, TextureTile::PlayerPants, light, ao);
+                   TextureTile::PlayerShoe, TextureTile::PlayerPants, light, torchLight, ao);
 
     // 4. Left Arm: 0.24w x 0.72h x 0.24l (Shoulder pivot at Y = 1.44, X = -0.36)
     glm::mat4 lArmMat = glm::translate(rootMat, glm::vec3(-0.36f, 1.44f, 0.0f));
     lArmMat = glm::rotate(lArmMat, -armSwing, glm::vec3(1, 0, 0));
     addOrientedBox(vertices, {0.0f, -0.36f, 0.0f}, {0.24f, 0.72f, 0.24f}, lArmMat,
                    TextureTile::PlayerArm, TextureTile::PlayerArm,
-                   TextureTile::PlayerArm, TextureTile::PlayerArm, light, ao);
+                   TextureTile::PlayerArm, TextureTile::PlayerArm, light, torchLight, ao);
 
     // 5. Right Arm: 0.24w x 0.72h x 0.24l (Shoulder pivot at Y = 1.44, X = +0.36)
     float rArmRot = armSwing - punch * 1.3f;
@@ -609,14 +611,14 @@ void Player::appendGeometry(std::vector<Vertex>& vertices, const World& world) c
     if (punch > 0.01f) rArmMat = glm::rotate(rArmMat, -punch * 0.4f, glm::vec3(0, 1, 0));
     addOrientedBox(vertices, {0.0f, -0.36f, 0.0f}, {0.24f, 0.72f, 0.24f}, rArmMat,
                    TextureTile::PlayerArm, TextureTile::PlayerArm,
-                   TextureTile::PlayerArm, TextureTile::PlayerArm, light, ao);
+                   TextureTile::PlayerArm, TextureTile::PlayerArm, light, torchLight, ao);
 
     // 6. Head: 0.48w x 0.48h x 0.48l (Neck at Y = 1.44)
     glm::mat4 headMat = glm::translate(rootMat, glm::vec3(0.0f, 1.44f, 0.0f));
     headMat = glm::rotate(headMat, glm::radians(m_pitch), glm::vec3(1, 0, 0));
     addOrientedBox(vertices, {0.0f, 0.24f, 0.0f}, {0.48f, 0.48f, 0.48f}, headMat,
                    TextureTile::PlayerHead, TextureTile::PlayerHead,
-                   TextureTile::PlayerHead, TextureTile::PlayerFace, light, ao);
+                   TextureTile::PlayerHead, TextureTile::PlayerFace, light, torchLight, ao);
 }
 
 void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& world) const {
@@ -651,12 +653,13 @@ void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& wo
     const int bx = static_cast<int>(std::floor(eye.x));
     const int by = static_cast<int>(std::floor(eye.y));
     const int bz = static_cast<int>(std::floor(eye.z));
-    const float light = world.skyLight(bx, by, bz);
+    const float light = static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f;
+    const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
 
     // Arm box in camera space: 0.14w x 0.54h x 0.14l
     addOrientedBox(vertices, {0.0f, -0.22f, 0.0f}, {0.14f, 0.54f, 0.14f}, armMat,
                    TextureTile::PlayerArm, TextureTile::PlayerArm,
-                   TextureTile::PlayerArm, TextureTile::PlayerArm, light, 1.0f);
+                   TextureTile::PlayerArm, TextureTile::PlayerArm, light, torchLight, 1.0f);
 }
 
 } // namespace vox

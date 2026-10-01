@@ -16,6 +16,8 @@ the table below rather than rewritten.
 
 | Version | Legacy tag | Milestone | Headline |
 |---------|------------|-----------|----------|
+| v0.M7.0 | - | M7 | Dual-channel BFS light engine (Sunlight/Blocklight), pitch black true night, distinct Menu & In-Game music with crossfading, distinct Survival vs Creative inventory catalogs |
+| v0.M5.6 | - | M5 | 10-stage PNG block break cracks, persistent save protection, BGM audio player & ambient loop synth, celestial sun/moon, Caveman AI skills |
 | v0.M5.5 | - | M5 | Item entities & pickup physics, 2x2 crafting grid, tool durability & mining multipliers (M5 closure) |
 | v0.M5.4 | - | M5 | Camera-space locked viewmodel hand, first-person torso removal, multi-directional 3D wall torches |
 | v0.M5.3 | - | M5 | Mob knockback impulse & recoil stun, combat aggro interest timer, wild passive mob spawning fix |
@@ -29,18 +31,23 @@ the table below rather than rewritten.
 | v0.M2.0 | v0.1.1 | M2 | Legacy-console menus (M2 delivery), compact crosshair, bidirectional options |
 | v0.M1.0 | v0.1.0 | M1 | Versioning, ChunkPalette, RLE |
 
-**v0.M5.5 is the current shipped release** and is what `build/bin/VoxelMin.exe`
-reports at startup. There is no unreleased work: the `## Done` entries tagged
-`v0.M5.5` are its contents. Milestone M5 is officially **complete**. Next milestone
-is **M6 -- Audio & World Streaming**, opening with core audio engine integration.
+**v0.M7.0 is the current build** and delivers **M7 -- Lighting, Visual Immersion & Inventory Evolution**.
 
 ## Current milestone
 
-**M6 -- Audio & World Streaming** (in progress; opening with miniaudio integration).
-Milestone M5 closed with the delivery of item drops/physics pickups and the 2x2 crafting
-grid with tool durability.
+**M7 -- Lighting & Visual Immersion (ACTIVE)**: Landed:
+- Nibble-packed dual 4-bit Sunlight and 4-bit Blocklight storage per voxel in `Chunk`.
+- BFS 3D flood-fill propagation queues with directional attenuation (15 sky down to caves, 14 torches radiating outward).
+- Smooth 4-corner vertex ambient occlusion (AO values: 0.45, 0.65, 0.82, 1.0) with quad diagonal split flipping to prevent anisotropy artifacts.
+- Multi-source shader blend combining sunlight, time-of-day sky factor, warm golden torch illumination (`vec3(0.18, 0.09, 0.02)`), and directional face shading.
+- Pitch black true night and cave darkness (deep caves require torches, no torches automatically spawned in natural caves).
+- Separate procedural background music for Main Menu (arpeggio piano theme) vs In-Game exploration (ambient pads) with smooth dynamic 1.0s crossfading.
+- Distinct Survival Mode (2x2 crafting + 24 bag) vs Creative Mode (Comprehensive item palette with Category Filter Tabs, instant stack generation, number-key hotbar loading, and trash slot) inventories.
+- Fully integrated into entities (mobs, items, player body, first-person viewmodel arm).
 
 **M5 -- Gameplay & Entities (COMPLETE)**: Landed:
+10-stage PNG block break textures, persistent save directory & auto-migration, BGM audio player with miniaudio file loader & procedural ambient chord loop,
+celestial sun & moon with 10-minute Day/Night cycle,
 item entities & pickup physics, 2x2 crafting grid & tool durability/mining multipliers,
 sprinting + dynamic FOV, Source-style movement (air-strafing and bunnyhopping),
 dynamic view bobbing, camera-space locked first-person viewmodel arm,

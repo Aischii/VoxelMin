@@ -87,11 +87,15 @@ public:
     const FrameStats& stats() const { return m_stats; }
     FrameStats& stats() { return m_stats; }
 
-    // Inventory modal UI overlay with 2x2 Crafting Grid.
+    // Inventory modal UI overlay with 2x2 Crafting Grid (Survival Mode).
     void drawInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
                        const ItemSlot* inventory, int invCount,
                        const ItemSlot* craftGrid, const ItemSlot& craftResult,
                        const ItemSlot& heldItem, const glm::vec2& mousePos);
+
+    // Creative Mode Item Catalog with Category Tabs and Unlimited Item Supply.
+    void drawCreativeInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
+                               const ItemSlot& heldItem, const glm::vec2& mousePos, int activeTab = 0);
 
     void drawDurabilityBar(float x, float y, float w, float h, int durability, int maxDurability);
     void drawBlockIcon(float x, float y, float w, float h, BlockId id);

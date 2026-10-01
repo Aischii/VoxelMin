@@ -31,7 +31,8 @@ void addItemBox(std::vector<Vertex>& vertices,
                 TextureTile tileTop,
                 TextureTile tileSide,
                 TextureTile tileBottom,
-                float light) {
+                float light,
+                float torchLight) {
     const glm::vec3 half = size * 0.5f;
     const glm::vec2 tSize = tileSizeUV();
 
@@ -90,13 +91,13 @@ void addItemBox(std::vector<Vertex>& vertices,
         const glm::vec2 u0v1 = {tMin.x, tMin.y + tSize.y};
 
         // Two triangles CCW
-        vertices.push_back({p1, worldNorm, u0v0, tMin, tSize, 1.0f, light});
-        vertices.push_back({p2, worldNorm, u1v0, tMin, tSize, 1.0f, light});
-        vertices.push_back({p3, worldNorm, u1v1, tMin, tSize, 1.0f, light});
+        vertices.push_back({p1, worldNorm, u0v0, tMin, tSize, 1.0f, light, torchLight});
+        vertices.push_back({p2, worldNorm, u1v0, tMin, tSize, 1.0f, light, torchLight});
+        vertices.push_back({p3, worldNorm, u1v1, tMin, tSize, 1.0f, light, torchLight});
 
-        vertices.push_back({p1, worldNorm, u0v0, tMin, tSize, 1.0f, light});
-        vertices.push_back({p3, worldNorm, u1v1, tMin, tSize, 1.0f, light});
-        vertices.push_back({p4, worldNorm, u0v1, tMin, tSize, 1.0f, light});
+        vertices.push_back({p1, worldNorm, u0v0, tMin, tSize, 1.0f, light, torchLight});
+        vertices.push_back({p3, worldNorm, u1v1, tMin, tSize, 1.0f, light, torchLight});
+        vertices.push_back({p4, worldNorm, u0v1, tMin, tSize, 1.0f, light, torchLight});
     }
 }
 
@@ -231,10 +232,10 @@ void ItemEntity::appendGeometry(std::vector<Vertex>& vertices, const World& worl
     const int bx = static_cast<int>(std::floor(m_position.x));
     const int by = static_cast<int>(std::floor(m_position.y + 0.15f));
     const int bz = static_cast<int>(std::floor(m_position.z));
-    const float light = std::max(0.12f, world.skyLight(bx, by, bz));
+    const float light = std::max(0.08f, static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f);
+    const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
 
-
-    addItemBox(vertices, glm::vec3(0.0f), size, model, def.top, def.side, def.bottom, light);
+    addItemBox(vertices, glm::vec3(0.0f), size, model, def.top, def.side, def.bottom, light, torchLight);
 }
 
 } // namespace vox

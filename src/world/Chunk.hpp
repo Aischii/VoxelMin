@@ -97,7 +97,10 @@ public:
     static constexpr int H = config::CHUNK_SIZE_Y;
     static constexpr int D = config::CHUNK_SIZE_Z;
 
-    Chunk(int cx, int cz) : m_cx(cx), m_cz(cz) { m_blocks.fill(BlockId::Air); }
+    Chunk(int cx, int cz)
+        : m_cx(cx), m_cz(cz), m_light(static_cast<size_t>(W) * H * D, 0) {
+        m_blocks.fill(BlockId::Air);
+    }
 
     int chunkX() const { return m_cx; }
     int chunkZ() const { return m_cz; }
@@ -114,9 +117,35 @@ public:
         m_blocks.set(static_cast<size_t>(index(x, y, z)), b);
     }
 
+    uint8_t getSunLight(int x, int y, int z) const {
+        if (x < 0 || x >= W || y < 0 || y >= H || z < 0 || z >= D) return (y >= H) ? 15 : 0;
+        return (m_light[static_cast<size_t>(index(x, y, z))] >> 4) & 0x0F;
+    }
+
+    uint8_t getBlockLight(int x, int y, int z) const {
+        if (x < 0 || x >= W || y < 0 || y >= H || z < 0 || z >= D) return 0;
+        return m_light[static_cast<size_t>(index(x, y, z))] & 0x0F;
+    }
+
+    void setSunLight(int x, int y, int z, uint8_t level) {
+        if (x < 0 || x >= W || y < 0 || y >= H || z < 0 || z >= D) return;
+        const size_t idx = static_cast<size_t>(index(x, y, z));
+        m_light[idx] = static_cast<uint8_t>((m_light[idx] & 0x0F) | ((level & 0x0F) << 4));
+    }
+
+    void setBlockLight(int x, int y, int z, uint8_t level) {
+        if (x < 0 || x >= W || y < 0 || y >= H || z < 0 || z >= D) return;
+        const size_t idx = static_cast<size_t>(index(x, y, z));
+        m_light[idx] = static_cast<uint8_t>((m_light[idx] & 0xF0) | (level & 0x0F));
+    }
+
+    void clearLight() {
+        std::fill(m_light.begin(), m_light.end(), 0);
+    }
+
     static constexpr int index(int x, int y, int z) { return (y * D + z) * W + x; }
 
-    size_t memoryUsage() const { return m_blocks.memoryUsage(); }
+    size_t memoryUsage() const { return m_blocks.memoryUsage() + m_light.size() * sizeof(uint8_t); }
     void compactStorage() { m_blocks.compact(); }
 
     // RLE compression for disk saves & stream payloads.
@@ -161,6 +190,7 @@ public:
 private:
     int m_cx, m_cz;
     ChunkPalette m_blocks;
+    std::vector<uint8_t> m_light;
 };
 
 } // namespace vox

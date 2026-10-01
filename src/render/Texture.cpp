@@ -987,7 +987,9 @@ void Texture::createAtlas() {
     makeBread(pixels, bread);
 
     for (int s = 0; s < 10; ++s) {
-        makeDestroyTile(pixels, destroy0 + s, s);
+        if (!loadTilePng(pixels, destroy0 + s, "destroy_stage_" + std::to_string(s) + ".png")) {
+            makeDestroyTile(pixels, destroy0 + s, s);
+        }
     }
 
 

@@ -1103,16 +1103,16 @@ float Application::computeSunlight() const {
     const float angle = m_timeOfDay * 2.0f * 3.14159265f;
     const float sunSin = std::sin(angle);
     if (sunSin > 0.0f) {
-        return std::clamp(0.12f + 0.88f * (sunSin * 1.35f), 0.12f, 1.0f);
+        return std::clamp(sunSin * 1.35f, 0.0f, 1.0f);
     }
-    return 0.12f;
+    return 0.0f;
 }
 
 glm::vec3 Application::computeSkyColor() const {
     const float t = m_timeOfDay;
     if (t < 0.05f) {
         const float f = (t + 0.05f) / 0.10f;
-        return glm::mix(glm::vec3(0.08f, 0.08f, 0.18f), glm::vec3(0.92f, 0.50f, 0.32f), f);
+        return glm::mix(glm::vec3(0.005f, 0.008f, 0.015f), glm::vec3(0.92f, 0.50f, 0.32f), f);
     } else if (t < 0.15f) {
         const float f = (t - 0.05f) / 0.10f;
         return glm::mix(glm::vec3(0.92f, 0.50f, 0.32f), glm::vec3(0.54f, 0.72f, 0.98f), f);
@@ -1126,20 +1126,182 @@ glm::vec3 Application::computeSkyColor() const {
         return glm::mix(glm::vec3(0.95f, 0.42f, 0.20f), glm::vec3(0.12f, 0.08f, 0.22f), f);
     } else if (t < 0.90f) {
         const float f = std::clamp((t - 0.58f) / 0.12f, 0.0f, 1.0f);
-        return glm::mix(glm::vec3(0.12f, 0.08f, 0.22f), glm::vec3(0.02f, 0.03f, 0.06f), f);
+        return glm::mix(glm::vec3(0.12f, 0.08f, 0.22f), glm::vec3(0.005f, 0.008f, 0.015f), f);
     } else {
         const float f = (t - 0.90f) / 0.05f;
-        return glm::mix(glm::vec3(0.02f, 0.03f, 0.06f), glm::vec3(0.08f, 0.08f, 0.18f), f);
+        return glm::mix(glm::vec3(0.005f, 0.008f, 0.015f), glm::vec3(0.005f, 0.008f, 0.015f), f);
     }
 }
 
 glm::vec3 Application::computeFogColor() const {
     const glm::vec3 sky = computeSkyColor();
     const float sunlight = computeSunlight();
-    return glm::mix(sky * 0.85f, sky, sunlight);
+    return glm::mix(sky * 0.40f, sky, sunlight);
+}
+
+void Application::handleCreativeInventoryInput() {
+    if (m_input.keyPressed(GLFW_KEY_E) || m_input.keyPressed(GLFW_KEY_ESCAPE)) {
+        closeInventory();
+        return;
+    }
+
+    const glm::vec2 mouse = mouseInFramebuffer();
+    const float s = computeUiScale();
+    const float slot = 18.0f * s;
+    const float gap = 2.5f * s;
+    const int cols = 8;
+    const int catalogRows = 6;
+
+    const float gridW = cols * slot + (cols - 1) * gap;
+    const float catalogH = catalogRows * slot + (catalogRows - 1) * gap;
+    const float hotbarH = slot;
+    const float pad = 12.0f * s;
+    const float headerH = 22.0f * s;
+    const float tabsH = 16.0f * s;
+    const float labelH = 12.0f * s;
+    const float sectionGap = 8.0f * s;
+    const float footerH = 14.0f * s;
+
+    const float containerW = gridW + 2.0f * pad + 24.0f * s;
+    const float containerH = pad + headerH + tabsH + sectionGap + catalogH + sectionGap + labelH + hotbarH + footerH + pad;
+
+    const float cx = static_cast<float>(m_fbWidth) * 0.5f;
+    const float cy = static_cast<float>(m_fbHeight) * 0.5f;
+
+    const float left = cx - containerW * 0.5f;
+    const float bottom = cy - containerH * 0.5f;
+
+    const float headerTop = bottom + containerH - pad;
+    const float tabY = headerTop - headerH;
+    const float tabW = (gridW - 3.0f * 4.0f * s) / 4.0f;
+    const float tabH = 13.0f * s;
+    const float gridLeft = left + pad + 12.0f * s;
+
+    // 1. Check Tabs click
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        for (int t = 0; t < 4; ++t) {
+            const float tx = gridLeft + t * (tabW + 4.0f * s);
+            if (mouse.x >= tx && mouse.x <= tx + tabW &&
+                mouse.y >= tabY - tabH && mouse.y <= tabY) {
+                m_creativeTab = t;
+                m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
+                return;
+            }
+        }
+    }
+
+    const auto& catalog = getCreativeCatalog(m_creativeTab);
+    const float catalogTop = tabY - tabH - sectionGap;
+
+    int hoveredCatalogIdx = -1;
+    for (int row = 0; row < catalogRows; ++row) {
+        for (int col = 0; col < cols; ++col) {
+            const int idx = row * cols + col;
+            const float x = gridLeft + col * (slot + gap);
+            const float y = catalogTop - (row + 1) * slot - row * gap;
+            if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= y && mouse.y <= y + slot) {
+                if (idx < static_cast<int>(catalog.size())) {
+                    hoveredCatalogIdx = idx;
+                }
+                break;
+            }
+        }
+    }
+
+    const float dividerY = catalogTop - catalogH - sectionGap * 0.5f;
+    const float subLabelTop = dividerY - 3.0f * s;
+    const float hotbarY = subLabelTop - labelH - slot;
+
+    int hoveredHotbarIdx = -1;
+    for (int i = 0; i < 8; ++i) {
+        const float x = gridLeft + i * (slot + gap);
+        if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= hotbarY && mouse.y <= hotbarY + slot) {
+            hoveredHotbarIdx = i;
+            break;
+        }
+    }
+
+    const float trashX = gridLeft + 8 * (slot + gap);
+    const bool hoveredTrash = (mouse.x >= trashX && mouse.x <= trashX + slot &&
+                               mouse.y >= hotbarY && mouse.y <= hotbarY + slot);
+
+    // Number keys 1-8 to immediately set or swap hotbar
+    const int numKeys[8] = { GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4, GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8 };
+    for (int i = 0; i < 8; ++i) {
+        if (m_input.keyPressed(numKeys[i])) {
+            if (hoveredCatalogIdx >= 0) {
+                const BlockId bId = catalog[hoveredCatalogIdx];
+                m_hotbar[i] = ItemSlot(bId, isTool(bId) ? 1 : 64, maxToolDurability(bId));
+                m_selectedSlot = i;
+                m_audioEngine.play(SoundId::ItemPickup, 0.8f, 1.2f);
+            } else if (hoveredHotbarIdx >= 0) {
+                std::swap(m_hotbar[i], m_hotbar[hoveredHotbarIdx]);
+                m_selectedSlot = i;
+                m_audioEngine.play(SoundId::Click, 0.6f, 1.1f);
+            }
+        }
+    }
+
+    // Left Click
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (hoveredTrash) {
+            if (!m_heldItem.empty()) {
+                m_heldItem.clear();
+                m_audioEngine.play(SoundId::DigWood, 0.7f, 1.2f);
+            } else {
+                for (int i = 0; i < 8; ++i) m_hotbar[i].clear();
+                m_audioEngine.play(SoundId::DigWood, 0.7f, 0.9f);
+            }
+        } else if (hoveredCatalogIdx >= 0) {
+            const BlockId bId = catalog[hoveredCatalogIdx];
+            m_heldItem = ItemSlot(bId, isTool(bId) ? 1 : 64, maxToolDurability(bId));
+            m_audioEngine.play(SoundId::ItemPickup, 0.8f, 1.3f);
+        } else if (hoveredHotbarIdx >= 0) {
+            m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
+            ItemSlot& target = m_hotbar[hoveredHotbarIdx];
+            if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                const int canAdd = std::min(m_heldItem.count, 64 - target.count);
+                target.count += canAdd;
+                m_heldItem.count -= canAdd;
+                if (m_heldItem.count <= 0) m_heldItem.clear();
+            } else {
+                std::swap(m_heldItem, target);
+            }
+        }
+    }
+
+    // Right Click
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
+        if (hoveredCatalogIdx >= 0) {
+            const BlockId bId = catalog[hoveredCatalogIdx];
+            if (m_heldItem.empty()) {
+                m_heldItem = ItemSlot(bId, 1, maxToolDurability(bId));
+            } else if (m_heldItem.id == bId && !isTool(bId) && m_heldItem.count < 64) {
+                m_heldItem.count++;
+            }
+            m_audioEngine.play(SoundId::Click, 0.5f, 1.4f);
+        } else if (hoveredHotbarIdx >= 0 && !m_heldItem.empty()) {
+            m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
+            ItemSlot& target = m_hotbar[hoveredHotbarIdx];
+            if (target.empty()) {
+                target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
+                m_heldItem.count--;
+                if (m_heldItem.count <= 0) m_heldItem.clear();
+            } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
+                target.count++;
+                m_heldItem.count--;
+                if (m_heldItem.count <= 0) m_heldItem.clear();
+            }
+        }
+    }
 }
 
 void Application::handleInventoryInput() {
+    if (m_creativeMode) {
+        handleCreativeInventoryInput();
+        return;
+    }
+
     if (m_input.keyPressed(GLFW_KEY_E) || m_input.keyPressed(GLFW_KEY_ESCAPE)) {
         closeInventory();
         return;
@@ -1955,11 +2117,13 @@ void Application::renderScene() {
         if (underwater) {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
         }
-        m_renderer.beginUI();
-        m_renderer.drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight),
-                            glm::vec4(0.0f, 0.0f, 0.0f, 0.60f));
-        m_renderer.drawInventory(m_selectedSlot, m_hotbar, 8, m_inventory, 24,
-                                 m_craftGrid, m_craftResult, m_heldItem, mouseInFramebuffer());
+        if (m_creativeMode) {
+            m_renderer.drawCreativeInventory(m_selectedSlot, m_hotbar, 8, m_heldItem,
+                                             mouseInFramebuffer(), m_creativeTab);
+        } else {
+            m_renderer.drawInventory(m_selectedSlot, m_hotbar, 8, m_inventory, 24,
+                                     m_craftGrid, m_craftResult, m_heldItem, mouseInFramebuffer());
+        }
         return;
     }
 

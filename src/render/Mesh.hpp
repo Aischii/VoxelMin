@@ -17,6 +17,7 @@ struct Vertex {
     glm::vec2 tileSize;
     float ao;
     float light;
+    float torchLight;
 };
 
 // Thin OpenGL VAO/VBO/EBO wrapper. Move-only via explicit destroy().

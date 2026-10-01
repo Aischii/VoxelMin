@@ -53,6 +53,14 @@ public:
     int surfaceHeight(int wx, int wz) const;
     float skyLight(int wx, int wy, int wz) const;
 
+    uint8_t getSunLight(int wx, int wy, int wz) const;
+    uint8_t getBlockLight(int wx, int wy, int wz) const;
+    void setSunLight(int wx, int wy, int wz, uint8_t level);
+    void setBlockLight(int wx, int wy, int wz, uint8_t level);
+
+    void computeWorldLighting(const ProgressCallback& onProgress = nullptr);
+    void updateLightAround(int wx, int wy, int wz);
+
     uint32_t seed() const { return m_seed; }
     void setSeed(uint32_t s) { m_seed = s; }
 
@@ -65,9 +73,13 @@ public:
     void addVillage(const Village& v) { m_villages.push_back(v); }
     void clearVillages() { m_villages.clear(); }
 
+    bool isGenerating() const { return m_generating; }
+    void setGenerating(bool g) { m_generating = g; }
+
 private:
     int m_chunksX, m_chunksZ;
     uint32_t m_seed;
+    bool m_generating = false;
     std::vector<std::unique_ptr<Chunk>> m_chunks;
     std::vector<Village> m_villages;
 };

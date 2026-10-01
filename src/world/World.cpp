@@ -3,8 +3,24 @@
 
 #include <algorithm>
 #include <cmath>
+#include <queue>
+#include <vector>
 
 namespace vox {
+
+namespace {
+
+struct LightNode {
+    int x, y, z;
+};
+
+const int NEIGHBOR_OFFSETS[6][3] = {
+    { 1,  0,  0}, {-1,  0,  0},
+    { 0,  1,  0}, { 0, -1,  0},
+    { 0,  0,  1}, { 0,  0, -1}
+};
+
+} // namespace
 
 World::World(uint32_t seed)
     : m_chunksX(config::WORLD_CHUNKS_X),
@@ -32,8 +48,11 @@ void World::initEmptyChunks() {
 }
 
 void World::generate(WorldType type, const ProgressCallback& onProgress) {
+    m_generating = true;
     initEmptyChunks();
     TerrainGenerator(m_seed, type).generate(*this, onProgress);
+    m_generating = false;
+    computeWorldLighting(onProgress);
 }
 
 Chunk* World::chunkAt(int cx, int cz) {
@@ -70,6 +89,8 @@ void World::setBlock(int wx, int wy, int wz, BlockId b) {
     const int lx = wx - cx * Chunk::W;
     const int lz = wz - cz * Chunk::D;
     const BlockId old = chunk->get(lx, wy, lz);
+    if (old == b) return;
+
     chunk->set(lx, wy, lz, b);
     chunk->dirty = true;
 
@@ -79,14 +100,54 @@ void World::setBlock(int wx, int wy, int wz, BlockId b) {
     if (lz == 0)             { if (Chunk* n = chunkAt(cx, cz - 1)) n->dirty = true; }
     if (lz == Chunk::D - 1)  { if (Chunk* n = chunkAt(cx, cz + 1)) n->dirty = true; }
 
-    // If placing or breaking a light source (torch), dirty all surrounding chunks in light radius
-    if (isLightSource(b) || isLightSource(old)) {
-        for (int dz = -1; dz <= 1; ++dz) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                if (Chunk* n = chunkAt(cx + dx, cz + dz)) n->dirty = true;
-            }
-        }
+    if (!m_generating) {
+        updateLightAround(wx, wy, wz);
     }
+}
+
+uint8_t World::getSunLight(int wx, int wy, int wz) const {
+    if (wy >= Chunk::H) return 15;
+    if (wy < 0) return 0;
+    if (wx < 0 || wz < 0 || wx >= widthBlocks() || wz >= depthBlocks()) return 15;
+
+    const int cx = wx / Chunk::W;
+    const int cz = wz / Chunk::D;
+    const Chunk* chunk = chunkAt(cx, cz);
+    if (!chunk) return 15;
+    return chunk->getSunLight(wx - cx * Chunk::W, wy, wz - cz * Chunk::D);
+}
+
+uint8_t World::getBlockLight(int wx, int wy, int wz) const {
+    if (wy >= Chunk::H || wy < 0) return 0;
+    if (wx < 0 || wz < 0 || wx >= widthBlocks() || wz >= depthBlocks()) return 0;
+
+    const int cx = wx / Chunk::W;
+    const int cz = wz / Chunk::D;
+    const Chunk* chunk = chunkAt(cx, cz);
+    if (!chunk) return 0;
+    return chunk->getBlockLight(wx - cx * Chunk::W, wy, wz - cz * Chunk::D);
+}
+
+void World::setSunLight(int wx, int wy, int wz, uint8_t level) {
+    if (wy < 0 || wy >= Chunk::H) return;
+    if (wx < 0 || wz < 0 || wx >= widthBlocks() || wz >= depthBlocks()) return;
+
+    const int cx = wx / Chunk::W;
+    const int cz = wz / Chunk::D;
+    Chunk* chunk = chunkAt(cx, cz);
+    if (!chunk) return;
+    chunk->setSunLight(wx - cx * Chunk::W, wy, wz - cz * Chunk::D, level);
+}
+
+void World::setBlockLight(int wx, int wy, int wz, uint8_t level) {
+    if (wy < 0 || wy >= Chunk::H) return;
+    if (wx < 0 || wz < 0 || wx >= widthBlocks() || wz >= depthBlocks()) return;
+
+    const int cx = wx / Chunk::W;
+    const int cz = wz / Chunk::D;
+    Chunk* chunk = chunkAt(cx, cz);
+    if (!chunk) return;
+    chunk->setBlockLight(wx - cx * Chunk::W, wy, wz - cz * Chunk::D, level);
 }
 
 int World::surfaceHeight(int wx, int wz) const {
@@ -97,68 +158,278 @@ int World::surfaceHeight(int wx, int wz) const {
 }
 
 float World::skyLight(int wx, int wy, int wz) const {
-    if (wy < 0) return 0.35f;
-    if (wy >= Chunk::H) return 1.0f;
+    const uint8_t sun = getSunLight(wx, wy, wz);
+    const uint8_t torch = getBlockLight(wx, wy, wz);
+    return std::max(static_cast<float>(sun) / 15.0f, static_cast<float>(torch) / 15.0f);
+}
 
-    // Check direct vertical column
-    bool directSky = true;
-    for (int checkY = wy + 1; checkY < Chunk::H; ++checkY) {
-        if (isOpaque(getBlock(wx, checkY, wz))) {
-            directSky = false;
-            break;
-        }
-    }
-    float maxLight = directSky ? 1.0f : 0.35f;
+void World::computeWorldLighting(const ProgressCallback& onProgress) {
+    std::queue<LightNode> sunQueue;
+    std::queue<LightNode> torchQueue;
 
-    // Horizontal light diffusion from nearby columns with open sky (radius 1 and 2)
-    if (!directSky) {
-        for (int r = 1; r <= 2; ++r) {
-            for (int dz = -r; dz <= r; ++dz) {
-                for (int dx = -r; dx <= r; ++dx) {
-                    if (std::abs(dx) != r && std::abs(dz) != r) continue; // Only ring of radius r
+    const int maxW = widthBlocks();
+    const int maxD = depthBlocks();
 
-                    const int nx = wx + dx;
-                    const int nz = wz + dz;
-                    bool nOpen = true;
-                    for (int ny = wy; ny < Chunk::H; ++ny) {
-                        if (isOpaque(getBlock(nx, ny, nz))) {
-                            nOpen = false;
-                            break;
-                        }
-                    }
-                    if (nOpen) {
-                        const float dist = std::sqrt(static_cast<float>(dx * dx + dz * dz));
-                        const float diff = std::max(0.35f, 1.0f - dist * 0.22f);
-                        if (diff > maxLight) {
-                            maxLight = diff;
-                        }
-                    }
+    if (onProgress) onProgress(0.96f, "Initializing vertical sunlight columns...");
+
+    // 1. Initialize Sunlight Columns directly down from sky
+    for (int wz = 0; wz < maxD; ++wz) {
+        for (int wx = 0; wx < maxW; ++wx) {
+            bool open = true;
+            for (int wy = Chunk::H - 1; wy >= 0; --wy) {
+                const BlockId b = getBlock(wx, wy, wz);
+                if (open && !isOpaque(b)) {
+                    setSunLight(wx, wy, wz, 15);
+                } else {
+                    open = false;
+                    setSunLight(wx, wy, wz, 0);
                 }
             }
-            if (maxLight >= 0.75f) break;
         }
     }
 
-    // Torch / Block point light contribution (radius 7)
-    for (int dy = -6; dy <= 6; ++dy) {
-        const int ty = wy + dy;
-        if (ty < 0 || ty >= Chunk::H) continue;
-        for (int dz = -6; dz <= 6; ++dz) {
-            const int tz = wz + dz;
-            for (int dx = -6; dx <= 6; ++dx) {
-                const int tx = wx + dx;
-                if (isLightSource(getBlock(tx, ty, tz))) {
-                    const float d = std::sqrt(static_cast<float>(dx * dx + dy * dy + dz * dz));
-                    const float tLight = std::max(0.0f, 1.0f - d * 0.14f);
-                    if (tLight > maxLight) {
-                        maxLight = tLight;
+    // 2. Queue only sunlight border nodes (nodes adjacent to non-opaque blocks with sunlight < 14)
+    for (int wz = 0; wz < maxD; ++wz) {
+        for (int wx = 0; wx < maxW; ++wx) {
+            for (int wy = 0; wy < Chunk::H; ++wy) {
+                if (getSunLight(wx, wy, wz) == 15) {
+                    bool isBorder = false;
+                    for (int i = 0; i < 6; ++i) {
+                        const int nx = wx + NEIGHBOR_OFFSETS[i][0];
+                        const int ny = wy + NEIGHBOR_OFFSETS[i][1];
+                        const int nz = wz + NEIGHBOR_OFFSETS[i][2];
+                        if (nx >= 0 && nx < maxW && nz >= 0 && nz < maxD && ny >= 0 && ny < Chunk::H) {
+                            if (!isOpaque(getBlock(nx, ny, nz)) && getSunLight(nx, ny, nz) < 14) {
+                                isBorder = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (isBorder) {
+                        sunQueue.push({wx, wy, wz});
                     }
                 }
             }
         }
     }
 
-    return maxLight;
+    if (onProgress) onProgress(0.98f, "Injecting torchlight & block light sources...");
+
+    // 3. Initialize Torch Lights
+    for (const auto& chunk : m_chunks) {
+        if (!chunk) continue;
+        const int ox = chunk->originX();
+        const int oz = chunk->originZ();
+        for (int y = 0; y < Chunk::H; ++y) {
+            for (int z = 0; z < Chunk::D; ++z) {
+                for (int x = 0; x < Chunk::W; ++x) {
+                    const BlockId b = chunk->get(x, y, z);
+                    if (isLightSource(b)) {
+                        chunk->setBlockLight(x, y, z, 14);
+                        torchQueue.push({ox + x, y, oz + z});
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. BFS Flood-Fill for Sunlight
+    while (!sunQueue.empty()) {
+        const LightNode node = sunQueue.front();
+        sunQueue.pop();
+
+        const uint8_t curLight = getSunLight(node.x, node.y, node.z);
+        if (curLight <= 1) continue;
+
+        const uint8_t nextLight = curLight - 1;
+
+        for (int i = 0; i < 6; ++i) {
+            const int nx = node.x + NEIGHBOR_OFFSETS[i][0];
+            const int ny = node.y + NEIGHBOR_OFFSETS[i][1];
+            const int nz = node.z + NEIGHBOR_OFFSETS[i][2];
+
+            if (nx < 0 || nx >= maxW || nz < 0 || nz >= maxD || ny < 0 || ny >= Chunk::H) continue;
+
+            const BlockId nb = getBlock(nx, ny, nz);
+            if (isOpaque(nb)) continue;
+
+            if (getSunLight(nx, ny, nz) < nextLight) {
+                setSunLight(nx, ny, nz, nextLight);
+                sunQueue.push({nx, ny, nz});
+            }
+        }
+    }
+
+    // 4. BFS Flood-Fill for Torchlight
+    while (!torchQueue.empty()) {
+        const LightNode node = torchQueue.front();
+        torchQueue.pop();
+
+        const uint8_t curLight = getBlockLight(node.x, node.y, node.z);
+        if (curLight <= 1) continue;
+
+        const uint8_t nextLight = curLight - 1;
+
+        for (int i = 0; i < 6; ++i) {
+            const int nx = node.x + NEIGHBOR_OFFSETS[i][0];
+            const int ny = node.y + NEIGHBOR_OFFSETS[i][1];
+            const int nz = node.z + NEIGHBOR_OFFSETS[i][2];
+
+            if (nx < 0 || nx >= maxW || nz < 0 || nz >= maxD || ny < 0 || ny >= Chunk::H) continue;
+
+            const BlockId nb = getBlock(nx, ny, nz);
+            if (isOpaque(nb)) continue;
+
+            if (getBlockLight(nx, ny, nz) < nextLight) {
+                setBlockLight(nx, ny, nz, nextLight);
+                torchQueue.push({nx, ny, nz});
+            }
+        }
+    }
+}
+
+void World::updateLightAround(int wx, int wy, int wz) {
+    const int maxW = widthBlocks();
+    const int maxD = depthBlocks();
+    const int r = 15;
+
+    const int minX = std::max(0, wx - r);
+    const int maxX = std::min(maxW - 1, wx + r);
+    const int minZ = std::max(0, wz - r);
+    const int maxZ = std::min(maxD - 1, wz + r);
+    const int minY = std::max(0, wy - r);
+    const int maxY = std::min(Chunk::H - 1, wy + r);
+
+    std::queue<LightNode> sunQueue;
+    std::queue<LightNode> torchQueue;
+
+    // Reset local lighting in bounding box
+    for (int z = minZ; z <= maxZ; ++z) {
+        for (int x = minX; x <= maxX; ++x) {
+            // Check direct sky column
+            bool openSky = true;
+            for (int y = Chunk::H - 1; y >= minY; --y) {
+                const BlockId b = getBlock(x, y, z);
+                if (openSky && !isOpaque(b)) {
+                    if (y >= minY && y <= maxY) {
+                        setSunLight(x, y, z, 15);
+                        sunQueue.push({x, y, z});
+                    }
+                } else {
+                    openSky = false;
+                    if (y >= minY && y <= maxY) {
+                        setSunLight(x, y, z, 0);
+                    }
+                }
+            }
+
+            for (int y = minY; y <= maxY; ++y) {
+                const BlockId b = getBlock(x, y, z);
+                if (isLightSource(b)) {
+                    setBlockLight(x, y, z, 14);
+                    torchQueue.push({x, y, z});
+                } else {
+                    setBlockLight(x, y, z, 0);
+                }
+            }
+        }
+    }
+
+    // Pull in boundary light from outside the bounding box
+    for (int z = minZ; z <= maxZ; ++z) {
+        for (int x = minX; x <= maxX; ++x) {
+            for (int y = minY; y <= maxY; ++y) {
+                if (isOpaque(getBlock(x, y, z))) continue;
+
+                for (int i = 0; i < 6; ++i) {
+                    const int nx = x + NEIGHBOR_OFFSETS[i][0];
+                    const int ny = y + NEIGHBOR_OFFSETS[i][1];
+                    const int nz = z + NEIGHBOR_OFFSETS[i][2];
+
+                    if (nx < minX || nx > maxX || nz < minZ || nz > maxZ || ny < minY || ny > maxY) {
+                        const uint8_t nSun = getSunLight(nx, ny, nz);
+                        if (nSun > 1 && nSun - 1 > getSunLight(x, y, z)) {
+                            setSunLight(x, y, z, nSun - 1);
+                            sunQueue.push({x, y, z});
+                        }
+                        const uint8_t nTorch = getBlockLight(nx, ny, nz);
+                        if (nTorch > 1 && nTorch - 1 > getBlockLight(x, y, z)) {
+                            setBlockLight(x, y, z, nTorch - 1);
+                            torchQueue.push({x, y, z});
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Propagate Sunlight
+    while (!sunQueue.empty()) {
+        const LightNode node = sunQueue.front();
+        sunQueue.pop();
+
+        const uint8_t curLight = getSunLight(node.x, node.y, node.z);
+        if (curLight <= 1) continue;
+
+        const uint8_t nextLight = curLight - 1;
+
+        for (int i = 0; i < 6; ++i) {
+            const int nx = node.x + NEIGHBOR_OFFSETS[i][0];
+            const int ny = node.y + NEIGHBOR_OFFSETS[i][1];
+            const int nz = node.z + NEIGHBOR_OFFSETS[i][2];
+
+            if (nx < minX || nx > maxX || nz < minZ || nz > maxZ || ny < minY || ny > maxY) continue;
+
+            const BlockId nb = getBlock(nx, ny, nz);
+            if (isOpaque(nb)) continue;
+
+            if (getSunLight(nx, ny, nz) < nextLight) {
+                setSunLight(nx, ny, nz, nextLight);
+                sunQueue.push({nx, ny, nz});
+            }
+        }
+    }
+
+    // Propagate Torchlight
+    while (!torchQueue.empty()) {
+        const LightNode node = torchQueue.front();
+        torchQueue.pop();
+
+        const uint8_t curLight = getBlockLight(node.x, node.y, node.z);
+        if (curLight <= 1) continue;
+
+        const uint8_t nextLight = curLight - 1;
+
+        for (int i = 0; i < 6; ++i) {
+            const int nx = node.x + NEIGHBOR_OFFSETS[i][0];
+            const int ny = node.y + NEIGHBOR_OFFSETS[i][1];
+            const int nz = node.z + NEIGHBOR_OFFSETS[i][2];
+
+            if (nx < minX || nx > maxX || nz < minZ || nz > maxZ || ny < minY || ny > maxY) continue;
+
+            const BlockId nb = getBlock(nx, ny, nz);
+            if (isOpaque(nb)) continue;
+
+            if (getBlockLight(nx, ny, nz) < nextLight) {
+                setBlockLight(nx, ny, nz, nextLight);
+                torchQueue.push({nx, ny, nz});
+            }
+        }
+    }
+
+    // Dirty all chunk meshes in affected bounding box
+    const int minCx = minX / Chunk::W;
+    const int maxCx = maxX / Chunk::W;
+    const int minCz = minZ / Chunk::D;
+    const int maxCz = maxZ / Chunk::D;
+
+    for (int cz = minCz; cz <= maxCz; ++cz) {
+        for (int cx = minCx; cx <= maxCx; ++cx) {
+            if (Chunk* chunk = chunkAt(cx, cz)) {
+                chunk->dirty = true;
+            }
+        }
+    }
 }
 
 size_t World::totalVoxelMemory() const {

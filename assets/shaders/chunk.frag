@@ -7,6 +7,7 @@ in vec2 vTileSize;
 in vec3 vWorldPos;
 in float vAO;
 in float vLight;
+in float vTorchLight;
 
 uniform sampler2D uAtlas;
 uniform vec3 uCamPos;
@@ -35,14 +36,27 @@ void main() {
     else if (abs(vNormal.z) > 0.5) shade = 0.85;
     else                           shade = 0.75;
 
-    // Combine dynamic sky light + vertex ambient occlusion + directional shading smoothly
-    float lightFloor = 0.08;
-    float sun = clamp(uSunlight, 0.05, 1.0);
-    float skyFactor = lightFloor + (1.0 - lightFloor) * vLight * sun;
+    // Smooth Ambient Occlusion factor
     float aoClamped = max(vAO, 0.0);
     float aoFactor = 0.35 + 0.65 * aoClamped;
-    float lightLevel = skyFactor * aoFactor * shade;
-    vec3 color = texel.rgb * lightLevel;
+
+    // Sunlight: modulated dynamically by sun angle / time of day.
+    // At night (uSunlight == 0), sunlight gives pitch black night with only 0.025 faint moonlight on sky-exposed surfaces.
+    // In deep caves (vLight == 0), skyFactor is 0.0 (absolute pitch black darkness without torches).
+    float moonlight = 0.025;
+    float skyFactor = vLight * (moonlight + (1.0 - moonlight) * uSunlight);
+
+    // Block / Torch light: constant independent of time of day
+    float torchFactor = vTorchLight * 0.95;
+
+    // Max blend between daylight/moonlight and torch light
+    float totalLight = max(skyFactor, torchFactor) * aoFactor * shade;
+    vec3 color = texel.rgb * totalLight;
+
+    // Warm golden glow boost for torch illumination
+    if (vTorchLight > 0.05) {
+        color += texel.rgb * vec3(0.20, 0.10, 0.02) * vTorchLight * aoFactor;
+    }
 
     // Red damage indicator when entity is hurt (indicated by negative vAO)
     if (vAO < 0.0) {

@@ -18,6 +18,7 @@ struct WorldMetadata {
 
 class WorldSave {
 public:
+    static std::string getSavesDirectory();
     static std::string sanitizeWorldName(const std::string& name);
     static std::string getWorldPath(const std::string& worldName);
     static std::vector<WorldMetadata> listSavedWorlds();

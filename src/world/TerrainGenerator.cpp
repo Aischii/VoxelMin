@@ -400,26 +400,7 @@ void TerrainGenerator::generate(World& world, const ProgressCallback& onProgress
         }
     }
 
-    if (onProgress) onProgress(0.55f, "Lighting subterranean cave alcoves...");
-
-    // Place torches in dark cave alcoves
-    for (int z = 4; z < depth - 4; ++z) {
-        for (int x = 4; x < width - 4; ++x) {
-            for (int y = 4; y < seaLevel + 15; ++y) {
-                if (world.getBlock(x, y, z) == BlockId::Air) {
-                    const BlockId below = world.getBlock(x, y - 1, z);
-                    if (below == BlockId::Stone || below == BlockId::Cobblestone ||
-                        below == BlockId::CoalOre || below == BlockId::IronOre) {
-                        if (hash3(x, y, z, m_seed + 999) > 0.993f) {
-                            world.setBlock(x, y, z, BlockId::Torch);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (onProgress) onProgress(0.68f, "Planting ancient forests & flora...");
+    if (onProgress) onProgress(0.60f, "Planting ancient forests & flora...");
 
     // Scatter trees on grass columns above water level
     for (int z = 3; z < depth - 3; ++z) {

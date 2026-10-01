@@ -1,6 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <mutex>
+#include <string>
 #include <vector>
 #include <cstddef>
 
@@ -54,6 +55,14 @@ public:
     void setAmbientVolume(float v);
     float ambientVolume() const { return m_ambientVolume; }
 
+    void setMusicVolume(float v);
+    float musicVolume() const { return m_musicVolume; }
+
+    bool loadMusicFile(const std::string& path);
+    bool loadMenuMusicFile(const std::string& path);
+    bool loadGameMusicFile(const std::string& path);
+    void scanAndLoadMusic();
+
     void setInGame(bool inGame) { m_inGame = inGame; }
 
     // High-priority audio mixing callback
@@ -74,16 +83,32 @@ private:
     };
 
     void precomputeSounds();
+    void synthesizeMenuMusic();
+    void synthesizeGameMusic();
 
     bool m_initialized = false;
     bool m_inGame = false;
     float m_masterVolume = 0.8f;
     float m_sfxVolume = 0.8f;
     float m_ambientVolume = 0.35f;
+    float m_musicVolume = 0.5f;
 
     std::vector<SoundSample> m_samples;
     std::vector<float> m_windLoop;
     float m_windPos = 0.0f;
+
+    // Background music stereo PCM buffers (interleaved L, R)
+    std::vector<float> m_menuMusicPcm;
+    float m_menuMusicPos = 0.0f;
+    bool m_menuMusicLoaded = false;
+
+    std::vector<float> m_gameMusicPcm;
+    float m_gameMusicPos = 0.0f;
+    bool m_gameMusicLoaded = false;
+
+    float m_menuGain = 1.0f;
+    float m_gameGain = 0.0f;
+    std::mutex m_musicMutex;
 
     static constexpr size_t MAX_VOICES = 32;
     Voice m_voices[MAX_VOICES];

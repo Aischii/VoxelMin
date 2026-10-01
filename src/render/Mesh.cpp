@@ -49,6 +49,9 @@ void Mesh::upload(const std::vector<Vertex>& vertices, const std::vector<uint32_
     glEnableVertexAttribArray(6);
     glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                           reinterpret_cast<void*>(offsetof(Vertex, light)));
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                          reinterpret_cast<void*>(offsetof(Vertex, torchLight)));
 
     glBindVertexArray(0);
     m_indexCount = static_cast<uint32_t>(indices.size());

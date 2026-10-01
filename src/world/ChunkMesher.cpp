@@ -56,9 +56,9 @@ inline uint8_t computeVertexAO(const World& world, int fx, int fy, int fz,
 
 inline float aoToFloat(uint8_t ao) {
     switch (ao) {
-        case 0: return 0.60f;
-        case 1: return 0.75f;
-        case 2: return 0.88f;
+        case 0: return 0.45f;
+        case 1: return 0.65f;
+        case 2: return 0.82f;
         default: return 1.00f;
     }
 }
@@ -71,12 +71,13 @@ struct FaceMask {
     uint8_t ao1 = 3;
     uint8_t ao2 = 3;
     uint8_t ao3 = 3;
-    uint8_t light = 15;
+    uint8_t sunLight = 15;
+    uint8_t torchLight = 0;
 
     bool operator==(const FaceMask& o) const {
         return block == o.block && tile == o.tile && isTransparent == o.isTransparent &&
                ao0 == o.ao0 && ao1 == o.ao1 && ao2 == o.ao2 && ao3 == o.ao3 &&
-               light == o.light;
+               sunLight == o.sunLight && torchLight == o.torchLight;
     }
     bool operator!=(const FaceMask& o) const { return !(*this == o); }
     bool empty() const { return block == BlockId::Air; }
@@ -92,7 +93,8 @@ void emitQuad(std::vector<Vertex>& outVertices,
               float w, float h,
               TextureTile tile,
               const float ao[4],
-              float light) {
+              float sunLight,
+              float torchLight) {
     const int tileIdx = static_cast<int>(tile);
     const int tileCol = tileIdx % config::ATLAS_TILES;
     const int tileRow = tileIdx / config::ATLAS_TILES;
@@ -102,10 +104,10 @@ void emitQuad(std::vector<Vertex>& outVertices,
     const glm::vec2 tileSize(TILE_UV, TILE_UV);
 
     const uint32_t base = static_cast<uint32_t>(outVertices.size());
-    outVertices.push_back({ p0, normal, {0.0f, 0.0f}, tileMin, tileSize, ao[0], light });
-    outVertices.push_back({ p1, normal, {w,    0.0f}, tileMin, tileSize, ao[1], light });
-    outVertices.push_back({ p2, normal, {w,    h},    tileMin, tileSize, ao[2], light });
-    outVertices.push_back({ p3, normal, {0.0f, h},    tileMin, tileSize, ao[3], light });
+    outVertices.push_back({ p0, normal, {0.0f, 0.0f}, tileMin, tileSize, ao[0], sunLight, torchLight });
+    outVertices.push_back({ p1, normal, {w,    0.0f}, tileMin, tileSize, ao[1], sunLight, torchLight });
+    outVertices.push_back({ p2, normal, {w,    h},    tileMin, tileSize, ao[2], sunLight, torchLight });
+    outVertices.push_back({ p3, normal, {0.0f, h},    tileMin, tileSize, ao[3], sunLight, torchLight });
 
     if (ao[0] + ao[2] < ao[1] + ao[3]) {
         outIndices.push_back(base + 1);
@@ -128,7 +130,8 @@ void emitTorch3D(std::vector<Vertex>& outVertices,
                  std::vector<uint32_t>& outIndices,
                  float wx, float wy, float wz,
                  BlockId torchType,
-                 float light) {
+                 float sunLight,
+                 float torchLight) {
     const TextureTile tile = TextureTile::Planks;
     const float ao[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     const float halfW = 0.0625f;
@@ -150,12 +153,12 @@ void emitTorch3D(std::vector<Vertex>& outVertices,
         const glm::vec3 t2 = topCenter + glm::vec3( halfW, 0.0f,  halfW);
         const glm::vec3 t3 = topCenter + glm::vec3(-halfW, 0.0f,  halfW);
 
-        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {-0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b1, t2, t3, b0, {0.0f, 0.0f, 1.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b3, t0, t1, b2, {0.0f, 0.0f, -1.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b2, t1, t2, b1, {0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, t3, t0, b3, {-0.89f, 0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {-0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b1, t2, t3, b0, {0.0f, 0.0f, 1.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b3, t0, t1, b2, {0.0f, 0.0f, -1.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b2, t1, t2, b1, {0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, t3, t0, b3, {-0.89f, 0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
     } else if (torchType == BlockId::TorchWallEast) {
         // Mounted on East wall (x = wx + 1). Base is at x = wx + 0.94, y = wy + 0.20.
         // Slanted toward -X: Top is at x = wx + 0.68, y = wy + 0.72.
@@ -173,12 +176,12 @@ void emitTorch3D(std::vector<Vertex>& outVertices,
         const glm::vec3 t2 = topCenter + glm::vec3( halfW, 0.0f,  halfW);
         const glm::vec3 t3 = topCenter + glm::vec3(-halfW, 0.0f,  halfW);
 
-        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b1, t2, t3, b0, {0.0f, 0.0f, 1.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b3, t0, t1, b2, {0.0f, 0.0f, -1.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b2, t3, t0, b3, {-0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, t1, t2, b1, {0.89f, 0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b1, t2, t3, b0, {0.0f, 0.0f, 1.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b3, t0, t1, b2, {0.0f, 0.0f, -1.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b2, t3, t0, b3, {-0.89f, -0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, t1, t2, b1, {0.89f, 0.44f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
     } else if (torchType == BlockId::TorchWallNorth) {
         // Mounted on North wall (z = wz). Base is at z = wz + 0.06, y = wy + 0.20.
         // Slanted toward +Z: Top is at z = wz + 0.32, y = wy + 0.72.
@@ -196,12 +199,12 @@ void emitTorch3D(std::vector<Vertex>& outVertices,
         const glm::vec3 t2 = topCenter + glm::vec3( halfW, 0.0f,  halfW);
         const glm::vec3 t3 = topCenter + glm::vec3(-halfW, 0.0f,  halfW);
 
-        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {0.0f, -0.44f, -0.89f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, t3, t2, b1, {0.0f, 0.44f, 0.89f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b3, t1, t0, b2, {0.0f, -0.44f, -0.89f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b1, t2, t1, b2, {1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b3, t0, t3, b0, {-1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {0.0f, -0.44f, -0.89f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, t3, t2, b1, {0.0f, 0.44f, 0.89f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b3, t1, t0, b2, {0.0f, -0.44f, -0.89f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b1, t2, t1, b2, {1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b3, t0, t3, b0, {-1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
     } else if (torchType == BlockId::TorchWallSouth) {
         // Mounted on South wall (z = wz + 1). Base is at z = wz + 0.94, y = wy + 0.20.
         // Slanted toward -Z: Top is at z = wz + 0.68, y = wy + 0.72.
@@ -219,12 +222,12 @@ void emitTorch3D(std::vector<Vertex>& outVertices,
         const glm::vec3 t2 = topCenter + glm::vec3( halfW, 0.0f,  halfW);
         const glm::vec3 t3 = topCenter + glm::vec3(-halfW, 0.0f,  halfW);
 
-        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {0.0f, -0.44f, 0.89f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b0, t3, t2, b1, {0.0f, -0.44f, -0.89f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b3, t1, t0, b2, {0.0f, 0.44f, 0.89f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b1, t0, t1, b2, {1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
-        emitQuad(outVertices, outIndices, b3, t2, t3, b0, {-1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+        emitQuad(outVertices, outIndices, t3, t2, t1, t0, {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, b1, b2, b3, {0.0f, -0.44f, 0.89f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b0, t3, t2, b1, {0.0f, -0.44f, -0.89f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b3, t1, t0, b2, {0.0f, 0.44f, 0.89f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b1, t0, t1, b2, {1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
+        emitQuad(outVertices, outIndices, b3, t2, t3, b0, {-1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
     } else {
         // Floor Torch (standing upright)
         const float x0 = wx + 0.4375f;
@@ -236,22 +239,22 @@ void emitTorch3D(std::vector<Vertex>& outVertices,
 
         emitQuad(outVertices, outIndices,
                  {x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0},
-                 {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+                 {0.0f, 1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
         emitQuad(outVertices, outIndices,
                  {x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1},
-                 {0.0f, 0.0f, 1.0f}, 1.0f, 1.0f, tile, ao, light);
+                 {0.0f, 0.0f, 1.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
         emitQuad(outVertices, outIndices,
                  {x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0},
-                 {0.0f, 0.0f, -1.0f}, 1.0f, 1.0f, tile, ao, light);
+                 {0.0f, 0.0f, -1.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
         emitQuad(outVertices, outIndices,
                  {x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1},
-                 {1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+                 {1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
         emitQuad(outVertices, outIndices,
                  {x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0},
-                 {-1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+                 {-1.0f, 0.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
         emitQuad(outVertices, outIndices,
                  {x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1},
-                 {0.0f, -1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, light);
+                 {0.0f, -1.0f, 0.0f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
     }
 }
 
@@ -259,7 +262,8 @@ void emitCrossModel(std::vector<Vertex>& outVertices,
                     std::vector<uint32_t>& outIndices,
                     float wx, float wy, float wz,
                     TextureTile tile,
-                    float light) {
+                    float sunLight,
+                    float torchLight) {
     const float x0 = wx;
     const float x1 = wx + 1.0f;
     const float z0 = wz;
@@ -272,12 +276,12 @@ void emitCrossModel(std::vector<Vertex>& outVertices,
     // Diagonal 1 (from (x0, z0) to (x1, z1))
     emitQuad(outVertices, outIndices,
              {x0, y0, z0}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z0},
-             {0.7071f, 0.0f, -0.7071f}, 1.0f, 1.0f, tile, ao, light);
+             {0.7071f, 0.0f, -0.7071f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
 
     // Diagonal 2 (from (x0, z1) to (x1, z0))
     emitQuad(outVertices, outIndices,
              {x0, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x0, y1, z1},
-             {0.7071f, 0.0f, 0.7071f}, 1.0f, 1.0f, tile, ao, light);
+             {0.7071f, 0.0f, 0.7071f}, 1.0f, 1.0f, tile, ao, sunLight, torchLight);
 }
 
 inline bool isSpecialModel(BlockId b) {
@@ -339,10 +343,10 @@ void buildChunkGeometry(const World& world,
                     const uint8_t ao2 = computeVertexAO(world, fx, fy, fz,  tangI,  bitangI);
                     const uint8_t ao3 = computeVertexAO(world, fx, fy, fz, -tangI,  bitangI);
 
-                    const float lightF = world.skyLight(fx, fy, fz);
-                    const uint8_t lightU = static_cast<uint8_t>(std::clamp(static_cast<int>(lightF * 15.0f + 0.5f), 0, 15));
+                    const uint8_t sunU = world.getSunLight(fx, fy, fz);
+                    const uint8_t torchU = world.getBlockLight(fx, fy, fz);
 
-                    mask[static_cast<size_t>(y) * Chunk::D + z] = { block, tile, curTrans, ao0, ao1, ao2, ao3, lightU };
+                    mask[static_cast<size_t>(y) * Chunk::D + z] = { block, tile, curTrans, ao0, ao1, ao2, ao3, sunU, torchU };
                 }
             }
 
@@ -409,12 +413,13 @@ void buildChunkGeometry(const World& world,
                         aoToFloat(current.ao2),
                         aoToFloat(current.ao3)
                     };
-                    const float quadLight = static_cast<float>(current.light) / 15.0f;
+                    const float quadSun = static_cast<float>(current.sunLight) / 15.0f;
+                    const float quadTorch = static_cast<float>(current.torchLight) / 15.0f;
 
                     if (current.isTransparent) {
-                        emitQuad(outTransVertices, outTransIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadLight);
+                        emitQuad(outTransVertices, outTransIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadSun, quadTorch);
                     } else {
-                        emitQuad(outOpaqueVertices, outOpaqueIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadLight);
+                        emitQuad(outOpaqueVertices, outOpaqueIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadSun, quadTorch);
                     }
 
                     z += w;
@@ -462,10 +467,10 @@ void buildChunkGeometry(const World& world,
                     const uint8_t ao2 = computeVertexAO(world, fx, fy, fz,  tangI,  bitangI);
                     const uint8_t ao3 = computeVertexAO(world, fx, fy, fz, -tangI,  bitangI);
 
-                    const float lightF = world.skyLight(fx, fy, fz);
-                    const uint8_t lightU = static_cast<uint8_t>(std::clamp(static_cast<int>(lightF * 15.0f + 0.5f), 0, 15));
+                    const uint8_t sunU = world.getSunLight(fx, fy, fz);
+                    const uint8_t torchU = world.getBlockLight(fx, fy, fz);
 
-                    mask[static_cast<size_t>(z) * Chunk::W + x] = { block, tile, curTrans, ao0, ao1, ao2, ao3, lightU };
+                    mask[static_cast<size_t>(z) * Chunk::W + x] = { block, tile, curTrans, ao0, ao1, ao2, ao3, sunU, torchU };
                 }
             }
 
@@ -539,12 +544,13 @@ void buildChunkGeometry(const World& world,
                         aoToFloat(current.ao2),
                         aoToFloat(current.ao3)
                     };
-                    const float quadLight = static_cast<float>(current.light) / 15.0f;
+                    const float quadSun = static_cast<float>(current.sunLight) / 15.0f;
+                    const float quadTorch = static_cast<float>(current.torchLight) / 15.0f;
 
                     if (current.isTransparent) {
-                        emitQuad(outTransVertices, outTransIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadLight);
+                        emitQuad(outTransVertices, outTransIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadSun, quadTorch);
                     } else {
-                        emitQuad(outOpaqueVertices, outOpaqueIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadLight);
+                        emitQuad(outOpaqueVertices, outOpaqueIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadSun, quadTorch);
                     }
 
                     x += w;
@@ -592,10 +598,10 @@ void buildChunkGeometry(const World& world,
                     const uint8_t ao2 = computeVertexAO(world, fx, fy, fz,  tangI,  bitangI);
                     const uint8_t ao3 = computeVertexAO(world, fx, fy, fz, -tangI,  bitangI);
 
-                    const float lightF = world.skyLight(fx, fy, fz);
-                    const uint8_t lightU = static_cast<uint8_t>(std::clamp(static_cast<int>(lightF * 15.0f + 0.5f), 0, 15));
+                    const uint8_t sunU = world.getSunLight(fx, fy, fz);
+                    const uint8_t torchU = world.getBlockLight(fx, fy, fz);
 
-                    mask[static_cast<size_t>(y) * Chunk::W + x] = { block, tile, curTrans, ao0, ao1, ao2, ao3, lightU };
+                    mask[static_cast<size_t>(y) * Chunk::W + x] = { block, tile, curTrans, ao0, ao1, ao2, ao3, sunU, torchU };
                 }
             }
 
@@ -662,12 +668,13 @@ void buildChunkGeometry(const World& world,
                         aoToFloat(current.ao2),
                         aoToFloat(current.ao3)
                     };
-                    const float quadLight = static_cast<float>(current.light) / 15.0f;
+                    const float quadSun = static_cast<float>(current.sunLight) / 15.0f;
+                    const float quadTorch = static_cast<float>(current.torchLight) / 15.0f;
 
                     if (current.isTransparent) {
-                        emitQuad(outTransVertices, outTransIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadLight);
+                        emitQuad(outTransVertices, outTransIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadSun, quadTorch);
                     } else {
-                        emitQuad(outOpaqueVertices, outOpaqueIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadLight);
+                        emitQuad(outOpaqueVertices, outOpaqueIndices, p0, p1, p2, p3, normF, fw, fh, current.tile, quadAO, quadSun, quadTorch);
                     }
 
                     x += w;
@@ -686,10 +693,14 @@ void buildChunkGeometry(const World& world,
                 const float wz = static_cast<float>(originZ + z);
 
                 if (isTorch(block)) {
-                    emitTorch3D(outTransVertices, outTransIndices, wx, wy, wz, block, 1.0f);
+                    emitTorch3D(outTransVertices, outTransIndices, wx, wy, wz, block, 1.0f, 1.0f);
                 } else if (block == BlockId::TallGrass) {
-                    const float light = world.skyLight(static_cast<int>(wx), static_cast<int>(wy), static_cast<int>(wz));
-                    emitCrossModel(outTransVertices, outTransIndices, wx, wy, wz, TextureTile::TallGrass, light);
+                    const int bxi = static_cast<int>(wx);
+                    const int byi = static_cast<int>(wy);
+                    const int bzi = static_cast<int>(wz);
+                    const float sun = static_cast<float>(world.getSunLight(bxi, byi, bzi)) / 15.0f;
+                    const float torch = static_cast<float>(world.getBlockLight(bxi, byi, bzi)) / 15.0f;
+                    emitCrossModel(outTransVertices, outTransIndices, wx, wy, wz, TextureTile::TallGrass, sun, torch);
                 }
             }
         }

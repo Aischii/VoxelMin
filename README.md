@@ -14,69 +14,54 @@ window icon, and the splash-text list.
 
 ## Status
 
-**M5 "Gameplay & Entities" complete; current release v0.M5.5**. See
+**M7 "Lighting, Visual Immersion & Inventory Evolution" active; current release v0.M7.0**. See
 [`docs/PROGRESS.md`](docs/PROGRESS.md) for the living status -- including the
-version history and the current performance metrics -- and
-[`docs/ROADMAP.md`](docs/ROADMAP.md) for what comes next (opening M6: Audio & World Streaming).
+version history and current performance metrics -- and
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the project roadmap.
 
 ## Features (current)
 
-- Legacy-console-inspired UI: main menu with a rotating world panorama, an
-  in-game pause menu, and an Options screen (keyboard/mouse navigable).
-- Adjustable **GUI Scale** (Auto / 1-4) applied to menus and the HUD, with a
-  safe bottom margin so text clears the taskbar in fullscreen.
-- GLFW window + OpenGL 3.3 Core context.
-- Procedural 5x7 pixel font (no font files).
-- Chunked voxel world: 8x8 chunks, each 16 x 80 x 16 blocks.
-- Seeded value-noise fBm terrain with five world types: `Default`, `Flat`,
-  `Mountainous`, `Cavernous`, `Island`.
-- Four randomised tree archetypes (classic oak, tall oak, conical spruce,
-  bushy/apple) and 3D noise cave carving with coal, iron, gold and diamond veins.
-- Water: sea-level basins, sandy beaches, swimming/diving physics, buoyancy,
-  translucent transparent-pass rendering, and an underwater shader with dense
-  blue fog and caustics.
-- Lighting: skylight propagation with horizontal diffusion, smooth 4-level
-  vertex ambient occlusion, and placeable torches with dynamic point-light
-  propagation plus flame/smoke particles.
-- 2D greedy meshing, frustum culling, dual-pass (opaque + alpha-cutout)
-  rendering, and incremental chunk rebuilds.
-- **Profiling**: an `F3` overlay with FPS, frame time, draw calls, triangles,
-  chunk visible/drawn/culled counts, mobs and particles. Headless capture runs
-  log the same numbers to stdout, so benchmarks are reproducible from a script.
-- **Persistence**: named worlds in `saves/`, RLE-compressed binary saves, a
-  Select World / Create New World menu with custom names, seeds and name entry,
-  and auto-save on quit.
-- **Player**: walking physics, creative flight, sprinting with dynamic FOV,
-  swimming, 24-slot storage inventory with drag-and-drop and tooltips.
-- **Mobs**: pigs and cows with an AI state machine (idle, wander, look-at-player,
-  panic), voxel collision, animated legs, and batched dynamic rendering; left
-  click deals knockback.
-- 3D standing torch models, block breaking/placing via voxel ray marching, a
-  selection outline, crosshair and hotbar UI.
+- **Atmospheric Lighting & Day/Night**: Dual-channel 4-bit Sunlight + 4-bit Blocklight nibble storage in chunks with BFS flood-fill propagation. Smooth 4-corner vertex AO with diagonal flipping. Real pitch-black darkness at night and in deep unlit caverns with celestial sun and moon orbits.
+- **Separate Menu & In-Game Music**: Dedicated procedural arpeggio title theme for the main menu and mystical ambient pad exploration music in-game, with seamless dynamic crossfading and external file scanning.
+- **Distinct Survival vs Creative Inventories**:
+  - *Survival*: 2x2 Crafting Grid + Result slot, 24-slot backpack, 8-slot hotbar, durability bars, and drag/drop stack management.
+  - *Creative*: Comprehensive Item Catalog with Category Filter Tabs (`All Items`, `Blocks`, `Tools`, `Items & Food`), infinite item generation, quick number key slot copying, and a dedicated trash slot.
+- **Minecraft-Style Block Breaking**: Real 10-stage cracking texture overlays (`destroy_stage_0.png` to `destroy_stage_9.png`) mapped cleanly over targeted voxels.
+- **Future-Proof Persistence**: Versioned binary world saves with header magic, compression metadata, chunk tables, and backward/forward save migration.
+- **Procedural Villages & Structures**: Wells, houses, towers, and lamp posts naturally generated on surface terrain.
+- **Full Sound Effects Suite**: Procedural digging, block placement, tool breaks, footsteps, damage grunts, eating, burping, and item pickups.
+- **RPG Survival Vitals**: Health, hunger, oxygen with underwater drowning, and screen-edge horror hurt vignettes.
+- **Legacy-Console UI**: Main menu panorama, pause menu, custom world creation, options screen with adjustable GUI Scale (Auto / 1-4).
+- **Profiling & Tools**: `F3` debug overlay with draw calls, FPS, frame times, particle/chunk counts, and headless capture support.
 
 ## Requirements
 
-- Windows with **MSYS2 + MinGW-w64** (GCC), CMake >= 3.20, Ninja.
-- Libraries: GLFW, GLEW, GLM, OpenGL (all from the MSYS2 `mingw64` repo).
+- **Linux**: GCC/Clang, CMake >= 3.20, Ninja/Make, `libglfw3-dev`, `libglew-dev`, `libglm-dev`, `libstb-dev`.
+- **Windows**: MSYS2 with `mingw-w64-x86_64-gcc`, `mingw-w64-x86_64-cmake`, `mingw-w64-x86_64-ninja`, `mingw-w64-x86_64-glfw`, `mingw-w64-x86_64-glm`, `mingw-w64-x86_64-glew`, `mingw-w64-x86_64-stb`.
 
 See [`docs/BUILD.md`](docs/BUILD.md) for the exact setup commands.
 
 ## Build & run
 
-```powershell
-pwsh -File scripts/build.ps1      # configure + build (Release)
-pwsh -File scripts/run.ps1        # run the game
-pwsh -File scripts/build.ps1 -Debug   # debug build
-pwsh -File scripts/clean.ps1      # remove build/
+### Linux
+```bash
+./scripts/build.sh          # configure + build (Release)
+./scripts/run.sh            # run the game
+./scripts/build.sh --debug  # debug build
+./scripts/clean.sh          # remove build/
 ```
 
-The executable is written to `build/bin/VoxelMin.exe` and is **self-contained**
-(the GCC runtime is linked statically; assets are copied beside it).
+### Windows
+```powershell
+pwsh -File scripts/build.ps1        # configure + build (Release)
+pwsh -File scripts/run.ps1          # run the game
+pwsh -File scripts/build.ps1 -Debug # debug build
+pwsh -File scripts/clean.ps1        # remove build/
+```
 
 ## Controls
 
-The game opens on the **main menu**. All menus can be navigated with the
-keyboard, the mouse, or both.
+The game opens on the **main menu**. All menus can be navigated with the keyboard, the mouse, or both.
 
 **Menus**
 
@@ -98,14 +83,15 @@ keyboard, the mouse, or both.
 | `Space` | Jump / fly up / swim up |
 | `Left Shift` | Fly down / dive |
 | `F` | Toggle fly / walk |
-| `E` | Open / close the storage inventory |
-| `1`..`8` / scroll | Select block |
-| Left click | Break block / hit mob |
-| Right click | Place block |
+| `F4` / `C` | Toggle Creative / Survival mode |
+| `F5` | Cycle perspective (1st person / 3rd person) |
+| `E` | Open / close inventory (Survival crafting or Creative catalog) |
+| `1`..`8` / scroll | Select hotbar slot |
+| Left click | Hold to mine block / attack mob / pick creative stack |
+| Right click | Place block / eat food / pick single creative item |
 | `G` | Toggle wireframe debug view |
-| `F3` | Toggle the profiling overlay |
-| `Esc` | Open the in-game menu |
-| Window close button | Quit |
+| `F3` | Toggle profiling overlay |
+| `Esc` | Pause menu |
 
 ## Project layout
 

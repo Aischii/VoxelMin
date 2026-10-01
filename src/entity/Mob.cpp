@@ -47,6 +47,7 @@ void addOrientedBox(std::vector<Vertex>& vertices,
                     TextureTile tileBottom,
                     TextureTile tileFront,
                     float light,
+                    float torchLight,
                     float ao) {
     const glm::vec3 half = size * 0.5f;
     const glm::vec2 tSize = tileSizeUV();
@@ -93,13 +94,13 @@ void addOrientedBox(std::vector<Vertex>& vertices,
         const glm::vec3 norm = glm::normalize(glm::mat3(transform) * f.normal);
 
         // Quad triangles: (v0, v1, v2) and (v0, v2, v3)
-        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v1, norm, {1.0f, 0.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light });
+        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v1, norm, {1.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
 
-        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light });
-        vertices.push_back({ v3, norm, {0.0f, 1.0f}, tMin, tSize, ao, light });
+        vertices.push_back({ v0, norm, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v2, norm, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+        vertices.push_back({ v3, norm, {0.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
     }
 }
 
@@ -571,7 +572,8 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
     const int bx = static_cast<int>(std::floor(m_position.x));
     const int by = static_cast<int>(std::floor(m_position.y + 0.5f));
     const int bz = static_cast<int>(std::floor(m_position.z));
-    const float light = world.skyLight(bx, by, bz);
+    const float light = static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f;
+    const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
     
     // Flash vibrant red on hurt
     const float ao = (m_hurtTimer > 0.0f) ? -1.0f : 1.0f;
@@ -590,7 +592,7 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
 
         // 1. Body: 0.60w x 0.50h x 0.85l (spans X: [-0.30, 0.30], Y: [0.17, 0.67], Z: [-0.425, 0.425])
         addOrientedBox(vertices, {0.0f, 0.42f, 0.0f}, {0.60f, 0.50f, 0.85f}, rootMat,
-                       skin, skin, skin, skin, light, ao);
+                       skin, skin, skin, skin, light, torchLight, ao);
 
         // 2. Head with head yaw/pitch: 0.44w x 0.44h x 0.44l
         glm::mat4 headMat = glm::translate(rootMat, glm::vec3(0.0f, 0.55f, 0.48f));
@@ -598,11 +600,11 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
         headMat = glm::rotate(headMat, glm::radians(m_headPitch), glm::vec3(1, 0, 0));
 
         addOrientedBox(vertices, {0.0f, 0.0f, 0.0f}, {0.44f, 0.44f, 0.44f}, headMat,
-                       skin, skin, skin, face, light, ao);
+                       skin, skin, skin, face, light, torchLight, ao);
 
         // 3. Snout: 0.22w x 0.16h x 0.08l
         addOrientedBox(vertices, {0.0f, -0.08f, 0.26f}, {0.22f, 0.16f, 0.08f}, headMat,
-                       snoutTile, snoutTile, snoutTile, snoutTile, light, ao);
+                       snoutTile, snoutTile, snoutTile, snoutTile, light, torchLight, ao);
 
         // 4. Legs (FL, FR, BL, BR): 0.16w x 0.32h x 0.16l
         // Legs are tucked underneath the body with clear margin from outer torso sides.
@@ -621,7 +623,7 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
             glm::mat4 legMat = glm::translate(rootMat, glm::vec3(leg.x, legH, leg.z));
             legMat = glm::rotate(legMat, leg.swing, glm::vec3(1, 0, 0));
             addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, legMat,
-                           skin, skin, skin, skin, light, ao);
+                           skin, skin, skin, skin, light, torchLight, ao);
         }
     } else if (m_type == MobType::Cow) {
         // --- COW MODEL ---
@@ -631,11 +633,11 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
 
         // 1. Body: 0.68w x 0.65h x 1.05l (spans X: [-0.34, 0.34], Y: [0.395, 1.045], Z: [-0.525, 0.525])
         addOrientedBox(vertices, {0.0f, 0.72f, 0.0f}, {0.68f, 0.65f, 1.05f}, rootMat,
-                       skin, skin, skin, skin, light, ao);
+                       skin, skin, skin, skin, light, torchLight, ao);
 
         // 2. Udder detail: 0.20w x 0.14h x 0.24l (pinkish)
         addOrientedBox(vertices, {0.0f, 0.40f, -0.22f}, {0.20f, 0.14f, 0.24f}, rootMat,
-                       TextureTile::PigSkin, TextureTile::PigSkin, TextureTile::PigSkin, TextureTile::PigSkin, light, ao);
+                       TextureTile::PigSkin, TextureTile::PigSkin, TextureTile::PigSkin, TextureTile::PigSkin, light, torchLight, ao);
 
         // 3. Head: 0.46w x 0.46h x 0.46l
         glm::mat4 headMat = glm::translate(rootMat, glm::vec3(0.0f, 0.95f, 0.62f));
@@ -643,13 +645,13 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
         headMat = glm::rotate(headMat, glm::radians(m_headPitch), glm::vec3(1, 0, 0));
 
         addOrientedBox(vertices, {0.0f, 0.0f, 0.0f}, {0.46f, 0.46f, 0.46f}, headMat,
-                       skin, skin, skin, face, light, ao);
+                       skin, skin, skin, face, light, torchLight, ao);
 
         // 4. Horns (Left & Right): 0.08w x 0.16h x 0.08l
         addOrientedBox(vertices, {-0.28f, 0.22f, 0.0f}, {0.08f, 0.16f, 0.08f}, headMat,
-                       horns, horns, horns, horns, light, ao);
+                       horns, horns, horns, horns, light, torchLight, ao);
         addOrientedBox(vertices, { 0.28f, 0.22f, 0.0f}, {0.08f, 0.16f, 0.08f}, headMat,
-                       horns, horns, horns, horns, light, ao);
+                       horns, horns, horns, horns, light, torchLight, ao);
 
         // 5. Legs (FL, FR, BL, BR): 0.18w x 0.58h x 0.18l
         // Legs are inset from torso boundary (X: ±0.20 vs ±0.34, Z: ±0.28 vs ±0.525) to prevent clipping.
@@ -668,7 +670,7 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
             glm::mat4 legMat = glm::translate(rootMat, glm::vec3(leg.x, legH, leg.z));
             legMat = glm::rotate(legMat, leg.swing, glm::vec3(1, 0, 0));
             addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, legMat,
-                           skin, skin, skin, skin, light, ao);
+                           skin, skin, skin, skin, light, torchLight, ao);
         }
     } else if (m_type == MobType::PigmanVillager) {
         // --- PIGMAN VILLAGER MODEL (Humanoid Biped) ---
@@ -682,7 +684,7 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
 
         // 1. Torso: 0.48w x 0.72h x 0.24l (Center Y = 1.08, spans [0.72, 1.44])
         addOrientedBox(vertices, {0.0f, 1.08f, 0.0f}, {0.48f, 0.72f, 0.24f}, rootMat,
-                       skin, torsoTile, skin, torsoTile, light, ao);
+                       skin, torsoTile, skin, torsoTile, light, torchLight, ao);
 
         // 2. Head with head yaw/pitch: 0.48w x 0.48h x 0.48l (Neck at Y = 1.44, Center Y = 1.68)
         glm::mat4 headMat = glm::translate(rootMat, glm::vec3(0.0f, 1.44f, 0.0f));
@@ -690,11 +692,11 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
         headMat = glm::rotate(headMat, glm::radians(m_headPitch), glm::vec3(1, 0, 0));
 
         addOrientedBox(vertices, {0.0f, 0.24f, 0.0f}, {0.48f, 0.48f, 0.48f}, headMat,
-                       skin, skin, skin, face, light, ao);
+                       skin, skin, skin, face, light, torchLight, ao);
 
         // 3. Snout: 0.24w x 0.16h x 0.08l on front of face
         addOrientedBox(vertices, {0.0f, 0.18f, 0.28f}, {0.24f, 0.16f, 0.08f}, headMat,
-                       snoutTile, snoutTile, snoutTile, snoutTile, light, ao);
+                       snoutTile, snoutTile, snoutTile, snoutTile, light, torchLight, ao);
 
         // 4. Arms (Left & Right): 0.24w x 0.72h x 0.24l (Shoulder pivot at Y = 1.44, X = ±0.36)
         const float armW = 0.24f;
@@ -713,13 +715,13 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
         glm::mat4 lArmMat = glm::translate(rootMat, glm::vec3(-0.36f, 1.44f, 0.0f));
         lArmMat = glm::rotate(lArmMat, leftArmRot, glm::vec3(1, 0, 0));
         addOrientedBox(vertices, {0.0f, -armH * 0.5f, 0.0f}, {armW, armH, armD}, lArmMat,
-                       skin, skin, skin, skin, light, ao);
+                       skin, skin, skin, skin, light, torchLight, ao);
 
         // Right Arm (X: 0.36, Y: 1.44)
         glm::mat4 rArmMat = glm::translate(rootMat, glm::vec3(0.36f, 1.44f, 0.0f));
         rArmMat = glm::rotate(rArmMat, rightArmRot, glm::vec3(1, 0, 0));
         addOrientedBox(vertices, {0.0f, -armH * 0.5f, 0.0f}, {armW, armH, armD}, rArmMat,
-                       skin, skin, skin, skin, light, ao);
+                       skin, skin, skin, skin, light, torchLight, ao);
 
         // 5. Legs (Left & Right): 0.24w x 0.72h x 0.24l (Hip pivot at Y = 0.72, X = ±0.12)
         const float legW = 0.24f;
@@ -730,13 +732,13 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
         glm::mat4 lLegMat = glm::translate(rootMat, glm::vec3(-0.12f, legH, 0.0f));
         lLegMat = glm::rotate(lLegMat, bipedSwing, glm::vec3(1, 0, 0));
         addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, lLegMat,
-                       skin, hoofTile, hoofTile, hoofTile, light, ao);
+                       skin, hoofTile, hoofTile, hoofTile, light, torchLight, ao);
 
         // Right Leg (X: 0.12, Y: 0.72)
         glm::mat4 rLegMat = glm::translate(rootMat, glm::vec3(0.12f, legH, 0.0f));
         rLegMat = glm::rotate(rLegMat, -bipedSwing, glm::vec3(1, 0, 0));
         addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, rLegMat,
-                       skin, hoofTile, hoofTile, hoofTile, light, ao);
+                       skin, hoofTile, hoofTile, hoofTile, light, torchLight, ao);
     }
 }
 

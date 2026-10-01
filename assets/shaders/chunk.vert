@@ -7,6 +7,7 @@ layout(location = 3) in vec2 aTileMin;
 layout(location = 4) in vec2 aTileSize;
 layout(location = 5) in float aAO;
 layout(location = 6) in float aLight;
+layout(location = 7) in float aTorchLight;
 
 uniform mat4 uVP;
 
@@ -17,6 +18,7 @@ out vec2 vTileSize;
 out vec3 vWorldPos;
 out float vAO;
 out float vLight;
+out float vTorchLight;
 
 void main() {
     vNormal = aNormal;
@@ -26,5 +28,6 @@ void main() {
     vWorldPos = aPos;
     vAO = aAO;
     vLight = aLight;
+    vTorchLight = aTorchLight;
     gl_Position = uVP * vec4(aPos, 1.0);
 }

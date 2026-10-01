@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstdlib>
+#include <vector>
 #include <glm/glm.hpp>
 
 // ---------------------------------------------------------------------------
@@ -545,5 +546,53 @@ inline glm::vec3 blockColor(BlockId id) {
     }
 }
 
+inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
+    static const std::vector<BlockId> allItems = {
+        // Blocks & Building
+        BlockId::Grass, BlockId::Dirt, BlockId::Stone, BlockId::Cobblestone,
+        BlockId::Wood, BlockId::Planks, BlockId::Leaves, BlockId::Sand,
+        BlockId::Bedrock, BlockId::Water, BlockId::Torch, BlockId::CraftingTable,
+        BlockId::TallGrass, BlockId::DirtPath, BlockId::CoalOre, BlockId::IronOre,
+        BlockId::GoldOre, BlockId::DiamondOre,
+        // Tools & Combat
+        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondPickaxe,
+        BlockId::WoodAxe, BlockId::StoneAxe, BlockId::IronAxe, BlockId::DiamondAxe,
+        BlockId::WoodShovel, BlockId::StoneShovel, BlockId::IronShovel, BlockId::DiamondShovel,
+        BlockId::WoodSword, BlockId::StoneSword, BlockId::IronSword, BlockId::DiamondSword,
+        // Materials & Food
+        BlockId::Stick, BlockId::Coal, BlockId::IronIngot, BlockId::Diamond,
+        BlockId::Apple, BlockId::Bread, BlockId::RawPorkchop, BlockId::CookedPorkchop,
+        BlockId::RawBeef, BlockId::CookedBeef
+    };
+
+    static const std::vector<BlockId> buildingItems = {
+        BlockId::Grass, BlockId::Dirt, BlockId::Stone, BlockId::Cobblestone,
+        BlockId::Wood, BlockId::Planks, BlockId::Leaves, BlockId::Sand,
+        BlockId::Bedrock, BlockId::Water, BlockId::Torch, BlockId::CraftingTable,
+        BlockId::TallGrass, BlockId::DirtPath, BlockId::CoalOre, BlockId::IronOre,
+        BlockId::GoldOre, BlockId::DiamondOre
+    };
+
+    static const std::vector<BlockId> toolItems = {
+        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondPickaxe,
+        BlockId::WoodAxe, BlockId::StoneAxe, BlockId::IronAxe, BlockId::DiamondAxe,
+        BlockId::WoodShovel, BlockId::StoneShovel, BlockId::IronShovel, BlockId::DiamondShovel,
+        BlockId::WoodSword, BlockId::StoneSword, BlockId::IronSword, BlockId::DiamondSword
+    };
+
+    static const std::vector<BlockId> foodMatItems = {
+        BlockId::Stick, BlockId::Coal, BlockId::IronIngot, BlockId::Diamond,
+        BlockId::Apple, BlockId::Bread, BlockId::RawPorkchop, BlockId::CookedPorkchop,
+        BlockId::RawBeef, BlockId::CookedBeef
+    };
+
+    switch (tab) {
+        case 1: return buildingItems;
+        case 2: return toolItems;
+        case 3: return foodMatItems;
+        case 0:
+        default: return allItems;
+    }
+}
 
 } // namespace vox

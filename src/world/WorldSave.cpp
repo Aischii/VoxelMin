@@ -18,6 +18,21 @@ constexpr uint32_t SAVE_VERSION_2 = 2;
 
 } // namespace
 
+std::string WorldSave::getSavesDirectory() {
+    std::error_code ec;
+    // Check if running from build/bin (i.e. ../../assets or ../../CMakeLists.txt exists)
+    if (std::filesystem::exists("../../CMakeLists.txt", ec) || std::filesystem::exists("../../assets", ec)) {
+        std::filesystem::create_directories("../../saves", ec);
+        return "../../saves";
+    }
+    if (std::filesystem::exists("../CMakeLists.txt", ec) || std::filesystem::exists("../assets", ec)) {
+        std::filesystem::create_directories("../saves", ec);
+        return "../saves";
+    }
+    std::filesystem::create_directories("saves", ec);
+    return "saves";
+}
+
 std::string WorldSave::sanitizeWorldName(const std::string& name) {
     std::string clean;
     clean.reserve(name.size());
@@ -31,9 +46,8 @@ std::string WorldSave::sanitizeWorldName(const std::string& name) {
 }
 
 std::string WorldSave::getWorldPath(const std::string& worldName) {
-    std::error_code ec;
-    std::filesystem::create_directories("saves", ec);
-    return "saves/" + sanitizeWorldName(worldName) + ".dat";
+    const std::string dir = getSavesDirectory();
+    return dir + "/" + sanitizeWorldName(worldName) + ".dat";
 }
 
 bool WorldSave::peekWorld(const std::string& path, std::string& outName, uint32_t& outSeed) {
@@ -73,33 +87,44 @@ std::vector<WorldMetadata> WorldSave::listSavedWorlds() {
     std::vector<WorldMetadata> list;
     std::error_code ec;
 
-    if (std::filesystem::exists("saves", ec)) {
-        for (const auto& entry : std::filesystem::directory_iterator("saves", ec)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".dat") {
-                std::string name;
-                uint32_t seed = 0;
-                const std::string pathStr = entry.path().string();
-                if (peekWorld(pathStr, name, seed)) {
-                    list.push_back({ name, pathStr, seed });
-                }
-            }
-        }
-    }
+    const std::string primaryDir = getSavesDirectory();
+    const std::vector<std::string> searchDirs = { primaryDir, "saves", "../../saves", "../saves", "." };
 
-    // Also check current directory for any standalone *.dat world files
-    if (std::filesystem::exists(".", ec)) {
-        for (const auto& entry : std::filesystem::directory_iterator(".", ec)) {
+    for (const auto& dir : searchDirs) {
+        if (!std::filesystem::exists(dir, ec)) continue;
+
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
             if (entry.is_regular_file() && entry.path().extension() == ".dat") {
                 const std::string pathStr = entry.path().string();
+                const std::string filename = entry.path().filename().string();
+
+                // If save is in a legacy/local build folder, auto-migrate to primary project saves dir
+                std::string targetPath = pathStr;
+                if (dir != primaryDir && primaryDir != ".") {
+                    const std::string newPath = primaryDir + "/" + filename;
+                    if (!std::filesystem::exists(newPath, ec)) {
+                        std::filesystem::copy_file(pathStr, newPath, std::filesystem::copy_options::overwrite_existing, ec);
+                        if (!ec) {
+                            log::info("Migrated save file '%s' to persistent directory '%s'", filename.c_str(), primaryDir.c_str());
+                            targetPath = newPath;
+                        }
+                    } else {
+                        targetPath = newPath;
+                    }
+                }
+
                 bool alreadyInList = false;
                 for (const auto& w : list) {
-                    if (w.path == pathStr) { alreadyInList = true; break; }
+                    if (std::filesystem::path(w.path).filename() == filename) {
+                        alreadyInList = true;
+                        break;
+                    }
                 }
                 if (!alreadyInList) {
                     std::string name;
                     uint32_t seed = 0;
-                    if (peekWorld(pathStr, name, seed)) {
-                        list.push_back({ name.empty() ? entry.path().stem().string() : name, pathStr, seed });
+                    if (peekWorld(targetPath, name, seed)) {
+                        list.push_back({ name.empty() ? entry.path().stem().string() : name, targetPath, seed });
                     }
                 }
             }
@@ -270,15 +295,23 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
     }
     world.init(chunksX, chunksZ, seed);
 
+    // Helper to sanitize block IDs from save files (forward compatibility for unknown/future blocks)
+    auto sanitizeBlock = [](uint8_t raw) -> BlockId {
+        if (raw >= static_cast<uint8_t>(BlockId::Count)) {
+            return BlockId::Stone; // Graceful fallback
+        }
+        return static_cast<BlockId>(raw);
+    };
+
     for (int i = 0; i < 8; ++i) {
         uint8_t b = 0;
         file.read(reinterpret_cast<char*>(&b), sizeof(b));
-        hotbar[i] = static_cast<BlockId>(b);
+        hotbar[i] = sanitizeBlock(b);
     }
     for (int i = 0; i < 24; ++i) {
         uint8_t b = 0;
         file.read(reinterpret_cast<char*>(&b), sizeof(b));
-        inventory[i] = static_cast<BlockId>(b);
+        inventory[i] = sanitizeBlock(b);
     }
 
     uint32_t totalChunks = 0;
@@ -301,7 +334,7 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
             uint8_t blockId = 0;
             file.read(reinterpret_cast<char*>(&count), sizeof(count));
             file.read(reinterpret_cast<char*>(&blockId), sizeof(blockId));
-            runs.push_back({ count, static_cast<BlockId>(blockId) });
+            runs.push_back({ count, sanitizeBlock(blockId) });
         }
 
         if (Chunk* chunk = world.chunkAt(cx, cz)) {
@@ -309,6 +342,8 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
             chunk->dirty = true;
         }
     }
+
+    world.computeWorldLighting();
 
     // Set player position and orientation after world chunks are allocated
     const float maxW = static_cast<float>(world.widthBlocks());
