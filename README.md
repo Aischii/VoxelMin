@@ -99,7 +99,6 @@ The game opens on the **main menu**. All menus can be navigated with the keyboar
 VoxelMin/
 ├── CMakeLists.txt          Build definition
 ├── README.md               This file
-├── AGENTS.md               Quick guide for AI agents / new contributors
 ├── assets/shaders/         GLSL sources (chunk, line, ui, text, sprite, particle, underwater)
 ├── assets/textures/        16x16 PNG block textures
 ├── saves/                  Named world saves (created at runtime)
@@ -125,4 +124,3 @@ VoxelMin/
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) -- planned milestones.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) -- how to continue the project (read this first when taking over).
 - [`docs/BUILD.md`](docs/BUILD.md) -- toolchain setup and troubleshooting.
-- [`AGENTS.md`](AGENTS.md) -- condensed instructions for automated agents.

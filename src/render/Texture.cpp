@@ -5,10 +5,31 @@
 
 #include <GL/glew.h>
 
+#if __has_include(<stb/stb_image.h>)
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
+#elif __has_include(<stb_image.h>)
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+#endif
+
+#if __has_include(<stb/stb_image_resize2.h>)
 #define STB_IMAGE_RESIZE2_IMPLEMENTATION
 #include <stb/stb_image_resize2.h>
+#define VOX_USE_STB_RESIZE2 1
+#elif __has_include(<stb_image_resize2.h>)
+#define STB_IMAGE_RESIZE2_IMPLEMENTATION
+#include <stb_image_resize2.h>
+#define VOX_USE_STB_RESIZE2 1
+#elif __has_include(<stb/stb_image_resize.h>)
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include <stb/stb_image_resize.h>
+#define VOX_USE_STB_RESIZE1 1
+#elif __has_include(<stb_image_resize.h>)
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include <stb_image_resize.h>
+#define VOX_USE_STB_RESIZE1 1
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -305,7 +326,25 @@ bool loadTilePng(std::vector<uint8_t>& pixels, int tile, const std::string& file
     const uint8_t* srcPixels = data;
     if (w != TILE || h != TILE) {
         resizedData.resize(static_cast<size_t>(TILE) * TILE * 4);
+#if defined(VOX_USE_STB_RESIZE2)
         stbir_resize_uint8_linear(data, w, h, 0, resizedData.data(), TILE, TILE, 0, STBIR_RGBA);
+#elif defined(VOX_USE_STB_RESIZE1)
+        stbir_resize_uint8(data, w, h, 0, resizedData.data(), TILE, TILE, 0, 4);
+#else
+        // Simple nearest-neighbor fallback if stb resize is not available
+        for (int ry = 0; ry < TILE; ++ry) {
+            const int sy = (ry * h) / TILE;
+            for (int rx = 0; rx < TILE; ++rx) {
+                const int sx = (rx * w) / TILE;
+                const size_t sIdx = (static_cast<size_t>(sy) * w + sx) * 4;
+                const size_t dIdx = (static_cast<size_t>(ry) * TILE + rx) * 4;
+                resizedData[dIdx + 0] = data[sIdx + 0];
+                resizedData[dIdx + 1] = data[sIdx + 1];
+                resizedData[dIdx + 2] = data[sIdx + 2];
+                resizedData[dIdx + 3] = data[sIdx + 3];
+            }
+        }
+#endif
         srcPixels = resizedData.data();
     }
 

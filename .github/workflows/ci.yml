@@ -1,10 +1,12 @@
-name: CI
+name: CI & Release
 
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-linux:
@@ -21,19 +23,27 @@ jobs:
             g++ \
             cmake \
             ninja-build \
+            pkg-config \
             libglfw3-dev \
             libglew-dev \
             libglm-dev \
             libstb-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libasound2-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev
 
       - name: Configure CMake
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: |
-          cmake --build build --config Release
+          cmake --build build --config Release --parallel
 
       - name: Verify build output
         run: |
@@ -41,11 +51,18 @@ jobs:
           test -d build/bin/assets
           echo "Linux binary and assets successfully verified."
 
+      - name: Package Linux release
+        run: |
+          mkdir -p package/VoxelMin-Linux
+          cp -r build/bin/* package/VoxelMin-Linux/
+          cp README.md package/VoxelMin-Linux/ 2>/dev/null || true
+          tar -czf VoxelMin-Linux-x86_64.tar.gz -C package VoxelMin-Linux
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: VoxelMin-Linux
-          path: build/bin/
+          path: VoxelMin-Linux-x86_64.tar.gz
           if-no-files-found: error
 
   build-windows:
@@ -68,12 +85,13 @@ jobs:
             mingw-w64-x86_64-glew
             mingw-w64-x86_64-glm
             mingw-w64-x86_64-stb
+            zip
 
       - name: Configure and build
         shell: msys2 {0}
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel
 
       - name: Verify build output
         shell: msys2 {0}
@@ -82,9 +100,49 @@ jobs:
           test -d build/bin/assets
           echo "Windows binary and assets successfully verified."
 
+      - name: Package Windows release
+        shell: msys2 {0}
+        run: |
+          mkdir -p package/VoxelMin-Windows
+          cp -r build/bin/* package/VoxelMin-Windows/
+          cp README.md package/VoxelMin-Windows/ 2>/dev/null || true
+          cd package && zip -r ../VoxelMin-Windows-x64.zip VoxelMin-Windows
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: VoxelMin-Windows
-          path: build/bin/
+          path: VoxelMin-Windows-x64.zip
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: VoxelMin-Linux
+
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: VoxelMin-Windows
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            VoxelMin-Linux-x86_64.tar.gz
+            VoxelMin-Windows-x64.zip
+          name: VoxelMin ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
