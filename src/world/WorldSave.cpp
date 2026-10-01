@@ -263,10 +263,12 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
     file.read(reinterpret_cast<char*>(&flying), sizeof(flying));
     file.read(reinterpret_cast<char*>(&selSlot), sizeof(selSlot));
 
-    player.setPosition(pos);
-    player.setRotation(yaw, pitch);
-    player.setFlying(flying != 0);
-    selectedSlot = static_cast<int>(selSlot);
+    // Chunk Voxel Data
+    if (chunksX <= 0 || chunksZ <= 0) {
+        chunksX = config::WORLD_CHUNKS_X;
+        chunksZ = config::WORLD_CHUNKS_Z;
+    }
+    world.init(chunksX, chunksZ, seed);
 
     for (int i = 0; i < 8; ++i) {
         uint8_t b = 0;
@@ -279,8 +281,6 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
         inventory[i] = static_cast<BlockId>(b);
     }
 
-    // Chunk Voxel Data
-    world.initEmptyChunks();
     uint32_t totalChunks = 0;
     file.read(reinterpret_cast<char*>(&totalChunks), sizeof(totalChunks));
 
@@ -310,7 +310,21 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
         }
     }
 
-    log::info("World '%s' (seed %u) loaded successfully from %s", outWorldName.c_str(), outSeed, path.c_str());
+    // Set player position and orientation after world chunks are allocated
+    const float maxW = static_cast<float>(world.widthBlocks());
+    const float maxD = static_cast<float>(world.depthBlocks());
+    const float maxH = static_cast<float>(world.heightBlocks());
+    if (pos.x <= 0.0f || pos.x >= maxW || pos.z <= 0.0f || pos.z >= maxD || pos.y <= 0.0f || pos.y >= maxH) {
+        player.spawnAt(world, maxW * 0.5f, maxD * 0.5f);
+    } else {
+        player.setPosition(pos);
+    }
+    player.setRotation(yaw, pitch);
+    player.setFlying(flying != 0);
+    selectedSlot = std::clamp(static_cast<int>(selSlot), 0, 7);
+
+    log::info("World '%s' (seed %u, %dx%d chunks) loaded successfully from %s",
+              outWorldName.c_str(), outSeed, chunksX, chunksZ, path.c_str());
     return true;
 }
 

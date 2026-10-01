@@ -506,7 +506,7 @@ void VillageGenerator::buildVillage(World& world, int centerX, int centerZ, int 
     }
 }
 
-void VillageGenerator::generateVillages(World& world, uint32_t seed, std::vector<Village>& outVillages) {
+void VillageGenerator::locateVillages(const World& world, uint32_t seed, std::vector<Village>& outVillages) {
     outVillages.clear();
 
     const int worldW = world.widthBlocks();
@@ -520,7 +520,6 @@ void VillageGenerator::generateVillages(World& world, uint32_t seed, std::vector
         if (sy < 26) sy = 28;
 
         const int templateType = static_cast<int>(seed % 4);
-        buildVillage(world, centerX, centerZ, templateType, seed);
 
         Village v;
         v.center = glm::vec3(static_cast<float>(centerX) + 0.5f,
@@ -584,7 +583,6 @@ void VillageGenerator::generateVillages(World& world, uint32_t seed, std::vector
         }
 
         const int templateType = (i + static_cast<int>(seed % 4)) % 4;
-        buildVillage(world, bestX, bestZ, templateType, seed + static_cast<uint32_t>(i) * 997);
 
         Village v;
         v.center = glm::vec3(static_cast<float>(bestX) + 0.5f,
@@ -594,6 +592,18 @@ void VillageGenerator::generateVillages(World& world, uint32_t seed, std::vector
         v.templateType = templateType;
         v.name = r.name;
         outVillages.push_back(v);
+    }
+}
+
+void VillageGenerator::generateVillages(World& world, uint32_t seed, std::vector<Village>& outVillages) {
+    locateVillages(world, seed, outVillages);
+
+    for (size_t i = 0; i < outVillages.size(); ++i) {
+        const auto& v = outVillages[i];
+        const int cx = static_cast<int>(std::floor(v.center.x));
+        const int cz = static_cast<int>(std::floor(v.center.z));
+        const uint32_t vSeed = (outVillages.size() == 1) ? seed : (seed + static_cast<uint32_t>(i) * 997);
+        buildVillage(world, cx, cz, v.templateType, vSeed);
     }
 }
 

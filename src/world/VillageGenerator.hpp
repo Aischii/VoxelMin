@@ -12,6 +12,7 @@ struct Village;
 class VillageGenerator {
 public:
     static void generateVillages(World& world, uint32_t seed, std::vector<Village>& outVillages);
+    static void locateVillages(const World& world, uint32_t seed, std::vector<Village>& outVillages);
 
 private:
     static void buildVillage(World& world, int centerX, int centerZ, int templateType, uint32_t vSeed);

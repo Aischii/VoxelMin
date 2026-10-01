@@ -2,6 +2,7 @@
 #include "core/Log.hpp"
 #include "world/Chunk.hpp"
 #include "world/ChunkMesher.hpp"
+#include "world/VillageGenerator.hpp"
 #include "world/WorldSave.hpp"
 
 #include <GL/glew.h>
@@ -267,13 +268,6 @@ void Application::buildMenus() {
     m_mainMenu.addButton("Play Game", [this] { openSelectWorld(); });
     m_mainMenu.addButton("Options", [this] { openOptions(GameState::MainMenu); });
     m_mainMenu.addButton("Quit Game", [this] {
-        const std::string savePath = m_activeWorldPath.empty() ? WorldSave::getWorldPath(m_activeWorldName) : m_activeWorldPath;
-        BlockId hb[8];
-        for (int i = 0; i < 8; ++i) hb[i] = m_hotbar[i].id;
-        BlockId inv[24];
-        for (int i = 0; i < 24; ++i) inv[i] = m_inventory[i].id;
-        WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
-                            m_world, m_player, m_selectedSlot, hb, inv);
         glfwSetWindowShouldClose(m_window, GLFW_TRUE);
     });
     m_mainMenu.resetSelection();
@@ -728,6 +722,7 @@ void Application::loadWorld(const std::string& path) {
         for (int i = 0; i < 8; ++i) m_hotbar[i] = ItemSlot(hb[i], hb[i] == BlockId::Air ? 0 : 64);
         for (int i = 0; i < 24; ++i) m_inventory[i] = ItemSlot(inv[i], inv[i] == BlockId::Air ? 0 : 64);
         m_world.setSeed(m_activeWorldSeed);
+        VillageGenerator::locateVillages(m_world, m_activeWorldSeed, m_world.villages());
 
         onProgress(0.40f, "Populating fauna & entities...");
         m_entityManager.spawnDefaults(m_world, m_activeWorldSeed);
@@ -1739,6 +1734,13 @@ void Application::applyCaptureEnvironment() {
         startNewWorld(m_activeWorldName, m_activeWorldSeed);
         m_capturePauseAt = 10;
         m_captureOptionsAt = 20;
+    } else if (state == "load") {
+        const auto savedWorlds = WorldSave::listSavedWorlds();
+        if (!savedWorlds.empty()) {
+            loadWorld(savedWorlds[0].path);
+        } else {
+            loadWorld(WorldSave::getWorldPath(m_activeWorldName));
+        }
     }
 
     if (const char* camEnv = std::getenv("VOXELMIN_CAPTURE_CAM")) {
