@@ -50,8 +50,13 @@ enum class BlockId : uint8_t {
     IronAxe,
     WoodShovel,
     StoneShovel,
+    IronShovel,
+    DiamondShovel,
     WoodSword,
     StoneSword,
+    IronSword,
+    DiamondSword,
+    DiamondAxe,
     CraftingTable,
     Count
 };
@@ -105,13 +110,28 @@ enum class TextureTile : uint8_t {
     WoodAxe,
     StoneAxe,
     IronAxe,
+    DiamondAxe,
     WoodShovel,
     StoneShovel,
+    IronShovel,
+    DiamondShovel,
     WoodSword,
     StoneSword,
+    IronSword,
+    DiamondSword,
     CraftingTableTop,
     CraftingTableSide,
     CraftingTableFront,
+    Destroy0,
+    Destroy1,
+    Destroy2,
+    Destroy3,
+    Destroy4,
+    Destroy5,
+    Destroy6,
+    Destroy7,
+    Destroy8,
+    Destroy9,
     Count
 };
 
@@ -163,8 +183,13 @@ inline const BlockDef& blockDef(BlockId id) {
         {"Iron Axe",         TextureTile::IronAxe,      TextureTile::IronAxe,      TextureTile::IronAxe,      false},
         {"Wooden Shovel",    TextureTile::WoodShovel,   TextureTile::WoodShovel,   TextureTile::WoodShovel,   false},
         {"Stone Shovel",     TextureTile::StoneShovel,  TextureTile::StoneShovel,  TextureTile::StoneShovel,  false},
+        {"Iron Shovel",      TextureTile::IronShovel,   TextureTile::IronShovel,   TextureTile::IronShovel,   false},
+        {"Diamond Shovel",   TextureTile::DiamondShovel, TextureTile::DiamondShovel, TextureTile::DiamondShovel, false},
         {"Wooden Sword",     TextureTile::WoodSword,    TextureTile::WoodSword,    TextureTile::WoodSword,    false},
         {"Stone Sword",      TextureTile::StoneSword,   TextureTile::StoneSword,   TextureTile::StoneSword,   false},
+        {"Iron Sword",       TextureTile::IronSword,    TextureTile::IronSword,    TextureTile::IronSword,    false},
+        {"Diamond Sword",    TextureTile::DiamondSword, TextureTile::DiamondSword, TextureTile::DiamondSword, false},
+        {"Diamond Axe",      TextureTile::DiamondAxe,   TextureTile::DiamondAxe,   TextureTile::DiamondAxe,   false},
         {"Crafting Table",   TextureTile::CraftingTableTop, TextureTile::CraftingTableSide, TextureTile::Planks, true},
     };
     return defs[static_cast<int>(id)];
@@ -178,22 +203,16 @@ struct BlockBounds {
 inline BlockBounds blockBounds(BlockId id) {
     switch (id) {
         case BlockId::Torch:
-            // Standing floor torch stick & head (centered 2x2 pixels, 10 pixels tall = 0.625)
             return { {0.375f, 0.0f, 0.375f}, {0.625f, 0.65f, 0.625f} };
         case BlockId::TorchWallEast:
-            // Attached to East wall (+X face of block at x+1, slanting toward -X)
             return { {0.45f, 0.15f, 0.35f}, {1.0f, 0.85f, 0.65f} };
         case BlockId::TorchWallWest:
-            // Attached to West wall (+X face of block at x-1, slanting toward +X)
             return { {0.0f, 0.15f, 0.35f}, {0.55f, 0.85f, 0.65f} };
         case BlockId::TorchWallSouth:
-            // Attached to South wall (+Z face of block at z+1, slanting toward -Z)
             return { {0.35f, 0.15f, 0.45f}, {0.65f, 0.85f, 1.0f} };
         case BlockId::TorchWallNorth:
-            // Attached to North wall (+Z face of block at z-1, slanting toward +Z)
             return { {0.35f, 0.15f, 0.0f}, {0.65f, 0.85f, 0.55f} };
         case BlockId::TallGrass:
-            // Foliage bounding box
             return { {0.15f, 0.0f, 0.15f}, {0.85f, 0.80f, 0.85f} };
         default:
             return { {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f} };
@@ -222,15 +241,18 @@ inline bool isPickaxe(BlockId id) {
 }
 
 inline bool isAxe(BlockId id) {
-    return id == BlockId::WoodAxe || id == BlockId::StoneAxe || id == BlockId::IronAxe;
+    return id == BlockId::WoodAxe || id == BlockId::StoneAxe ||
+           id == BlockId::IronAxe || id == BlockId::DiamondAxe;
 }
 
 inline bool isShovel(BlockId id) {
-    return id == BlockId::WoodShovel || id == BlockId::StoneShovel;
+    return id == BlockId::WoodShovel || id == BlockId::StoneShovel ||
+           id == BlockId::IronShovel || id == BlockId::DiamondShovel;
 }
 
 inline bool isSword(BlockId id) {
-    return id == BlockId::WoodSword || id == BlockId::StoneSword;
+    return id == BlockId::WoodSword || id == BlockId::StoneSword ||
+           id == BlockId::IronSword || id == BlockId::DiamondSword;
 }
 
 inline bool isTool(BlockId id) {
@@ -260,9 +282,14 @@ inline int maxToolDurability(BlockId id) {
             return 132;
         case BlockId::IronPickaxe:
         case BlockId::IronAxe:
+        case BlockId::IronShovel:
+        case BlockId::IronSword:
             return 250;
         case BlockId::DiamondPickaxe:
-            return 1000;
+        case BlockId::DiamondAxe:
+        case BlockId::DiamondShovel:
+        case BlockId::DiamondSword:
+            return 1561;
         default:
             return 0;
     }
@@ -282,27 +309,115 @@ inline float toolMiningMultiplier(BlockId tool, BlockId block) {
         if (block == BlockId::Wood || block == BlockId::WoodX ||
             block == BlockId::WoodZ || block == BlockId::Planks ||
             block == BlockId::CraftingTable) {
-            if (tool == BlockId::IronAxe)  return 6.0f;
-            if (tool == BlockId::StoneAxe) return 4.0f;
-            return 2.5f;
+            if (tool == BlockId::DiamondAxe) return 8.0f;
+            if (tool == BlockId::IronAxe)    return 6.0f;
+            if (tool == BlockId::StoneAxe)   return 4.0f;
+            return 2.0f;
         }
     } else if (isShovel(tool)) {
         if (block == BlockId::Dirt || block == BlockId::Grass ||
             block == BlockId::Sand || block == BlockId::DirtPath) {
-            if (tool == BlockId::StoneShovel) return 4.0f;
-            return 2.5f;
+            if (tool == BlockId::DiamondShovel) return 8.0f;
+            if (tool == BlockId::IronShovel)    return 6.0f;
+            if (tool == BlockId::StoneShovel)   return 4.0f;
+            return 2.0f;
+        }
+    } else if (isSword(tool)) {
+        if (block == BlockId::Leaves || block == BlockId::TallGrass) {
+            return 15.0f;
         }
     }
     return 1.0f;
 }
 
+inline float blockHardness(BlockId id) {
+    switch (id) {
+        case BlockId::TallGrass:
+        case BlockId::Torch:
+        case BlockId::TorchWallEast:
+        case BlockId::TorchWallWest:
+        case BlockId::TorchWallSouth:
+        case BlockId::TorchWallNorth:
+            return 0.0f;
+        case BlockId::Leaves:
+            return 0.35f;
+        case BlockId::Dirt:
+        case BlockId::Grass:
+        case BlockId::Sand:
+        case BlockId::DirtPath:
+            return 0.65f;
+        case BlockId::Planks:
+            return 1.25f;
+        case BlockId::Stone:
+            return 1.50f;
+        case BlockId::Cobblestone:
+        case BlockId::Wood:
+        case BlockId::WoodX:
+        case BlockId::WoodZ:
+        case BlockId::CraftingTable:
+            return 2.00f;
+        case BlockId::CoalOre:
+            return 3.00f;
+        case BlockId::IronOre:
+        case BlockId::GoldOre:
+            return 3.00f;
+        case BlockId::DiamondOre:
+            return 4.00f;
+        case BlockId::Bedrock:
+            return -1.0f;
+        default:
+            return 1.0f;
+    }
+}
+
+inline bool canHarvestBlock(BlockId tool, BlockId block) {
+    if (block == BlockId::DiamondOre || block == BlockId::GoldOre) {
+        return tool == BlockId::IronPickaxe || tool == BlockId::DiamondPickaxe;
+    }
+    if (block == BlockId::IronOre) {
+        return tool == BlockId::StonePickaxe || tool == BlockId::IronPickaxe || tool == BlockId::DiamondPickaxe;
+    }
+    if (block == BlockId::Stone || block == BlockId::Cobblestone || block == BlockId::CoalOre) {
+        return isPickaxe(tool);
+    }
+    return true;
+}
+
+inline float getBreakTime(BlockId tool, BlockId block) {
+    const float base = blockHardness(block);
+    if (base <= 0.0f) return 0.0f;
+
+    float speed = toolMiningMultiplier(tool, block);
+    // Mining stone/ores without a pickaxe is severely penalized
+    if ((block == BlockId::Stone || block == BlockId::Cobblestone ||
+         block == BlockId::CoalOre || block == BlockId::IronOre ||
+         block == BlockId::GoldOre || block == BlockId::DiamondOre) && !isPickaxe(tool)) {
+        speed = 0.30f;
+    }
+
+    return std::max(0.04f, base / speed);
+}
+
 inline int attackDamage(BlockId tool) {
-    if (tool == BlockId::StoneSword) return 6;
-    if (tool == BlockId::WoodSword)  return 5;
-    if (isAxe(tool))                 return 4;
-    if (isPickaxe(tool))             return 3;
-    if (isShovel(tool))              return 2;
-    return 2; // Bare hand
+    switch (tool) {
+        case BlockId::DiamondSword:  return 8;
+        case BlockId::IronSword:     return 7;
+        case BlockId::StoneSword:    return 6;
+        case BlockId::WoodSword:     return 5;
+        case BlockId::DiamondAxe:    return 7;
+        case BlockId::IronAxe:       return 6;
+        case BlockId::StoneAxe:      return 5;
+        case BlockId::WoodAxe:       return 4;
+        case BlockId::DiamondPickaxe:
+        case BlockId::DiamondShovel: return 5;
+        case BlockId::IronPickaxe:
+        case BlockId::IronShovel:    return 4;
+        case BlockId::StonePickaxe:
+        case BlockId::StoneShovel:   return 3;
+        case BlockId::WoodPickaxe:
+        case BlockId::WoodShovel:    return 2;
+        default:                     return 1; // Bare fist
+    }
 }
 
 inline BlockId getDropForBlock(BlockId block) {
@@ -371,8 +486,13 @@ inline glm::vec3 blockColor(BlockId id) {
         case BlockId::StoneShovel:
         case BlockId::StoneSword:  return {0.55f, 0.55f, 0.55f};
         case BlockId::IronPickaxe:
-        case BlockId::IronAxe:     return {0.80f, 0.80f, 0.80f};
-        case BlockId::DiamondPickaxe: return {0.30f, 0.85f, 0.95f};
+        case BlockId::IronAxe:
+        case BlockId::IronShovel:
+        case BlockId::IronSword:   return {0.80f, 0.80f, 0.80f};
+        case BlockId::DiamondPickaxe:
+        case BlockId::DiamondAxe:
+        case BlockId::DiamondShovel:
+        case BlockId::DiamondSword: return {0.30f, 0.85f, 0.95f};
         case BlockId::CraftingTable: return {0.65f, 0.50f, 0.30f};
         default:                   return {1.00f, 0.00f, 1.00f};
     }

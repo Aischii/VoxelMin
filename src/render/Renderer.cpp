@@ -626,6 +626,91 @@ void Renderer::drawSelection(const Camera& camera, const glm::ivec3& block, Bloc
     ++m_stats.drawCalls;
 }
 
+void Renderer::drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage) {
+    if (stage < 0 || stage > 9) return;
+
+    const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
+    const glm::mat4 viewProjection = camera.projectionMatrix(aspect) * camera.viewMatrix();
+
+    const BlockBounds bounds = blockBounds(blockId);
+    const glm::vec3 bMin = glm::vec3(block) + bounds.minOffset;
+    const glm::vec3 bMax = glm::vec3(block) + bounds.maxOffset;
+
+    const float eps = 0.003f;
+    const float x0 = bMin.x - eps, x1 = bMax.x + eps;
+    const float y0 = bMin.y - eps, y1 = bMax.y + eps;
+    const float z0 = bMin.z - eps, z1 = bMax.z + eps;
+
+    const TextureTile tile = static_cast<TextureTile>(static_cast<int>(TextureTile::Destroy0) + stage);
+    const int tileIdx = static_cast<int>(tile);
+    const int tx = tileIdx % config::ATLAS_TILES;
+    const int ty = tileIdx / config::ATLAS_TILES;
+    const float u0 = static_cast<float>(tx) / static_cast<float>(config::ATLAS_TILES);
+    const float v0 = static_cast<float>(ty) / static_cast<float>(config::ATLAS_TILES);
+    const float u1 = u0 + 1.0f / static_cast<float>(config::ATLAS_TILES);
+    const float v1 = v0 + 1.0f / static_cast<float>(config::ATLAS_TILES);
+
+    const glm::vec2 tileMin(u0, v0);
+    const glm::vec2 tileSize(u1 - u0, v1 - v0);
+
+    Vertex v[36];
+    int idx = 0;
+
+    auto addQuad = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3,
+                       const glm::vec3& n) {
+        v[idx++] = Vertex{p0, n, {u0, v0}, tileMin, tileSize, 1.0f, 1.0f};
+        v[idx++] = Vertex{p1, n, {u1, v0}, tileMin, tileSize, 1.0f, 1.0f};
+        v[idx++] = Vertex{p2, n, {u1, v1}, tileMin, tileSize, 1.0f, 1.0f};
+        v[idx++] = Vertex{p0, n, {u0, v0}, tileMin, tileSize, 1.0f, 1.0f};
+        v[idx++] = Vertex{p2, n, {u1, v1}, tileMin, tileSize, 1.0f, 1.0f};
+        v[idx++] = Vertex{p3, n, {u0, v1}, tileMin, tileSize, 1.0f, 1.0f};
+    };
+
+    // +Y (Top)
+    addQuad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, {0.0f, 1.0f, 0.0f});
+    // -Y (Bottom)
+    addQuad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, {0.0f, -1.0f, 0.0f});
+    // +Z (South)
+    addQuad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, {0.0f, 0.0f, 1.0f});
+    // -Z (North)
+    addQuad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, {0.0f, 0.0f, -1.0f});
+    // +X (East)
+    addQuad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {1.0f, 0.0f, 0.0f});
+    // -X (West)
+    addQuad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, {-1.0f, 0.0f, 0.0f});
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    m_chunkShader.use();
+    m_chunkShader.setMat4("uVP", viewProjection);
+    m_chunkShader.setVec3("uCamPos", camera.position());
+    m_chunkShader.setVec3("uFogColor", glm::vec3(0.0f));
+    m_chunkShader.setFloat("uFogStart", 999.0f);
+    m_chunkShader.setFloat("uFogEnd", 1000.0f);
+    m_chunkShader.setFloat("uSunlight", 1.0f);
+    m_chunkShader.setInt("uAtlas", 0);
+    m_atlas.bind(0);
+
+    glBindVertexArray(m_entityVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_entityVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(v), v, GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+
+    ++m_stats.drawCalls;
+    m_stats.triangles += 12;
+}
+
 void Renderer::beginUI() {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);

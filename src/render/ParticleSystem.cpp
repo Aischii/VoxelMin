@@ -31,7 +31,7 @@ bool ParticleSystem::init() {
     glGenBuffers(1, &m_vbo);
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(ParticleVertex) * 6 * 256, nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(ParticleVertex) * 6 * 1024, nullptr, GL_DYNAMIC_DRAW);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(ParticleVertex),
@@ -56,7 +56,7 @@ void ParticleSystem::clear() {
 }
 
 void ParticleSystem::spawnFlame(const glm::vec3& pos) {
-    if (m_particles.size() >= 256) return;
+    if (m_particles.size() >= 1024) return;
     Particle p;
     p.pos = pos + glm::vec3(randF(-0.04f, 0.04f), randF(0.0f, 0.05f), randF(-0.04f, 0.04f));
     p.vel = glm::vec3(randF(-0.05f, 0.05f), randF(0.40f, 0.75f), randF(-0.05f, 0.05f));
@@ -64,11 +64,12 @@ void ParticleSystem::spawnFlame(const glm::vec3& pos) {
     p.size = randF(0.14f, 0.22f);
     p.maxLife = randF(0.35f, 0.65f);
     p.life = p.maxLife;
+    p.gravity = 0.0f;
     m_particles.push_back(p);
 }
 
 void ParticleSystem::spawnSmoke(const glm::vec3& pos) {
-    if (m_particles.size() >= 256) return;
+    if (m_particles.size() >= 1024) return;
     Particle p;
     p.pos = pos + glm::vec3(randF(-0.03f, 0.03f), randF(0.04f, 0.08f), randF(-0.03f, 0.03f));
     p.vel = glm::vec3(randF(-0.06f, 0.06f), randF(0.45f, 0.80f), randF(-0.06f, 0.06f));
@@ -77,7 +78,48 @@ void ParticleSystem::spawnSmoke(const glm::vec3& pos) {
     p.size = randF(0.12f, 0.18f);
     p.maxLife = randF(0.60f, 1.1f);
     p.life = p.maxLife;
+    p.gravity = 0.0f;
     m_particles.push_back(p);
+}
+
+void ParticleSystem::spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, uint8_t blockId, int count) {
+    if (m_particles.size() >= 1024) return;
+    const glm::vec3 baseCol = blockColor(static_cast<BlockId>(blockId));
+    const glm::vec3 n(normal);
+
+    for (int i = 0; i < count; ++i) {
+        Particle p;
+        p.pos = blockPos + glm::vec3(0.5f) + n * 0.52f +
+                glm::vec3(randF(-0.35f, 0.35f), randF(-0.35f, 0.35f), randF(-0.35f, 0.35f));
+        p.vel = n * randF(1.2f, 2.5f) +
+                glm::vec3(randF(-1.5f, 1.5f), randF(0.8f, 2.2f), randF(-1.5f, 1.5f));
+        const float cVar = randF(0.85f, 1.15f);
+        p.color = glm::vec4(baseCol.r * cVar, baseCol.g * cVar, baseCol.b * cVar, 1.0f);
+        p.size = randF(0.06f, 0.12f);
+        p.maxLife = randF(0.30f, 0.55f);
+        p.life = p.maxLife;
+        p.gravity = 14.0f;
+        m_particles.push_back(p);
+    }
+}
+
+void ParticleSystem::spawnBlockBreakParticles(const glm::vec3& blockPos, uint8_t blockId, int count) {
+    if (m_particles.size() >= 1024) return;
+    const glm::vec3 baseCol = blockColor(static_cast<BlockId>(blockId));
+    const glm::vec3 center = blockPos + glm::vec3(0.5f);
+
+    for (int i = 0; i < count; ++i) {
+        Particle p;
+        p.pos = center + glm::vec3(randF(-0.40f, 0.40f), randF(-0.40f, 0.40f), randF(-0.40f, 0.40f));
+        p.vel = glm::vec3(randF(-2.5f, 2.5f), randF(1.5f, 4.2f), randF(-2.5f, 2.5f));
+        const float cVar = randF(0.80f, 1.20f);
+        p.color = glm::vec4(baseCol.r * cVar, baseCol.g * cVar, baseCol.b * cVar, 1.0f);
+        p.size = randF(0.08f, 0.16f);
+        p.maxLife = randF(0.45f, 0.85f);
+        p.life = p.maxLife;
+        p.gravity = 14.0f;
+        m_particles.push_back(p);
+    }
 }
 
 void ParticleSystem::update(float dt, const World& world, const glm::vec3& playerPos) {
@@ -139,9 +181,10 @@ void ParticleSystem::update(float dt, const World& world, const glm::vec3& playe
         if (it->life <= 0.0f) {
             it = m_particles.erase(it);
         } else {
+            it->vel.y -= it->gravity * dt;
             it->pos += it->vel * dt;
             const float progress = it->life / it->maxLife;
-            it->color.a = progress * 0.9f;
+            it->color.a = progress * 0.95f;
             ++it;
         }
     }

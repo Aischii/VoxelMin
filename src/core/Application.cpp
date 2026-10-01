@@ -175,7 +175,7 @@ void Application::run() {
                     return false;
                 });
                 m_renderer.updateParticles(dt, m_world, m_player.position());
-                updateInteraction();
+                updateInteraction(dt);
             }
         } else if (m_state == GameState::Inventory) {
             handleInventoryInput();
@@ -763,6 +763,8 @@ void Application::startGame() {
 
 void Application::pauseGame() {
     m_state = GameState::Paused;
+    m_isMining = false;
+    m_miningProgress = 0.0f;
     m_pauseMenu.subtitle("World: " + m_activeWorldName);
     m_pauseMenu.resetSelection();
     setCursorCaptured(false);
@@ -775,6 +777,8 @@ void Application::resumeGame() {
 
 void Application::quitToTitle() {
     m_state = GameState::MainMenu;
+    m_isMining = false;
+    m_miningProgress = 0.0f;
     m_mainMenu.splash(getRandomSplash());
     m_mainMenu.resetSelection();
     setCursorCaptured(false);
@@ -793,6 +797,8 @@ void Application::closeOptions() {
 }
 void Application::openInventory() {
     m_state = GameState::Inventory;
+    m_isMining = false;
+    m_miningProgress = 0.0f;
     setCursorCaptured(false);
 }
 
@@ -875,6 +881,20 @@ void Application::updateCrafting() {
             return;
         }
 
+        // Iron Shovel: 1 Iron Ingot on top, 1 Stick on bottom
+        if ((c0 == BlockId::IronIngot && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
+            (c1 == BlockId::IronIngot && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::IronShovel, 1);
+            return;
+        }
+
+        // Diamond Shovel: 1 Diamond on top, 1 Stick on bottom
+        if ((c0 == BlockId::Diamond && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
+            (c1 == BlockId::Diamond && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::DiamondShovel, 1);
+            return;
+        }
+
         // Wooden Sword: 1 Plank, 1 Stick diagonal
         if ((c0 == BlockId::Planks && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
             (c1 == BlockId::Planks && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
@@ -886,6 +906,20 @@ void Application::updateCrafting() {
         if ((c0 == BlockId::Cobblestone && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
             (c1 == BlockId::Cobblestone && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
             m_craftResult = ItemSlot(BlockId::StoneSword, 1);
+            return;
+        }
+
+        // Iron Sword: 1 Iron Ingot, 1 Stick diagonal
+        if ((c0 == BlockId::IronIngot && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
+            (c1 == BlockId::IronIngot && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::IronSword, 1);
+            return;
+        }
+
+        // Diamond Sword: 1 Diamond, 1 Stick diagonal
+        if ((c0 == BlockId::Diamond && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
+            (c1 == BlockId::Diamond && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
+            m_craftResult = ItemSlot(BlockId::DiamondSword, 1);
             return;
         }
     }
@@ -926,6 +960,11 @@ void Application::updateCrafting() {
         // Iron Axe: 2 Iron Ingot vertical (0 and 2), 1 Stick (1 or 3)
         if (c0 == BlockId::IronIngot && c2 == BlockId::IronIngot && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
             m_craftResult = ItemSlot(BlockId::IronAxe, 1);
+            return;
+        }
+        // Diamond Axe: 2 Diamond vertical (0 and 2), 1 Stick (1 or 3)
+        if (c0 == BlockId::Diamond && c2 == BlockId::Diamond && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
+            m_craftResult = ItemSlot(BlockId::DiamondAxe, 1);
             return;
         }
     }
@@ -1014,14 +1053,14 @@ void Application::populateCreativeCatalog() {
     const BlockId catalog[32] = {
         // Hotbar (8 items)
         BlockId::Dirt, BlockId::Stone, BlockId::Cobblestone, BlockId::Planks,
-        BlockId::Torch, BlockId::DiamondPickaxe, BlockId::StoneSword, BlockId::Water,
+        BlockId::Torch, BlockId::DiamondPickaxe, BlockId::DiamondSword, BlockId::Water,
         // Main inventory (24 items)
         BlockId::Grass, BlockId::Sand, BlockId::Wood, BlockId::Leaves,
         BlockId::TallGrass, BlockId::DirtPath, BlockId::Bedrock, BlockId::CraftingTable,
         BlockId::CoalOre, BlockId::IronOre, BlockId::GoldOre, BlockId::DiamondOre,
         BlockId::Coal, BlockId::IronIngot, BlockId::Diamond, BlockId::Stick,
-        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::WoodAxe,
-        BlockId::StoneAxe, BlockId::IronAxe, BlockId::WoodShovel, BlockId::StoneShovel
+        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondAxe,
+        BlockId::IronAxe, BlockId::IronShovel, BlockId::DiamondShovel, BlockId::IronSword
     };
 
     for (int i = 0; i < 8; ++i) {
@@ -1302,10 +1341,23 @@ void Application::handlePlayInput() {
     else if (scroll < 0.0) m_selectedSlot = (m_selectedSlot + 1) % 8;
 }
 
-void Application::updateInteraction() {
+void Application::updateInteraction(float dt) {
     const Camera& camera = m_player.camera();
     ItemSlot& held = m_hotbar[m_selectedSlot];
 
+    auto getDigSound = [](BlockId b) -> SoundId {
+        if (b == BlockId::Wood || b == BlockId::WoodX || b == BlockId::WoodZ ||
+            b == BlockId::Planks || b == BlockId::CraftingTable) {
+            return SoundId::DigWood;
+        }
+        if (b == BlockId::Grass || b == BlockId::Dirt || b == BlockId::Leaves ||
+            b == BlockId::TallGrass || b == BlockId::Sand || b == BlockId::DirtPath) {
+            return SoundId::DigGrass;
+        }
+        return SoundId::DigStone;
+    };
+
+    // 1. Mob Melee Attack (instant on click)
     if (m_input.cursorCaptured() && m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
         m_player.triggerSwing();
         Mob* hitMob = m_entityManager.hitTest(camera.position(), camera.front(), config::REACH_DISTANCE);
@@ -1323,50 +1375,103 @@ void Application::updateInteraction() {
             if (hitMob->type() == MobType::PigmanVillager) {
                 m_entityManager.alertNearbyPigmen(hitMob->position(), 16.0f);
             }
+            m_isMining = false;
+            m_miningProgress = 0.0f;
             return;
         }
     }
 
     m_target = raycast(m_world, camera.position(), camera.front(), config::REACH_DISTANCE);
 
-    if (!m_input.cursorCaptured() || !m_target.hit) return;
-
-    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        m_player.triggerSwing();
-        const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
-        if (isBreakable(targetBlock) || (m_creativeMode && targetBlock != BlockId::Air)) {
-            m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
-            const BlockId drop = getDropForBlock(targetBlock);
-            const glm::vec3 dropPos = glm::vec3(m_target.block) + glm::vec3(0.5f, 0.4f, 0.5f);
-            if (!m_creativeMode && drop != BlockId::Air) {
-                m_entityManager.spawnItem(drop, dropPos, 1);
-            }
-
-            SoundId digSnd = SoundId::DigStone;
-            if (targetBlock == BlockId::Wood || targetBlock == BlockId::WoodX ||
-                targetBlock == BlockId::WoodZ || targetBlock == BlockId::Planks ||
-                targetBlock == BlockId::CraftingTable) {
-                digSnd = SoundId::DigWood;
-            } else if (targetBlock == BlockId::Grass || targetBlock == BlockId::Dirt ||
-                       targetBlock == BlockId::Leaves || targetBlock == BlockId::TallGrass ||
-                       targetBlock == BlockId::Sand || targetBlock == BlockId::DirtPath) {
-                digSnd = SoundId::DigGrass;
-            } else {
-                digSnd = SoundId::DigStone;
-            }
-            m_audioEngine.play3D(digSnd, dropPos, camera.position(), camera.front(), 0.90f);
-
-            if (!m_creativeMode && isTool(held.id)) {
-                held.durability--;
-                if (held.durability <= 0) {
-                    held.clear();
-                    m_audioEngine.play(SoundId::ToolBreak);
-                }
-            }
-        }
+    if (!m_input.cursorCaptured()) {
+        m_isMining = false;
+        m_miningProgress = 0.0f;
+        return;
     }
 
-    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
+    // 2. Block Mining & Breaking
+    if (m_input.mouseDown(GLFW_MOUSE_BUTTON_LEFT) && m_target.hit) {
+        const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
+        if (isBreakable(targetBlock) || (m_creativeMode && targetBlock != BlockId::Air)) {
+            if (m_creativeMode) {
+                if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+                    m_player.triggerSwing();
+                    m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
+                    const SoundId digSnd = getDigSound(targetBlock);
+                    const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
+                    m_audioEngine.play3D(digSnd, blockCenter, camera.position(), camera.front(), 0.90f);
+                    m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, 24);
+                }
+                m_isMining = false;
+                m_miningProgress = 0.0f;
+            } else {
+                // Survival mode continuous mining progress
+                if (!m_isMining || m_miningBlock != m_target.block) {
+                    m_isMining = true;
+                    m_miningBlock = m_target.block;
+                    m_miningProgress = 0.0f;
+                    m_digSoundTimer = 0.0f;
+                }
+
+                // Continuously re-trigger arm swing while mining
+                if (m_player.swingProgress() >= 0.70f) {
+                    m_player.triggerSwing();
+                }
+
+                // Periodic dig sound & debris particles
+                m_digSoundTimer -= dt;
+                if (m_digSoundTimer <= 0.0f) {
+                    m_digSoundTimer = 0.22f;
+                    const SoundId digSnd = getDigSound(targetBlock);
+                    const glm::vec3 hitFacePos = glm::vec3(m_target.block) + glm::vec3(0.5f) + glm::vec3(m_target.normal) * 0.5f;
+                    m_audioEngine.play3D(digSnd, hitFacePos, camera.position(), camera.front(), 0.70f);
+                    m_renderer.spawnDigParticles(glm::vec3(m_target.block), m_target.normal, targetBlock, 4);
+                }
+
+                const float breakTime = getBreakTime(held.id, targetBlock);
+                if (breakTime <= 0.0f) {
+                    m_miningProgress = 1.0f;
+                } else {
+                    m_miningProgress += dt / breakTime;
+                }
+
+                if (m_miningProgress >= 1.0f) {
+                    m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
+                    const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
+                    m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, 24);
+                    const SoundId breakSnd = getDigSound(targetBlock);
+                    m_audioEngine.play3D(breakSnd, blockCenter, camera.position(), camera.front(), 0.95f);
+
+                    if (canHarvestBlock(held.id, targetBlock)) {
+                        const BlockId drop = getDropForBlock(targetBlock);
+                        if (drop != BlockId::Air) {
+                            m_entityManager.spawnItem(drop, blockCenter - glm::vec3(0.0f, 0.1f, 0.0f), 1);
+                        }
+                    }
+
+                    if (isTool(held.id)) {
+                        held.durability--;
+                        if (held.durability <= 0) {
+                            held.clear();
+                            m_audioEngine.play(SoundId::ToolBreak);
+                        }
+                    }
+
+                    m_isMining = false;
+                    m_miningProgress = 0.0f;
+                }
+            }
+        } else {
+            m_isMining = false;
+            m_miningProgress = 0.0f;
+        }
+    } else {
+        m_isMining = false;
+        m_miningProgress = 0.0f;
+    }
+
+    // 3. Block Placement
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT) && m_target.hit) {
         m_player.triggerSwing();
         if (!held.empty() && isPlaceable(held.id)) {
             const glm::ivec3 place = m_target.block + m_target.normal;
@@ -1723,6 +1828,10 @@ void Application::renderScene() {
         if (m_target.hit) {
             const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
             m_renderer.drawSelection(m_player.camera(), m_target.block, targetBlock);
+            if (m_isMining && m_miningBlock == m_target.block && m_miningProgress > 0.0f) {
+                const int stage = std::clamp(static_cast<int>(m_miningProgress * 10.0f), 0, 9);
+                m_renderer.drawBlockBreak(m_player.camera(), m_target.block, targetBlock, stage);
+            }
         }
 
         m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);

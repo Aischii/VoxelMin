@@ -667,6 +667,68 @@ void makeTool(std::vector<uint8_t>& pixels, int tile, int toolType, Rgb head) {
     }
 }
 
+void setPixelRgba(std::vector<uint8_t>& pixels, int tile, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    if (x < 0 || x >= TILE || y < 0 || y >= TILE) return;
+    const int tx = (tile % TILES) * TILE + x;
+    const int ty = (tile / TILES) * TILE + y;
+    const size_t i = (static_cast<size_t>(ty) * SIZE + tx) * 4;
+    pixels[i + 0] = r;
+    pixels[i + 1] = g;
+    pixels[i + 2] = b;
+    pixels[i + 3] = a;
+}
+
+void makeDestroyTile(std::vector<uint8_t>& pixels, int tile, int stage) {
+    struct CrackLine {
+        int x0, y0, x1, y1;
+        int minStage;
+    };
+
+    static const CrackLine lines[] = {
+        // Stage 0: initial center fissures
+        {7, 8, 9, 7, 0}, {8, 8, 8, 10, 0},
+        // Stage 1
+        {9, 7, 11, 6, 1}, {8, 10, 6, 11, 1}, {7, 8, 6, 6, 1},
+        // Stage 2
+        {11, 6, 13, 4, 2}, {6, 11, 4, 13, 2}, {6, 6, 4, 4, 2}, {8, 8, 10, 9, 2},
+        // Stage 3
+        {10, 9, 13, 11, 3}, {6, 6, 7, 3, 3}, {7, 8, 5, 8, 3},
+        // Stage 4
+        {13, 11, 14, 14, 4}, {4, 4, 2, 2, 4}, {5, 8, 2, 9, 4}, {10, 9, 11, 13, 4},
+        // Stage 5
+        {7, 3, 9, 2, 5}, {6, 11, 8, 13, 5}, {9, 7, 10, 4, 5}, {4, 13, 2, 14, 5},
+        // Stage 6
+        {10, 4, 13, 2, 6}, {8, 13, 10, 14, 6}, {5, 8, 4, 6, 6}, {11, 6, 13, 8, 6},
+        // Stage 7
+        {2, 9, 1, 11, 7}, {13, 8, 14, 10, 7}, {2, 2, 1, 5, 7}, {9, 2, 12, 1, 7},
+        // Stage 8
+        {4, 6, 2, 5, 8}, {8, 8, 6, 9, 8}, {9, 7, 11, 8, 8}, {13, 4, 15, 6, 8},
+        // Stage 9: total shattering
+        {6, 9, 3, 11, 9}, {11, 8, 14, 7, 9}, {1, 5, 1, 8, 9}, {14, 10, 15, 13, 9},
+        {10, 14, 12, 15, 9}, {12, 1, 15, 2, 9}, {4, 4, 5, 2, 9}, {10, 4, 8, 2, 9}
+    };
+
+    for (const auto& cl : lines) {
+        if (stage < cl.minStage) continue;
+
+        int x0 = cl.x0, y0 = cl.y0, x1 = cl.x1, y1 = cl.y1;
+        int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        int dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+        int err = dx + dy;
+
+        while (true) {
+            setPixelRgba(pixels, tile, x0, y0, 18, 18, 22, 230);
+            setPixelRgba(pixels, tile, x0 + 1, y0, 240, 240, 245, 95);
+            setPixelRgba(pixels, tile, x0, y0 - 1, 220, 220, 230, 75);
+
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    }
+}
+
 void makeCraftingTable(std::vector<uint8_t>& pixels, int topTile, int sideTile, int frontTile) {
     // Base wood planks
     makePlanks(pixels, topTile);
@@ -749,13 +811,19 @@ void Texture::createAtlas() {
     const int woodAxe = static_cast<int>(TextureTile::WoodAxe);
     const int stoneAxe = static_cast<int>(TextureTile::StoneAxe);
     const int ironAxe = static_cast<int>(TextureTile::IronAxe);
+    const int diamondAxe = static_cast<int>(TextureTile::DiamondAxe);
     const int woodShovel = static_cast<int>(TextureTile::WoodShovel);
     const int stoneShovel = static_cast<int>(TextureTile::StoneShovel);
+    const int ironShovel = static_cast<int>(TextureTile::IronShovel);
+    const int diamondShovel = static_cast<int>(TextureTile::DiamondShovel);
     const int woodSword = static_cast<int>(TextureTile::WoodSword);
     const int stoneSword = static_cast<int>(TextureTile::StoneSword);
+    const int ironSword = static_cast<int>(TextureTile::IronSword);
+    const int diamondSword = static_cast<int>(TextureTile::DiamondSword);
     const int craftingTableTop = static_cast<int>(TextureTile::CraftingTableTop);
     const int craftingTableSide = static_cast<int>(TextureTile::CraftingTableSide);
     const int craftingTableFront = static_cast<int>(TextureTile::CraftingTableFront);
+    const int destroy0 = static_cast<int>(TextureTile::Destroy0);
 
     const Rgb woodHead = {0.60f, 0.45f, 0.25f};
     const Rgb stoneHead = {0.55f, 0.55f, 0.55f};
@@ -773,11 +841,20 @@ void Texture::createAtlas() {
     makeTool(pixels, woodAxe, 1, woodHead);
     makeTool(pixels, stoneAxe, 1, stoneHead);
     makeTool(pixels, ironAxe, 1, ironHead);
+    makeTool(pixels, diamondAxe, 1, diamondHead);
     makeTool(pixels, woodShovel, 2, woodHead);
     makeTool(pixels, stoneShovel, 2, stoneHead);
+    makeTool(pixels, ironShovel, 2, ironHead);
+    makeTool(pixels, diamondShovel, 2, diamondHead);
     makeTool(pixels, woodSword, 3, woodHead);
     makeTool(pixels, stoneSword, 3, stoneHead);
+    makeTool(pixels, ironSword, 3, ironHead);
+    makeTool(pixels, diamondSword, 3, diamondHead);
     makeCraftingTable(pixels, craftingTableTop, craftingTableSide, craftingTableFront);
+
+    for (int s = 0; s < 10; ++s) {
+        makeDestroyTile(pixels, destroy0 + s, s);
+    }
 
 
     const Rgb grassTint = {0.45f, 0.76f, 0.26f};

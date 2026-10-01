@@ -47,9 +47,16 @@ public:
                     const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
     void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera, float sunlight = 1.0f);
     void drawSelection(const Camera& camera, const glm::ivec3& block, BlockId blockId = BlockId::Grass);
+    void drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage);
 
     void updateParticles(float dt, const World& world, const glm::vec3& playerPos) {
         m_particles.update(dt, world, playerPos);
+    }
+    void spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, BlockId blockId, int count = 4) {
+        m_particles.spawnDigParticles(blockPos, normal, static_cast<uint8_t>(blockId), count);
+    }
+    void spawnBlockBreakParticles(const glm::vec3& blockPos, BlockId blockId, int count = 24) {
+        m_particles.spawnBlockBreakParticles(blockPos, static_cast<uint8_t>(blockId), count);
     }
     void clearParticles() { m_particles.clear(); }
     size_t particleCount() const { return m_particles.particleCount(); }

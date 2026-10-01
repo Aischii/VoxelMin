@@ -83,7 +83,7 @@ private:
     // Gameplay
     void handlePlayInput();
     void handleInventoryInput();
-    void updateInteraction();
+    void updateInteraction(float dt);
     void rebuildDirtyMeshes();
     bool playerOccupies(const glm::ivec3& block) const;
     bool addItem(BlockId id, int count = 1);
@@ -159,6 +159,12 @@ private:
 
     bool m_creativeMode = false;
     float m_timeOfDay = 0.22f; // Starts in the morning (~08:30 AM)
+
+    // Mining / Block breaking state
+    bool m_isMining = false;
+    glm::ivec3 m_miningBlock{0};
+    float m_miningProgress = 0.0f;
+    float m_digSoundTimer = 0.0f;
 
 
     RayHit m_target;

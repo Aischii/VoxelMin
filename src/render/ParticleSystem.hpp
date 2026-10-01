@@ -17,6 +17,7 @@ struct Particle {
     float size = 0.08f;
     float life = 0.5f;
     float maxLife = 0.5f;
+    float gravity = 0.0f;
 };
 
 class ParticleSystem {
@@ -29,6 +30,8 @@ public:
 
     void spawnFlame(const glm::vec3& pos);
     void spawnSmoke(const glm::vec3& pos);
+    void spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, uint8_t blockId, int count = 4);
+    void spawnBlockBreakParticles(const glm::vec3& blockPos, uint8_t blockId, int count = 24);
 
     void update(float dt, const World& world, const glm::vec3& playerPos);
     void render(const Camera& camera, float aspect);
