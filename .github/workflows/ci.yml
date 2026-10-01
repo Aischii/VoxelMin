@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-linux:
+    name: Linux (Ubuntu / GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++ \
+            cmake \
+            ninja-build \
+            libglfw3-dev \
+            libglew-dev \
+            libglm-dev \
+            libstb-dev \
+            libgl1-mesa-dev
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cmake --build build --config Release
+
+      - name: Verify build output
+        run: |
+          test -f build/bin/VoxelMin
+          test -d build/bin/assets
+          echo "Linux binary and assets successfully verified."
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoxelMin-Linux
+          path: build/bin/
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows (MinGW-w64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-glfw
+            mingw-w64-x86_64-glew
+            mingw-w64-x86_64-glm
+            mingw-w64-x86_64-stb
+
+      - name: Configure and build
+        shell: msys2 {0}
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Verify build output
+        shell: msys2 {0}
+        run: |
+          test -f build/bin/VoxelMin.exe
+          test -d build/bin/assets
+          echo "Windows binary and assets successfully verified."
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoxelMin-Windows
+          path: build/bin/
+          if-no-files-found: error

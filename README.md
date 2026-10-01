@@ -1,5 +1,7 @@
 # VoxelMin
 
+[![CI](https://github.com/Aischii/VoxelMin/actions/workflows/ci.yml/badge.svg)](https://github.com/Aischii/VoxelMin/actions/workflows/ci.yml)
+
 A minimal, single-player voxel sandbox inspired by early ("alpha") Minecraft,
 written in C++17 with OpenGL 3.3 Core. The goal is a small, readable codebase
 for **learning** and for **handing off between developers/AI agents**.
