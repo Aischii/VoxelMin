@@ -82,12 +82,89 @@ void Player::moveAxis(const World& world, float delta, int axis) {
     m_position = candidate;
 }
 
+void Player::takeDamage(float amount, const glm::vec3& sourcePos, AudioEngine* audio) {
+    if (m_creative || m_flying || m_isDead || m_invulnerableTimer > 0.0f) return;
+
+    m_health = std::max(0.0f, m_health - amount);
+    m_invulnerableTimer = 0.45f;
+    m_hurtTimer = 0.45f;
+
+    if (audio) {
+        audio->play(SoundId::PlayerHurt, 1.0f);
+    }
+
+    // Apply knockback impulse away from damage source if provided
+    if (glm::length(sourcePos) > 1e-4f) {
+        glm::vec3 knock = m_position - sourcePos;
+        knock.y = 0.0f;
+        if (glm::length(knock) > 1e-4f) {
+            knock = glm::normalize(knock);
+        } else {
+            knock = -m_camera.front();
+            knock.y = 0.0f;
+            if (glm::length(knock) > 1e-4f) knock = glm::normalize(knock);
+        }
+        m_velocity.x = knock.x * 6.5f;
+        m_velocity.z = knock.z * 6.5f;
+        m_velocity.y = 4.2f;
+        m_onGround = false;
+    }
+
+    if (m_health <= 0.0f) {
+        m_health = 0.0f;
+        m_isDead = true;
+    }
+}
+
+void Player::heal(float amount) {
+    if (m_isDead) return;
+    m_health = std::min(m_maxHealth, m_health + amount);
+}
+
+void Player::feed(float hungerGain, float healthGain) {
+    if (m_isDead) return;
+    m_hunger = std::min(m_maxHunger, m_hunger + hungerGain);
+    if (healthGain > 0.0f) {
+        heal(healthGain);
+    }
+}
+
+void Player::drainHunger(float amount) {
+    if (m_creative || m_isDead) return;
+    m_hunger = std::max(0.0f, m_hunger - amount);
+}
+
+void Player::respawn(const World& world, float x, float z) {
+    m_health = m_maxHealth;
+    m_hunger = m_maxHunger;
+    m_oxygen = m_maxOxygen;
+    m_fallDistance = 0.0f;
+    m_invulnerableTimer = 0.0f;
+    m_hurtTimer = 0.0f;
+    m_regenTimer = 0.0f;
+    m_starveTimer = 0.0f;
+    m_drownTimer = 0.0f;
+    m_isDead = false;
+    spawnAt(world, x, z);
+}
+
 void Player::update(float dt, const Input& input, const World& world, AudioEngine* audio) {
+    if (m_invulnerableTimer > 0.0f) m_invulnerableTimer -= dt;
+    if (m_hurtTimer > 0.0f) m_hurtTimer -= dt;
+
+    if (m_creative) {
+        m_health = m_maxHealth;
+        m_hunger = m_maxHunger;
+        m_oxygen = m_maxOxygen;
+        m_fallDistance = 0.0f;
+        m_isDead = false;
+    }
+
     applyLook(input);
 
     m_timeSinceWPress += dt;
 
-    if (input.cursorCaptured()) {
+    if (input.cursorCaptured() && !m_isDead) {
         if (input.keyPressed(GLFW_KEY_W)) {
             if (m_timeSinceWPress < 0.28f) {
                 m_sprinting = true;
@@ -100,7 +177,7 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
         }
     }
 
-    if (!input.cursorCaptured() || !input.keyDown(GLFW_KEY_W)) {
+    if (!input.cursorCaptured() || !input.keyDown(GLFW_KEY_W) || m_isDead) {
         m_sprinting = false;
     }
 
@@ -115,7 +192,7 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
     right = glm::normalize(right);
 
     glm::vec3 wish(0.0f);
-    if (input.cursorCaptured()) {
+    if (input.cursorCaptured() && !m_isDead) {
         if (input.keyDown(GLFW_KEY_W)) wish += forward;
         if (input.keyDown(GLFW_KEY_S)) wish -= forward;
         if (input.keyDown(GLFW_KEY_D)) wish += right;
@@ -127,11 +204,61 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
     const int bx = static_cast<int>(std::floor(m_position.x));
     const int byFeet = static_cast<int>(std::floor(m_position.y));
     const int byMid = static_cast<int>(std::floor(m_position.y + 0.9f));
+    const int byHead = static_cast<int>(std::floor(m_position.y + config::PLAYER_EYE_HEIGHT));
     const int bz = static_cast<int>(std::floor(m_position.z));
     m_inWater = (isLiquid(world.getBlock(bx, byFeet, bz)) || isLiquid(world.getBlock(bx, byMid, bz)));
+    const bool headSubmerged = isLiquid(world.getBlock(bx, byHead, bz));
+
+    // Oxygen & Drowning
+    if (headSubmerged && !m_creative && !m_isDead) {
+        m_oxygen = std::max(0.0f, m_oxygen - dt);
+        if (m_oxygen <= 0.0f) {
+            m_drownTimer += dt;
+            if (m_drownTimer >= 1.0f) {
+                m_drownTimer = 0.0f;
+                takeDamage(10.0f, glm::vec3(0.0f), audio);
+            }
+        } else {
+            m_drownTimer = 0.0f;
+        }
+    } else {
+        m_oxygen = std::min(m_maxOxygen, m_oxygen + dt * 8.0f);
+        m_drownTimer = 0.0f;
+    }
+
+    // Hunger drain
+    if (!m_creative && !m_isDead) {
+        drainHunger(dt * 0.035f);
+        if (m_sprinting && glm::length(wish) > 0.1f) {
+            drainHunger(dt * 0.20f);
+        }
+    }
+
+    // Natural regeneration
+    if (!m_creative && m_hunger >= 90.0f && m_health < m_maxHealth && !m_isDead) {
+        m_regenTimer += dt;
+        if (m_regenTimer >= 2.5f) {
+            m_regenTimer = 0.0f;
+            heal(5.0f);
+            drainHunger(3.0f);
+        }
+    } else {
+        m_regenTimer = 0.0f;
+    }
+
+    // Starvation
+    if (!m_creative && m_hunger <= 0.0f && !m_isDead) {
+        m_starveTimer += dt;
+        if (m_starveTimer >= 3.0f) {
+            m_starveTimer = 0.0f;
+            takeDamage(5.0f, glm::vec3(0.0f), audio);
+        }
+    } else {
+        m_starveTimer = 0.0f;
+    }
 
     // Jump queueing & auto-bunnyhop
-    if (input.cursorCaptured()) {
+    if (input.cursorCaptured() && !m_isDead) {
         if (input.keyPressed(GLFW_KEY_SPACE)) {
             m_jumpQueueTimer = JUMP_QUEUE_DURATION;
         } else if (input.keyDown(GLFW_KEY_SPACE)) {
@@ -144,19 +271,21 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
     if (m_flying) {
         const float speed = FLY_SPEED * ((input.cursorCaptured() && (input.keyDown(GLFW_KEY_LEFT_CONTROL) || m_sprinting)) ? 2.5f : 1.0f);
         m_velocity = wish * speed;
-        if (input.cursorCaptured()) {
+        if (input.cursorCaptured() && !m_isDead) {
             if (input.keyDown(GLFW_KEY_SPACE))      m_velocity.y = speed;
             if (input.keyDown(GLFW_KEY_LEFT_SHIFT)) m_velocity.y = -speed;
         }
+        m_fallDistance = 0.0f;
     } else if (m_inWater) {
+        m_fallDistance = 0.0f;
         // Water swimming & buoyancy physics
         const float waterSpeed = WALK_SPEED * 0.70f;
         m_velocity.x = wish.x * waterSpeed;
         m_velocity.z = wish.z * waterSpeed;
 
-        if (input.cursorCaptured() && input.keyDown(GLFW_KEY_SPACE)) {
+        if (input.cursorCaptured() && !m_isDead && input.keyDown(GLFW_KEY_SPACE)) {
             m_velocity.y = 4.2f; // Active upward swimming
-        } else if (input.cursorCaptured() && input.keyDown(GLFW_KEY_LEFT_SHIFT)) {
+        } else if (input.cursorCaptured() && !m_isDead && input.keyDown(GLFW_KEY_LEFT_SHIFT)) {
             m_velocity.y = -4.0f; // Dive down
         } else {
             // Gentle sinking drift with fluid drag
@@ -177,9 +306,10 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
             m_velocity.y = JUMP_SPEED;
             m_onGround = false;
             m_jumpQueueTimer = 0.0f;
+            drainHunger(0.12f);
         } else {
             if (glm::length(wish) > 1e-4f) {
-                // Snappy ground acceleration towards wish direction (forward, backward, sideways, diagonals)
+                // Snappy ground acceleration towards wish direction
                 m_velocity.x = glm::mix(m_velocity.x, targetVel.x, std::min(1.0f, dt * GROUND_ACCEL_RATE));
                 m_velocity.z = glm::mix(m_velocity.z, targetVel.z, std::min(1.0f, dt * GROUND_ACCEL_RATE));
             } else {
@@ -191,15 +321,17 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
             }
         }
     } else {
-        // Air physics: full responsive air strafe & air steering (Minecraft-style)
+        // Air physics: accumulate downward fall distance
+        if (m_velocity.y < 0.0f) {
+            m_fallDistance += -m_velocity.y * dt;
+        }
+
         if (glm::length(wish) > 1e-4f) {
             const float airWishSpeed = m_sprinting ? SPRINT_SPEED : WALK_SPEED;
             const glm::vec3 targetAirVel = wish * airWishSpeed;
-            // Responsive mid-air steering for strafing left/right and jumping around corners
             m_velocity.x = glm::mix(m_velocity.x, targetAirVel.x, std::min(1.0f, dt * AIR_ACCEL_RATE));
             m_velocity.z = glm::mix(m_velocity.z, targetAirVel.z, std::min(1.0f, dt * AIR_ACCEL_RATE));
         } else {
-            // Gentle air resistance
             m_velocity.x = glm::mix(m_velocity.x, 0.0f, std::min(1.0f, dt * AIR_DECEL_RATE));
             m_velocity.z = glm::mix(m_velocity.z, 0.0f, std::min(1.0f, dt * AIR_DECEL_RATE));
         }
@@ -209,10 +341,19 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
         if (m_velocity.y < -50.0f) m_velocity.y = -50.0f;
     }
 
+    const bool wasInAir = !m_onGround && !m_inWater && !m_flying;
     m_onGround = false;
     moveAxis(world, m_velocity.x * dt, 0);
     moveAxis(world, m_velocity.y * dt, 1);
     moveAxis(world, m_velocity.z * dt, 2);
+
+    if (wasInAir && m_onGround && !m_inWater && !m_flying) {
+        if (m_fallDistance > 3.5f && !m_creative && !m_isDead) {
+            const float fallDmg = (m_fallDistance - 3.5f) * 11.0f;
+            takeDamage(fallDmg, glm::vec3(0.0f), audio);
+        }
+        m_fallDistance = 0.0f;
+    }
 
     const float hSpeed = std::hypot(m_velocity.x, m_velocity.z);
 

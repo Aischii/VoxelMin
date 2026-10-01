@@ -35,6 +35,9 @@ public:
     bool onGround() const { return m_onGround; }
     int stepUpCount() const { return m_stepUps; }
     int jumpCount() const { return m_jumps; }
+    bool isHostile() const { return m_state == MobState::Hostile; }
+    bool canAttack() const { return m_attackCooldown <= 0.0f; }
+    void resetAttackCooldown(float cd = 1.0f) { m_attackCooldown = cd; }
 
     void setHomeVillage(const glm::vec3& center) { m_homeVillage = center; m_hasHome = true; }
     const glm::vec3& homeVillage() const { return m_homeVillage; }

@@ -19,6 +19,9 @@ enum class SoundId {
     PlaceBlock,
     MobHurt,
     ToolBreak,
+    PlayerHurt,
+    PlayerEat,
+    PlayerBurp,
     Count
 };
 

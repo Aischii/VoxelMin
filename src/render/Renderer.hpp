@@ -64,6 +64,20 @@ public:
     // HUD shown while playing (crosshair + hotbar).
     void drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount);
 
+    // RPG Horror Vitals HUD (placed in top-left corner)
+    void drawRpgVitalsHud(float health, float maxHealth,
+                          float hunger, float maxHunger,
+                          float oxygen, float maxOxygen,
+                          bool inWater, float hurtTimer, float animTime,
+                          bool isCreative = false);
+
+    // Screen edge horror effects (low-health heartbeat vignette & damage blood flash)
+    void drawHurtVignette(float hurtTimer, float healthRatio, float animTime);
+
+    // Dark gothic Death Screen ("YOU DIED")
+    void drawDeathScreen(float animTime, const glm::vec2& mousePos,
+                         bool& outHoverRespawn, bool& outHoverQuit);
+
     // F3 debug overlay: dark panel with one text line per entry, drawn in the
     // top-left corner. Rendering only -- the caller owns the content.
     void drawDebugOverlay(const std::vector<std::string>& lines);

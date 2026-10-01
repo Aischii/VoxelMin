@@ -667,6 +667,110 @@ void makeTool(std::vector<uint8_t>& pixels, int tile, int toolType, Rgb head) {
     }
 }
 
+void makeFoodPorkchop(std::vector<uint8_t>& pixels, int tile, bool cooked) {
+    // Porkchop shape with bone and meat
+    for (int y = 3; y <= 12; ++y) {
+        for (int x = 3; x <= 12; ++x) {
+            const int dx = x - 8;
+            const int dy = y - 7;
+            if (dx * dx + dy * dy <= 18) {
+                if (x <= 5 && y <= 5) {
+                    // Bone end
+                    setPixel(pixels, tile, x, y, {0.96f, 0.95f, 0.90f});
+                } else if (cooked) {
+                    // Roasted golden-brown porkchop with dark crust
+                    const float edge = (dx * dx + dy * dy >= 14) ? 0.7f : 1.0f;
+                    const float n = (rnd(x, y, 71) - 0.5f) * 0.08f;
+                    setPixel(pixels, tile, x, y, {(0.78f + n) * edge, (0.45f + n) * edge, (0.22f + n) * edge});
+                } else {
+                    // Raw pink porkchop with fat rim
+                    const bool isFat = (dx >= 2 || dy >= 2);
+                    if (isFat) {
+                        setPixel(pixels, tile, x, y, {0.96f, 0.82f, 0.85f});
+                    } else {
+                        const float n = (rnd(x, y, 72) - 0.5f) * 0.06f;
+                        setPixel(pixels, tile, x, y, {0.92f + n, 0.50f + n, 0.55f + n});
+                    }
+                }
+            }
+        }
+    }
+}
+
+void makeFoodBeef(std::vector<uint8_t>& pixels, int tile, bool cooked) {
+    for (int y = 4; y <= 11; ++y) {
+        for (int x = 3; x <= 13; ++x) {
+            const int dx = x - 8;
+            const int dy = y - 7;
+            if (dx * dx * 1.2f + dy * dy * 1.8f <= 22.0f) {
+                if (cooked) {
+                    // Dark roasted steak with sear marks
+                    const bool isGrillMark = ((x + y) % 3 == 0);
+                    const float g = isGrillMark ? 0.65f : 1.0f;
+                    const float n = (rnd(x, y, 73) - 0.5f) * 0.06f;
+                    setPixel(pixels, tile, x, y, {(0.54f + n) * g, (0.28f + n) * g, (0.16f + n) * g});
+                } else {
+                    // Raw rich red steak with marbling
+                    const bool isMarble = ((x * 2 + y * 3) % 5 == 0);
+                    if (isMarble) {
+                        setPixel(pixels, tile, x, y, {0.92f, 0.85f, 0.85f});
+                    } else {
+                        const float n = (rnd(x, y, 74) - 0.5f) * 0.06f;
+                        setPixel(pixels, tile, x, y, {0.80f + n, 0.18f + n, 0.20f + n});
+                    }
+                }
+            }
+        }
+    }
+}
+
+void makeApple(std::vector<uint8_t>& pixels, int tile) {
+    // Apple fruit body
+    for (int y = 3; y <= 11; ++y) {
+        for (int x = 4; x <= 11; ++x) {
+            const int dx = x - 7;
+            const int dy = y - 7;
+            if (dx * dx + dy * dy <= 16) {
+                float r = 0.88f, g = 0.12f, b = 0.14f;
+                // Highlight at top-left
+                if (x == 6 && (y == 9 || y == 10)) {
+                    r = 1.00f; g = 0.45f; b = 0.45f;
+                } else if (y <= 4) {
+                    r = 0.65f; g = 0.08f; b = 0.10f;
+                }
+                const float n = (rnd(x, y, 75) - 0.5f) * 0.05f;
+                setPixel(pixels, tile, x, y, {r + n, g + n, b + n});
+            }
+        }
+    }
+    // Apple stem
+    setPixel(pixels, tile, 7, 12, {0.45f, 0.28f, 0.12f});
+    setPixel(pixels, tile, 8, 13, {0.45f, 0.28f, 0.12f});
+    // Green leaf
+    setPixel(pixels, tile, 9, 13, {0.25f, 0.78f, 0.20f});
+    setPixel(pixels, tile, 10, 14, {0.20f, 0.65f, 0.15f});
+}
+
+void makeBread(std::vector<uint8_t>& pixels, int tile) {
+    for (int y = 5; y <= 10; ++y) {
+        for (int x = 3; x <= 12; ++x) {
+            const int dx = x - 7;
+            const int dy = y - 7;
+            if (dx * dx * 0.9f + dy * dy * 2.2f <= 18.0f) {
+                // Crust & score marks
+                const bool isScore = (x == 5 && y >= 7) || (x == 8 && y >= 7) || (x == 11 && y >= 7);
+                if (isScore) {
+                    setPixel(pixels, tile, x, y, {0.96f, 0.88f, 0.65f});
+                } else {
+                    const float shadow = (y == 5) ? 0.7f : 1.0f;
+                    const float n = (rnd(x, y, 76) - 0.5f) * 0.06f;
+                    setPixel(pixels, tile, x, y, {(0.84f + n) * shadow, (0.58f + n) * shadow, (0.24f + n) * shadow});
+                }
+            }
+        }
+    }
+}
+
 void setPixelRgba(std::vector<uint8_t>& pixels, int tile, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (x < 0 || x >= TILE || y < 0 || y >= TILE) return;
     const int tx = (tile % TILES) * TILE + x;
@@ -823,6 +927,12 @@ void Texture::createAtlas() {
     const int craftingTableTop = static_cast<int>(TextureTile::CraftingTableTop);
     const int craftingTableSide = static_cast<int>(TextureTile::CraftingTableSide);
     const int craftingTableFront = static_cast<int>(TextureTile::CraftingTableFront);
+    const int rawPorkchop = static_cast<int>(TextureTile::RawPorkchop);
+    const int cookedPorkchop = static_cast<int>(TextureTile::CookedPorkchop);
+    const int rawBeef = static_cast<int>(TextureTile::RawBeef);
+    const int cookedBeef = static_cast<int>(TextureTile::CookedBeef);
+    const int apple = static_cast<int>(TextureTile::Apple);
+    const int bread = static_cast<int>(TextureTile::Bread);
     const int destroy0 = static_cast<int>(TextureTile::Destroy0);
 
     const Rgb woodHead = {0.60f, 0.45f, 0.25f};
@@ -851,6 +961,12 @@ void Texture::createAtlas() {
     makeTool(pixels, ironSword, 3, ironHead);
     makeTool(pixels, diamondSword, 3, diamondHead);
     makeCraftingTable(pixels, craftingTableTop, craftingTableSide, craftingTableFront);
+    makeFoodPorkchop(pixels, rawPorkchop, false);
+    makeFoodPorkchop(pixels, cookedPorkchop, true);
+    makeFoodBeef(pixels, rawBeef, false);
+    makeFoodBeef(pixels, cookedBeef, true);
+    makeApple(pixels, apple);
+    makeBread(pixels, bread);
 
     for (int s = 0; s < 10; ++s) {
         makeDestroyTile(pixels, destroy0 + s, s);

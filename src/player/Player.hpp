@@ -60,6 +60,25 @@ public:
     float swingProgress() const { return std::clamp(1.0f - (m_swingTimer / 0.25f), 0.0f, 1.0f); }
     float animTime() const { return m_animTime; }
 
+    // Survival / Vitals
+    float health() const { return m_health; }
+    float maxHealth() const { return m_maxHealth; }
+    float hunger() const { return m_hunger; }
+    float maxHunger() const { return m_maxHunger; }
+    float oxygen() const { return m_oxygen; }
+    float maxOxygen() const { return m_maxOxygen; }
+    bool isDead() const { return m_isDead; }
+    float hurtTimer() const { return m_hurtTimer; }
+
+    bool isCreative() const { return m_creative; }
+    void setCreative(bool c) { m_creative = c; }
+
+    void takeDamage(float amount, const glm::vec3& sourcePos = glm::vec3(0.0f), AudioEngine* audio = nullptr);
+    void heal(float amount);
+    void feed(float hungerGain, float healthGain = 0.0f);
+    void drainHunger(float amount);
+    void respawn(const World& world, float x, float z);
+
     void appendGeometry(std::vector<Vertex>& vertices, const World& world) const;
     void appendFirstPersonArm(std::vector<Vertex>& vertices, const World& world) const;
 
@@ -77,8 +96,24 @@ private:
     bool m_flying = false;
     bool m_sprinting = false;
     bool m_inWater = false;
+    bool m_creative = false;
     float m_timeSinceWPress = 100.0f;
     float m_mouseSensitivity = 0.12f;
+
+    // Vitals & Survival state
+    float m_health = 100.0f;
+    float m_maxHealth = 100.0f;
+    float m_hunger = 100.0f;
+    float m_maxHunger = 100.0f;
+    float m_oxygen = 15.0f;
+    float m_maxOxygen = 15.0f;
+    float m_fallDistance = 0.0f;
+    float m_invulnerableTimer = 0.0f;
+    float m_hurtTimer = 0.0f;
+    float m_regenTimer = 0.0f;
+    float m_starveTimer = 0.0f;
+    float m_drownTimer = 0.0f;
+    bool m_isDead = false;
 
     // View bobbing & dynamics
     float m_bobTimer = 0.0f;

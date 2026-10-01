@@ -429,6 +429,56 @@ void AudioEngine::precomputeSounds() {
         m_samples[static_cast<size_t>(SoundId::ToolBreak)].data = std::move(data);
     }
 
+    // SoundId::PlayerHurt (Visceral punch impact + low groan/thud)
+    {
+        const int n = static_cast<int>(0.22f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        std::mt19937 rng(999);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::exp(-t * 16.0f);
+            const float freq = 120.0f - 60.0f * (t / 0.22f);
+            const float thud = std::sin(2.0f * PI * freq * t);
+            const float crunch = dist(rng) * 0.35f * std::exp(-t * 30.0f);
+            data[i] = (thud * 0.75f + crunch) * env * 0.65f;
+        }
+        m_samples[static_cast<size_t>(SoundId::PlayerHurt)].data = std::move(data);
+    }
+
+    // SoundId::PlayerEat (Crisp, crunchy bite/chew)
+    {
+        const int n = static_cast<int>(0.12f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        std::mt19937 rng(5555);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::exp(-t * 26.0f);
+            const float noise = dist(rng);
+            const float tonal = 0.3f * std::sin(2.0f * PI * 850.0f * t) + 0.2f * std::sin(2.0f * PI * 1300.0f * t);
+            data[i] = (noise * 0.7f + tonal) * env * 0.40f;
+        }
+        m_samples[static_cast<size_t>(SoundId::PlayerEat)].data = std::move(data);
+    }
+
+    // SoundId::PlayerBurp (Low resonant burp after full meal)
+    {
+        const int n = static_cast<int>(0.35f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        std::mt19937 rng(777);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::sin(PI * (t / 0.35f)) * std::exp(-t * 3.5f);
+            const float freq = 85.0f + 15.0f * std::sin(2.0f * PI * 12.0f * t);
+            const float pulse = std::sin(2.0f * PI * freq * t);
+            const float rattle = dist(rng) * 0.25f * (0.5f + 0.5f * std::sin(2.0f * PI * 28.0f * t));
+            data[i] = (pulse * 0.75f + rattle) * env * 0.50f;
+        }
+        m_samples[static_cast<size_t>(SoundId::PlayerBurp)].data = std::move(data);
+    }
+
     // Seamless ambient wind loop (~4 seconds)
     {
         const int n = 4 * SAMPLE_RATE;

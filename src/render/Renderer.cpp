@@ -982,6 +982,234 @@ void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount) 
     endUI();
 }
 
+void Renderer::drawRpgVitalsHud(float health, float maxHealth,
+                                float hunger, float maxHunger,
+                                float oxygen, float maxOxygen,
+                                bool inWater, float /*hurtTimer*/, float animTime,
+                                bool isCreative) {
+    if (isCreative) return; // Creative mode hides vitals HUD
+
+    const float s = m_uiScale;
+    beginUI();
+
+    const bool showOxygen = (inWater || oxygen < (maxOxygen - 0.2f));
+    const float cardW = 120.0f * s;
+    const float cardH = showOxygen ? (46.0f * s) : (33.0f * s);
+    const float cardX = 14.0f * s;
+    const float cardY = static_cast<float>(m_fbHeight) - (14.0f * s) - cardH;
+
+    // Dark gothic slate frame
+    const glm::vec4 slateBg(0.05f, 0.04f, 0.06f, 0.88f);
+    const glm::vec4 ironBorder(0.25f, 0.18f, 0.20f, 0.95f);
+    const glm::vec4 crimsonAccent(0.80f, 0.10f, 0.15f, 0.95f);
+
+    drawRect(cardX, cardY, cardW, cardH, slateBg);
+    // Outer border
+    drawRect(cardX, cardY, cardW, 1.0f * s, ironBorder);
+    drawRect(cardX, cardY + cardH - 1.0f * s, cardW, 1.0f * s, ironBorder);
+    drawRect(cardX, cardY, 1.0f * s, cardH, ironBorder);
+    drawRect(cardX + cardW - 1.0f * s, cardY, 1.0f * s, cardH, ironBorder);
+
+    // Gothic corner bracket accents
+    const float cLen = 4.0f * s;
+    const float cThick = 1.5f * s;
+    // Bottom-Left
+    drawRect(cardX, cardY, cLen, cThick, crimsonAccent);
+    drawRect(cardX, cardY, cThick, cLen, crimsonAccent);
+    // Bottom-Right
+    drawRect(cardX + cardW - cLen, cardY, cLen, cThick, crimsonAccent);
+    drawRect(cardX + cardW - cThick, cardY, cThick, cLen, crimsonAccent);
+    // Top-Left
+    drawRect(cardX, cardY + cardH - cThick, cLen, cThick, crimsonAccent);
+    drawRect(cardX, cardY + cardH - cLen, cThick, cLen, crimsonAccent);
+    // Top-Right
+    drawRect(cardX + cardW - cLen, cardY + cardH - cThick, cLen, cThick, crimsonAccent);
+    drawRect(cardX + cardW - cThick, cardY + cardH - cLen, cThick, cLen, crimsonAccent);
+
+    const float barX = cardX + 7.0f * s;
+    const float barW = cardW - 14.0f * s;
+    const float barH = 7.0f * s;
+    const float textScale = std::max(1.0f, s * 0.52f);
+
+    // 1. Health Bar (Blood / Vitality)
+    const float hpY = cardY + cardH - 13.0f * s;
+    const float hpRatio = std::clamp(health / maxHealth, 0.0f, 1.0f);
+
+    // Background track
+    drawRect(barX, hpY, barW, barH, glm::vec4(0.12f, 0.03f, 0.04f, 0.95f));
+    drawRect(barX, hpY, barW, 1.0f, glm::vec4(0.25f, 0.05f, 0.06f, 0.8f));
+    drawRect(barX, hpY + barH - 1.0f, barW, 1.0f, glm::vec4(0.25f, 0.05f, 0.06f, 0.8f));
+
+    if (hpRatio > 0.001f) {
+        // Low HP heartbeat pulse effect
+        glm::vec4 hpTop(0.92f, 0.12f, 0.16f, 1.0f);
+        glm::vec4 hpBottom(0.55f, 0.04f, 0.06f, 1.0f);
+        if (hpRatio <= 0.30f) {
+            const float pulse = 0.5f + 0.5f * std::sin(animTime * 9.0f);
+            hpTop = glm::mix(glm::vec4(0.85f, 0.08f, 0.10f, 1.0f), glm::vec4(1.0f, 0.35f, 0.38f, 1.0f), pulse);
+            hpBottom = glm::mix(glm::vec4(0.50f, 0.02f, 0.04f, 1.0f), glm::vec4(0.75f, 0.10f, 0.15f, 1.0f), pulse);
+        }
+        drawGradientRect(barX, hpY, barW * hpRatio, barH, hpBottom, hpTop);
+    }
+
+    // Health text
+    const std::string hpText = "HP " + std::to_string(static_cast<int>(std::ceil(health))) + "/" +
+                               std::to_string(static_cast<int>(maxHealth));
+    drawText(barX + 2.0f * s + 1.0f, hpY + barH - 1.0f * s - 1.0f, hpText, textScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.9f));
+    drawText(barX + 2.0f * s, hpY + barH - 1.0f * s, hpText, textScale, glm::vec4(1.0f, 0.92f, 0.92f, 1.0f));
+
+    // 2. Hunger Bar (Sanity / Essence)
+    const float hungerY = hpY - 11.0f * s;
+    const float hungerRatio = std::clamp(hunger / maxHunger, 0.0f, 1.0f);
+
+    drawRect(barX, hungerY, barW, barH, glm::vec4(0.12f, 0.08f, 0.03f, 0.95f));
+    drawRect(barX, hungerY, barW, 1.0f, glm::vec4(0.28f, 0.18f, 0.06f, 0.8f));
+    drawRect(barX, hungerY + barH - 1.0f, barW, 1.0f, glm::vec4(0.28f, 0.18f, 0.06f, 0.8f));
+
+    if (hungerRatio > 0.001f) {
+        drawGradientRect(barX, hungerY, barW * hungerRatio, barH,
+                         glm::vec4(0.52f, 0.30f, 0.06f, 1.0f),
+                         glm::vec4(0.92f, 0.65f, 0.14f, 1.0f));
+    }
+
+    const std::string hungerText = "HUNGER " + std::to_string(static_cast<int>(std::round(hunger))) + "%";
+    drawText(barX + 2.0f * s + 1.0f, hungerY + barH - 1.0f * s - 1.0f, hungerText, textScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.9f));
+    drawText(barX + 2.0f * s, hungerY + barH - 1.0f * s, hungerText, textScale, glm::vec4(1.0f, 0.95f, 0.85f, 1.0f));
+
+    // 3. Oxygen Bar (Underwater breath)
+    if (showOxygen) {
+        const float oxyY = hungerY - 11.0f * s;
+        const float oxyRatio = std::clamp(oxygen / maxOxygen, 0.0f, 1.0f);
+
+        drawRect(barX, oxyY, barW, barH, glm::vec4(0.04f, 0.10f, 0.14f, 0.95f));
+        drawRect(barX, oxyY, barW, 1.0f, glm::vec4(0.08f, 0.22f, 0.32f, 0.8f));
+        drawRect(barX, oxyY + barH - 1.0f, barW, 1.0f, glm::vec4(0.08f, 0.22f, 0.32f, 0.8f));
+
+        if (oxyRatio > 0.001f) {
+            drawGradientRect(barX, oxyY, barW * oxyRatio, barH,
+                             glm::vec4(0.08f, 0.38f, 0.55f, 1.0f),
+                             glm::vec4(0.22f, 0.88f, 0.98f, 1.0f));
+        }
+
+        const std::string oxyText = "OXYGEN " + std::to_string(static_cast<int>(std::ceil(oxygen))) + "s";
+        drawText(barX + 2.0f * s + 1.0f, oxyY + barH - 1.0f * s - 1.0f, oxyText, textScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.9f));
+        drawText(barX + 2.0f * s, oxyY + barH - 1.0f * s, oxyText, textScale, glm::vec4(0.85f, 0.98f, 1.0f, 1.0f));
+    }
+
+    endUI();
+}
+
+void Renderer::drawHurtVignette(float hurtTimer, float healthRatio, float animTime) {
+    float flashAlpha = 0.0f;
+    if (hurtTimer > 0.0f) {
+        flashAlpha = (hurtTimer / 0.45f) * 0.50f;
+    }
+
+    float dangerAlpha = 0.0f;
+    if (healthRatio <= 0.40f) {
+        const float pulse = 0.6f + 0.4f * std::sin(animTime * 6.0f);
+        dangerAlpha = (1.0f - (healthRatio / 0.40f)) * 0.40f * pulse;
+    }
+
+    const float totalAlpha = std::clamp(flashAlpha + dangerAlpha, 0.0f, 0.75f);
+    if (totalAlpha <= 0.01f) return;
+
+    beginUI();
+
+    const float fbW = static_cast<float>(m_fbWidth);
+    const float fbH = static_cast<float>(m_fbHeight);
+    const float thick = std::min(fbW, fbH) * 0.16f;
+
+    const glm::vec4 colSolid(0.60f, 0.02f, 0.04f, totalAlpha);
+    const glm::vec4 colTrans(0.60f, 0.02f, 0.04f, 0.0f);
+
+    // Bottom edge
+    drawGradientRect(0.0f, 0.0f, fbW, thick, colSolid, colTrans);
+    // Top edge
+    drawGradientRect(0.0f, fbH - thick, fbW, thick, colTrans, colSolid);
+
+    // Left and Right edge corner overlays
+    drawRect(0.0f, 0.0f, thick * 0.4f, fbH, colSolid * 0.4f);
+    drawRect(fbW - thick * 0.4f, 0.0f, thick * 0.4f, fbH, colSolid * 0.4f);
+
+    endUI();
+}
+
+void Renderer::drawDeathScreen(float /*animTime*/, const glm::vec2& mousePos,
+                              bool& outHoverRespawn, bool& outHoverQuit) {
+    const float s = m_uiScale;
+    beginUI();
+
+    const float fbW = static_cast<float>(m_fbWidth);
+    const float fbH = static_cast<float>(m_fbHeight);
+
+    // Dark crimson shroud
+    drawRect(0.0f, 0.0f, fbW, fbH, glm::vec4(0.06f, 0.01f, 0.02f, 0.88f));
+
+    // Death Title "YOU DIED"
+    const std::string title = "YOU DIED";
+    const float titleScale = std::max(2.5f, s * 1.5f);
+    const float titleW = textWidth(title, titleScale);
+    const float titleX = (fbW - titleW) * 0.5f;
+    const float titleY = fbH * 0.68f;
+
+    // Glowing drop shadow
+    drawText(titleX + 2.0f, titleY - 2.0f, title, titleScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.95f));
+    drawText(titleX, titleY, title, titleScale, glm::vec4(0.95f, 0.08f, 0.10f, 1.0f));
+
+    // Subtitle
+    const std::string subtitle = "The darkness consumed your mortal soul...";
+    const float subScale = std::max(1.0f, s * 0.65f);
+    const float subW = textWidth(subtitle, subScale);
+    const float subX = (fbW - subW) * 0.5f;
+    const float subY = titleY - (22.0f * s);
+    drawText(subX, subY, subtitle, subScale, glm::vec4(0.75f, 0.65f, 0.65f, 0.85f));
+
+    // Buttons
+    const float btnW = 120.0f * s;
+    const float btnH = 18.0f * s;
+    const float btnX = (fbW - btnW) * 0.5f;
+    const float respawnY = fbH * 0.42f;
+    const float quitY = respawnY - (26.0f * s);
+
+    // Respawn button
+    outHoverRespawn = (mousePos.x >= btnX && mousePos.x <= btnX + btnW &&
+                       mousePos.y >= respawnY && mousePos.y <= respawnY + btnH);
+    const glm::vec4 respawnBg = outHoverRespawn ? glm::vec4(0.40f, 0.12f, 0.15f, 0.95f) : glm::vec4(0.15f, 0.08f, 0.10f, 0.90f);
+    const glm::vec4 respawnBorder = outHoverRespawn ? glm::vec4(0.95f, 0.25f, 0.30f, 1.0f) : glm::vec4(0.35f, 0.20f, 0.22f, 0.9f);
+    drawRect(btnX, respawnY, btnW, btnH, respawnBg);
+    drawRect(btnX, respawnY, btnW, 1.0f * s, respawnBorder);
+    drawRect(btnX, respawnY + btnH - 1.0f * s, btnW, 1.0f * s, respawnBorder);
+    drawRect(btnX, respawnY, 1.0f * s, btnH, respawnBorder);
+    drawRect(btnX + btnW - 1.0f * s, respawnY, 1.0f * s, btnH, respawnBorder);
+
+    const std::string respawnText = "RESPAWN";
+    const float btnTextScale = std::max(1.0f, s * 0.70f);
+    const float rw = textWidth(respawnText, btnTextScale);
+    const float rh = textHeight(btnTextScale);
+    drawText(btnX + (btnW - rw) * 0.5f, respawnY + (btnH + rh) * 0.5f, respawnText, btnTextScale,
+             outHoverRespawn ? glm::vec4(1.0f, 0.95f, 0.95f, 1.0f) : glm::vec4(0.85f, 0.75f, 0.75f, 0.9f));
+
+    // Title menu button
+    outHoverQuit = (mousePos.x >= btnX && mousePos.x <= btnX + btnW &&
+                    mousePos.y >= quitY && mousePos.y <= quitY + btnH);
+    const glm::vec4 quitBg = outHoverQuit ? glm::vec4(0.30f, 0.12f, 0.15f, 0.95f) : glm::vec4(0.12f, 0.08f, 0.10f, 0.90f);
+    const glm::vec4 quitBorder = outHoverQuit ? glm::vec4(0.85f, 0.25f, 0.30f, 1.0f) : glm::vec4(0.30f, 0.18f, 0.20f, 0.9f);
+    drawRect(btnX, quitY, btnW, btnH, quitBg);
+    drawRect(btnX, quitY, btnW, 1.0f * s, quitBorder);
+    drawRect(btnX, quitY + btnH - 1.0f * s, btnW, 1.0f * s, quitBorder);
+    drawRect(btnX, quitY, 1.0f * s, btnH, quitBorder);
+    drawRect(btnX + btnW - 1.0f * s, quitY, 1.0f * s, btnH, quitBorder);
+
+    const std::string quitText = "TITLE MENU";
+    const float qw = textWidth(quitText, btnTextScale);
+    const float qh = textHeight(btnTextScale);
+    drawText(btnX + (btnW - qw) * 0.5f, quitY + (btnH + qh) * 0.5f, quitText, btnTextScale,
+             outHoverQuit ? glm::vec4(1.0f, 0.95f, 0.95f, 1.0f) : glm::vec4(0.85f, 0.75f, 0.75f, 0.9f));
+
+    endUI();
+}
+
 void Renderer::drawDebugOverlay(const std::vector<std::string>& lines) {
     if (lines.empty()) return;
 

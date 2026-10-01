@@ -173,10 +173,23 @@ void Application::run() {
                         return true;
                     }
                     return false;
+                }, [this](float dmg, const glm::vec3& src) {
+                    m_player.takeDamage(dmg, src, &m_audioEngine);
                 });
                 m_renderer.updateParticles(dt, m_world, m_player.position());
                 updateInteraction(dt);
+
+                if (m_player.isDead()) {
+                    m_state = GameState::GameOver;
+                    setCursorCaptured(false);
+                    m_isMining = false;
+                    m_miningProgress = 0.0f;
+                }
             }
+        } else if (m_state == GameState::GameOver) {
+            handleGameOverInput();
+            m_player.update(dt, m_input, m_world, &m_audioEngine);
+            m_renderer.updateParticles(dt, m_world, m_player.position());
         } else if (m_state == GameState::Inventory) {
             handleInventoryInput();
             m_player.update(dt, m_input, m_world, &m_audioEngine);
@@ -186,6 +199,8 @@ void Application::run() {
                     return true;
                 }
                 return false;
+            }, [this](float dmg, const glm::vec3& src) {
+                m_player.takeDamage(dmg, src, &m_audioEngine);
             });
             m_renderer.updateParticles(dt, m_world, m_player.position());
         } else {
@@ -1053,14 +1068,14 @@ void Application::populateCreativeCatalog() {
     const BlockId catalog[32] = {
         // Hotbar (8 items)
         BlockId::Dirt, BlockId::Stone, BlockId::Cobblestone, BlockId::Planks,
-        BlockId::Torch, BlockId::DiamondPickaxe, BlockId::DiamondSword, BlockId::Water,
+        BlockId::Torch, BlockId::DiamondPickaxe, BlockId::DiamondSword, BlockId::CookedBeef,
         // Main inventory (24 items)
         BlockId::Grass, BlockId::Sand, BlockId::Wood, BlockId::Leaves,
         BlockId::TallGrass, BlockId::DirtPath, BlockId::Bedrock, BlockId::CraftingTable,
         BlockId::CoalOre, BlockId::IronOre, BlockId::GoldOre, BlockId::DiamondOre,
         BlockId::Coal, BlockId::IronIngot, BlockId::Diamond, BlockId::Stick,
-        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondAxe,
-        BlockId::IronAxe, BlockId::IronShovel, BlockId::DiamondShovel, BlockId::IronSword
+        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::DiamondAxe, BlockId::DiamondShovel,
+        BlockId::Apple, BlockId::Bread, BlockId::CookedPorkchop, BlockId::Water
     };
 
     for (int i = 0; i < 8; ++i) {
@@ -1073,6 +1088,7 @@ void Application::populateCreativeCatalog() {
 
 void Application::toggleCreativeMode() {
     m_creativeMode = !m_creativeMode;
+    m_player.setCreative(m_creativeMode);
     if (m_creativeMode) {
         populateCreativeCatalog();
         m_audioEngine.play(SoundId::ItemPickup, 1.0f, 1.3f);
@@ -1357,6 +1373,36 @@ void Application::updateInteraction(float dt) {
         return SoundId::DigStone;
     };
 
+    // 0. Eating food (hold right-click with food item)
+    if (m_input.cursorCaptured() && m_input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT) && !held.empty() && isFood(held.id) &&
+        (m_player.hunger() < m_player.maxHunger() || m_player.health() < m_player.maxHealth() || m_creativeMode)) {
+        m_eatingTimer += dt;
+        m_eatSoundTimer -= dt;
+        if (m_eatSoundTimer <= 0.0f) {
+            m_eatSoundTimer = 0.22f;
+            const float pitch = 0.95f + 0.1f * (static_cast<float>(std::rand() % 10) / 10.0f);
+            m_audioEngine.play(SoundId::PlayerEat, 0.75f, pitch);
+        }
+        if (m_player.swingProgress() >= 0.70f) {
+            m_player.triggerSwing();
+        }
+        if (m_eatingTimer >= 1.2f) {
+            const FoodProperties fp = foodNutrition(held.id);
+            m_player.feed(static_cast<float>(fp.hunger), static_cast<float>(fp.health));
+            m_audioEngine.play(SoundId::PlayerBurp, 0.85f, 1.0f);
+            if (!m_creativeMode) {
+                held.count--;
+                if (held.count <= 0) held.clear();
+            }
+            m_eatingTimer = 0.0f;
+            m_eatSoundTimer = 0.0f;
+        }
+        return; // Consuming food takes precedence over placing blocks
+    } else {
+        m_eatingTimer = 0.0f;
+        m_eatSoundTimer = 0.0f;
+    }
+
     // 1. Mob Melee Attack (instant on click)
     if (m_input.cursorCaptured() && m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
         m_player.triggerSwing();
@@ -1523,6 +1569,41 @@ bool Application::playerOccupies(const glm::ivec3& block) const {
     return minP.x < bMax.x && maxP.x > bMin.x &&
            minP.y < bMax.y && maxP.y > bMin.y &&
            minP.z < bMax.z && maxP.z > bMin.z;
+}
+
+void Application::handleGameOverInput() {
+    const glm::vec2 mouse = mouseInFramebuffer();
+    const float s = computeUiScale();
+    const float fbW = static_cast<float>(m_fbWidth);
+    const float fbH = static_cast<float>(m_fbHeight);
+    const float btnW = 120.0f * s;
+    const float btnH = 18.0f * s;
+    const float btnX = (fbW - btnW) * 0.5f;
+    const float respawnY = fbH * 0.42f;
+    const float quitY = respawnY - (26.0f * s);
+
+    const bool hoverRespawn = (mouse.x >= btnX && mouse.x <= btnX + btnW &&
+                               mouse.y >= respawnY && mouse.y <= respawnY + btnH);
+    const bool hoverQuit = (mouse.x >= btnX && mouse.x <= btnX + btnW &&
+                            mouse.y >= quitY && mouse.y <= quitY + btnH);
+
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (hoverRespawn) {
+            m_audioEngine.play(SoundId::Click, 0.85f, 1.0f);
+            respawnPlayer();
+        } else if (hoverQuit) {
+            m_audioEngine.play(SoundId::Click, 0.85f, 1.0f);
+            quitToTitle();
+        }
+    }
+}
+
+void Application::respawnPlayer() {
+    const float spawnX = static_cast<float>(m_world.widthBlocks()) * 0.5f;
+    const float spawnZ = static_cast<float>(m_world.depthBlocks()) * 0.5f;
+    m_player.respawn(m_world, spawnX, spawnZ);
+    m_state = GameState::Playing;
+    setCursorCaptured(true);
 }
 
 void Application::rebuildDirtyMeshes() {
@@ -1841,7 +1922,28 @@ void Application::renderScene() {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
         }
 
+        // Screen-edge horror hurt/danger vignette
+        m_renderer.drawHurtVignette(m_player.hurtTimer(), m_player.health() / m_player.maxHealth(), static_cast<float>(m_uiTime));
+
+        // Top-left RPG Horror Vitals Card (Health, Hunger, Oxygen)
+        m_renderer.drawRpgVitalsHud(m_player.health(), m_player.maxHealth(),
+                                    m_player.hunger(), m_player.maxHunger(),
+                                    m_player.oxygen(), m_player.maxOxygen(),
+                                    m_player.isInWater(), m_player.hurtTimer(),
+                                    static_cast<float>(m_uiTime), m_creativeMode);
+
         m_renderer.drawHud(m_selectedSlot, m_hotbar, 8);
+        return;
+    }
+
+    if (m_state == GameState::GameOver) {
+        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
+
+        bool hoverRespawn = false, hoverQuit = false;
+        m_renderer.drawDeathScreen(static_cast<float>(m_uiTime), mouseInFramebuffer(), hoverRespawn, hoverQuit);
         return;
     }
 

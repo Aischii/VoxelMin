@@ -58,6 +58,12 @@ enum class BlockId : uint8_t {
     DiamondSword,
     DiamondAxe,
     CraftingTable,
+    RawPorkchop,
+    CookedPorkchop,
+    RawBeef,
+    CookedBeef,
+    Apple,
+    Bread,
     Count
 };
 
@@ -122,6 +128,12 @@ enum class TextureTile : uint8_t {
     CraftingTableTop,
     CraftingTableSide,
     CraftingTableFront,
+    RawPorkchop,
+    CookedPorkchop,
+    RawBeef,
+    CookedBeef,
+    Apple,
+    Bread,
     Destroy0,
     Destroy1,
     Destroy2,
@@ -191,6 +203,12 @@ inline const BlockDef& blockDef(BlockId id) {
         {"Diamond Sword",    TextureTile::DiamondSword, TextureTile::DiamondSword, TextureTile::DiamondSword, false},
         {"Diamond Axe",      TextureTile::DiamondAxe,   TextureTile::DiamondAxe,   TextureTile::DiamondAxe,   false},
         {"Crafting Table",   TextureTile::CraftingTableTop, TextureTile::CraftingTableSide, TextureTile::Planks, true},
+        {"Raw Porkchop",     TextureTile::RawPorkchop,  TextureTile::RawPorkchop,  TextureTile::RawPorkchop,  false},
+        {"Cooked Porkchop",  TextureTile::CookedPorkchop, TextureTile::CookedPorkchop, TextureTile::CookedPorkchop, false},
+        {"Raw Beef",         TextureTile::RawBeef,      TextureTile::RawBeef,      TextureTile::RawBeef,      false},
+        {"Cooked Beef",      TextureTile::CookedBeef,   TextureTile::CookedBeef,   TextureTile::CookedBeef,   false},
+        {"Apple",            TextureTile::Apple,        TextureTile::Apple,        TextureTile::Apple,        false},
+        {"Bread",            TextureTile::Bread,        TextureTile::Bread,        TextureTile::Bread,        false},
     };
     return defs[static_cast<int>(id)];
 }
@@ -259,8 +277,31 @@ inline bool isTool(BlockId id) {
     return isPickaxe(id) || isAxe(id) || isShovel(id) || isSword(id);
 }
 
+struct FoodProperties {
+    int hunger; // Hunger restored (0-100)
+    int health; // Instant health restored (0-100)
+};
+
+inline bool isFood(BlockId id) {
+    return id == BlockId::RawPorkchop || id == BlockId::CookedPorkchop ||
+           id == BlockId::RawBeef || id == BlockId::CookedBeef ||
+           id == BlockId::Apple || id == BlockId::Bread;
+}
+
+inline FoodProperties foodNutrition(BlockId id) {
+    switch (id) {
+        case BlockId::Apple:          return {15, 5};
+        case BlockId::Bread:          return {25, 10};
+        case BlockId::RawPorkchop:    return {15, 0};
+        case BlockId::CookedPorkchop: return {40, 20};
+        case BlockId::RawBeef:        return {15, 0};
+        case BlockId::CookedBeef:     return {40, 20};
+        default:                      return {0, 0};
+    }
+}
+
 inline bool isItem(BlockId id) {
-    return isTool(id) || id == BlockId::Stick || id == BlockId::Coal ||
+    return isTool(id) || isFood(id) || id == BlockId::Stick || id == BlockId::Coal ||
            id == BlockId::IronIngot || id == BlockId::Diamond;
 }
 
@@ -494,6 +535,12 @@ inline glm::vec3 blockColor(BlockId id) {
         case BlockId::DiamondShovel:
         case BlockId::DiamondSword: return {0.30f, 0.85f, 0.95f};
         case BlockId::CraftingTable: return {0.65f, 0.50f, 0.30f};
+        case BlockId::RawPorkchop:    return {0.95f, 0.60f, 0.62f};
+        case BlockId::CookedPorkchop: return {0.75f, 0.44f, 0.22f};
+        case BlockId::RawBeef:        return {0.80f, 0.20f, 0.20f};
+        case BlockId::CookedBeef:     return {0.55f, 0.28f, 0.16f};
+        case BlockId::Apple:          return {0.92f, 0.15f, 0.15f};
+        case BlockId::Bread:          return {0.85f, 0.62f, 0.25f};
         default:                   return {1.00f, 0.00f, 1.00f};
     }
 }

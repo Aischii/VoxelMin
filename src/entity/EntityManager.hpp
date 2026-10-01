@@ -19,7 +19,8 @@ public:
     void clear();
 
     void update(float dt, const World& world, const glm::vec3& playerPos,
-                const std::function<bool(BlockId, int)>& onPickup = nullptr);
+                const std::function<bool(BlockId, int)>& onPickup = nullptr,
+                const std::function<void(float, const glm::vec3&)>& onPlayerDamage = nullptr);
     Mob* hitTest(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDist);
     void alertNearbyPigmen(const glm::vec3& position, float radius = 14.0f);
     void buildMesh(std::vector<Vertex>& outVertices, const World& world) const;

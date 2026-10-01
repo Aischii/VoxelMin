@@ -127,12 +127,32 @@ void EntityManager::clear() {
 }
 
 void EntityManager::update(float dt, const World& world, const glm::vec3& playerPos,
-                           const std::function<bool(BlockId, int)>& onPickup) {
+                           const std::function<bool(BlockId, int)>& onPickup,
+                           const std::function<void(float, const glm::vec3&)>& onPlayerDamage) {
     for (auto it = m_mobs.begin(); it != m_mobs.end(); ) {
         if (!(*it)->isAlive()) {
+            // Drop meat/food on mob death
+            const glm::vec3 dropPos = (*it)->position() + glm::vec3(0.0f, 0.4f, 0.0f);
+            if ((*it)->type() == MobType::Pig) {
+                const int count = 1 + (std::rand() % 2); // 1-2 Raw Porkchops
+                spawnItem(BlockId::RawPorkchop, dropPos, count);
+            } else if ((*it)->type() == MobType::Cow) {
+                const int count = 1 + (std::rand() % 3); // 1-3 Raw Beef
+                spawnItem(BlockId::RawBeef, dropPos, count);
+            }
             it = m_mobs.erase(it);
         } else {
             (*it)->update(dt, world, playerPos);
+            // Hostile mob melee attack on player
+            if ((*it)->type() == MobType::PigmanVillager && (*it)->isHostile()) {
+                const float dist = glm::distance((*it)->position(), playerPos);
+                if (dist <= 1.5f && (*it)->canAttack()) {
+                    (*it)->resetAttackCooldown(1.0f);
+                    if (onPlayerDamage) {
+                        onPlayerDamage(15.0f, (*it)->position());
+                    }
+                }
+            }
             ++it;
         }
     }

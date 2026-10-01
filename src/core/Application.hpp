@@ -33,6 +33,7 @@ enum class GameState {
     Paused,
     Options,
     Inventory,
+    GameOver,
 };
 
 // Top-level game object: owns the window, world, player, renderer, menus and
@@ -83,6 +84,8 @@ private:
     // Gameplay
     void handlePlayInput();
     void handleInventoryInput();
+    void handleGameOverInput();
+    void respawnPlayer();
     void updateInteraction(float dt);
     void rebuildDirtyMeshes();
     bool playerOccupies(const glm::ivec3& block) const;
@@ -165,6 +168,10 @@ private:
     glm::ivec3 m_miningBlock{0};
     float m_miningProgress = 0.0f;
     float m_digSoundTimer = 0.0f;
+
+    // Eating state
+    float m_eatingTimer = 0.0f;
+    float m_eatSoundTimer = 0.0f;
 
 
     RayHit m_target;
