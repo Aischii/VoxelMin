@@ -36,6 +36,7 @@ other except through the dependencies shown above.
 | `ConfirmDeleteWorld` | no | visible | rotating menu camera | confirm delete dialog |
 | `Playing` | yes | hidden | player camera | HUD |
 | `Inventory` | yes (physics/gravity) | visible | live player camera (dimmed) | storage inventory |
+| `GameOver` | no (corpse physics only) | visible | frozen player camera | death screen; world keeps simulating behind it |
 | `Paused` | no | visible | frozen player camera (dimmed) | pause menu |
 | `Options` | no | visible | depends on where it was opened | options menu |
 
@@ -186,6 +187,12 @@ via `Shader::loadFromFiles()`:
 
 - `chunk` -- world geometry with greedy UV tiling and alpha cutout discard (`if (texel.a < 0.1) discard;`).
   Per-face shading from the normal (top bright, bottom dark) plus distance fog toward the sky colour. Uniform `uVP` only.
+- `skydome` -- camera-centred UV-sphere dome drawn first in `Renderer::DrawSky` with depth writes off.
+  The fragment shader maps the view direction to a zenith/horizon/ground gradient derived from the time-of-day
+  sky colour, so the sky changes with the direction the player faces instead of being a flat clear colour.
+  The horizon colour matches the fog colour so distant terrain blends seamlessly into the sky.
+  The dome is world-aligned and follows the camera position, and `Renderer::drawSky` must receive the same
+  camera as the world draw (player camera during play, menu camera in menus) or the sky locks to a stale view.
 - `line` -- the selection outline. A unit-cube wireframe drawn per targeted block.
 - `ui` -- flat 2D geometry with per-vertex colour, in screen pixels; used for
   panels, button fills, gradients, the crosshair and the hotbar.
@@ -331,7 +338,9 @@ Holding `Left Ctrl` or double-tapping `W` sets `m_sprinting` (a timed latch, so
 a brief double-tap is enough), which swaps `WALK_SPEED` for `SPRINT_SPEED`
 (7.4 blocks/s) and drives a smooth FOV widening in `Player::update`. The FOV
 interpolates toward its target rather than snapping, and the same path handles
-the extra speed of creative flight.
+the extra speed of creative flight. Flight itself is only available in creative
+mode: the `F` toggle is ignored in survival, leaving creative force-disables
+flight, and saves never restore a flying state (creative mode is not persisted).
 
 ### Water & swimming
 
@@ -460,7 +469,9 @@ Reference and rationale: `docs/SOURCES.md` section 4.
 `raycast()` is an Amanatides & Woo voxel DDA. It returns the first opaque block
 and the face normal through which the ray entered. Left click sets that block to
 `Air`; right click places the selected block at `block + normal`, unless that
-cell would overlap the player.
+cell would overlap the player. Right-clicking `Grass` or `Dirt` with a shovel
+tills it into a `Dirt Path` (costs shovel durability in survival); a broken
+`Dirt Path` drops `Dirt` via `getDropForBlock`.
 
 ## Loading Screen & World Generation
 

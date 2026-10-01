@@ -1,6 +1,7 @@
 #pragma once
 #include "render/Camera.hpp"
 #include "render/Mesh.hpp"
+#include "world/Block.hpp"
 
 #include <algorithm>
 #include <glm/glm.hpp>
@@ -71,7 +72,13 @@ public:
     float hurtTimer() const { return m_hurtTimer; }
 
     bool isCreative() const { return m_creative; }
-    void setCreative(bool c) { m_creative = c; }
+    void setCreative(bool c) {
+        m_creative = c;
+        if (c) m_flying = true;
+    }
+
+    void setHeldItem(BlockId id) { m_heldItem = id; }
+    BlockId heldItem() const { return m_heldItem; }
 
     void takeDamage(float amount, const glm::vec3& sourcePos = glm::vec3(0.0f), AudioEngine* audio = nullptr);
     void heal(float amount);
@@ -97,7 +104,9 @@ private:
     bool m_sprinting = false;
     bool m_inWater = false;
     bool m_creative = false;
+    BlockId m_heldItem = BlockId::Air;
     float m_timeSinceWPress = 100.0f;
+    float m_timeSinceSpacePress = 100.0f;
     float m_mouseSensitivity = 0.12f;
 
     // Vitals & Survival state

@@ -467,6 +467,7 @@ inline BlockId getDropForBlock(BlockId block) {
         case BlockId::Stone:
             return BlockId::Cobblestone;
         case BlockId::Grass:
+        case BlockId::DirtPath:
             return BlockId::Dirt;
         case BlockId::CoalOre:
             return BlockId::Coal;

@@ -78,7 +78,7 @@ private:
     void quitToTitle();
     void openOptions(GameState from);
     void closeOptions();
-    void openInventory();
+    void openInventory(bool withCraftingTable = false);
     void closeInventory();
 
     void handlePlayInput();
@@ -90,12 +90,14 @@ private:
     void rebuildDirtyMeshes();
     bool playerOccupies(const glm::ivec3& block) const;
     bool addItem(BlockId id, int count = 1);
-    void updateCrafting();
-    void takeCraftResult();
+    bool canCraftRecipe(int catIdx, int recIdx) const;
+    bool craftSelectedRecipe();
     void toggleCreativeMode();
     void populateCreativeCatalog();
 
     // Day / Night cycle & Celestial lighting
+    int moonPhase() const { return m_dayCount % 8; }
+    float moonLightFactor() const;
     float computeSunlight() const;
     glm::vec3 computeSkyColor() const;
     glm::vec3 computeFogColor() const;
@@ -155,14 +157,17 @@ private:
 
     ItemSlot m_hotbar[8] = {};
     ItemSlot m_inventory[24] = {};
-    ItemSlot m_craftGrid[4] = {};
-    ItemSlot m_craftResult;
     ItemSlot m_heldItem;
     int m_selectedSlot = 0;
+
+    int m_craftingCategory = 0;
+    int m_selectedRecipe = 0;
+    bool m_isCraftingTableOpen = false;
 
     bool m_creativeMode = false;
     int m_creativeTab = 0;
     float m_timeOfDay = 0.22f; // Starts in the morning (~08:30 AM)
+    int m_dayCount = 0;
 
     // Mining / Block breaking state
     bool m_isMining = false;

@@ -1,7 +1,9 @@
 #include "core/Application.hpp"
 #include "core/Log.hpp"
+#include "world/Block.hpp"
 #include "world/Chunk.hpp"
 #include "world/ChunkMesher.hpp"
+#include "world/CraftingRecipes.hpp"
 #include "world/VillageGenerator.hpp"
 #include "world/WorldSave.hpp"
 
@@ -156,9 +158,15 @@ void Application::run() {
 
         m_audioEngine.setInGame(m_state == GameState::Playing || m_state == GameState::Inventory);
 
-        if (m_state == GameState::Playing || m_state == GameState::Inventory) {
+        if (m_state == GameState::Playing || m_state == GameState::Inventory || m_state == GameState::GameOver) {
             m_timeOfDay += dt / config::DAY_CYCLE_SECONDS;
-            if (m_timeOfDay >= 1.0f) m_timeOfDay -= 1.0f;
+            if (m_timeOfDay >= 1.0f) {
+                m_timeOfDay -= 1.0f;
+                m_dayCount++;
+            }
+            m_world.tickEcology(glm::ivec3(m_player.position()), 24, [this](const glm::vec3& pos, BlockId dropId) {
+                m_entityManager.spawnItem(dropId, pos, 1);
+            });
         }
 
         if (m_state == GameState::Playing) {
@@ -189,6 +197,18 @@ void Application::run() {
         } else if (m_state == GameState::GameOver) {
             handleGameOverInput();
             m_player.update(dt, m_input, m_world, &m_audioEngine);
+            // Keep the world simulating behind the death screen instead of
+            // freezing: mobs wander, items bob, particles drift. takeDamage
+            // early-returns while m_isDead, so mobs cannot finish the kill.
+            m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+                if (addItem(id, count)) {
+                    m_audioEngine.play(SoundId::ItemPickup, 0.9f);
+                    return true;
+                }
+                return false;
+            }, [this](float dmg, const glm::vec3& src) {
+                m_player.takeDamage(dmg, src, &m_audioEngine);
+            });
             m_renderer.updateParticles(dt, m_world, m_player.position());
         } else if (m_state == GameState::Inventory) {
             handleInventoryInput();
@@ -810,215 +830,86 @@ void Application::closeOptions() {
     if (m_state == GameState::Paused) m_pauseMenu.resetSelection();
     else m_mainMenu.resetSelection();
 }
-void Application::openInventory() {
+void Application::openInventory(bool withCraftingTable) {
     m_state = GameState::Inventory;
+    m_isCraftingTableOpen = withCraftingTable;
     m_isMining = false;
     m_miningProgress = 0.0f;
     setCursorCaptured(false);
 }
 
 void Application::closeInventory() {
-    for (int i = 0; i < 4; ++i) {
-        if (!m_craftGrid[i].empty()) {
-            if (!addItem(m_craftGrid[i].id, m_craftGrid[i].count)) {
-                m_entityManager.spawnItem(m_craftGrid[i].id, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), m_craftGrid[i].count);
-            }
-            m_craftGrid[i].clear();
-        }
-    }
-    m_craftResult.clear();
-
     if (!m_heldItem.empty()) {
         if (!addItem(m_heldItem.id, m_heldItem.count)) {
             m_entityManager.spawnItem(m_heldItem.id, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), m_heldItem.count);
         }
         m_heldItem.clear();
     }
-
+    m_isCraftingTableOpen = false;
     m_state = GameState::Playing;
     setCursorCaptured(true);
 }
 
-void Application::updateCrafting() {
-    m_craftResult.clear();
+bool Application::canCraftRecipe(int catIdx, int recIdx) const {
+    const auto& categories = getConsoleRecipeCategories();
+    if (catIdx < 0 || catIdx >= static_cast<int>(categories.size())) return false;
+    const auto& recipes = categories[catIdx].recipes;
+    if (recIdx < 0 || recIdx >= static_cast<int>(recipes.size())) return false;
 
-    const BlockId c0 = m_craftGrid[0].id;
-    const BlockId c1 = m_craftGrid[1].id;
-    const BlockId c2 = m_craftGrid[2].id;
-    const BlockId c3 = m_craftGrid[3].id;
+    const auto& recipe = recipes[recIdx];
+    if (recipe.tableOnly && !m_isCraftingTableOpen) return false;
 
-    int nonAir = 0;
-    for (int i = 0; i < 4; ++i) {
-        if (!m_craftGrid[i].empty()) nonAir++;
+    for (int i = 0; i < recipe.ingredientCount; ++i) {
+        const BlockId neededId = recipe.ingredients[i].id;
+        const int neededCount = recipe.ingredients[i].count;
+        int haveCount = 0;
+        for (int h = 0; h < 8; ++h) {
+            if (m_hotbar[h].id == neededId) haveCount += m_hotbar[h].count;
+        }
+        for (int inv = 0; inv < 24; ++inv) {
+            if (m_inventory[inv].id == neededId) haveCount += m_inventory[inv].count;
+        }
+        if (haveCount < neededCount) return false;
     }
-    if (nonAir == 0) return;
-
-    // 1. Single Wood Log -> 4 Planks
-    if (nonAir == 1) {
-        for (int i = 0; i < 4; ++i) {
-            if (!m_craftGrid[i].empty()) {
-                const BlockId id = m_craftGrid[i].id;
-                if (id == BlockId::Wood || id == BlockId::WoodX || id == BlockId::WoodZ) {
-                    m_craftResult = ItemSlot(BlockId::Planks, 4);
-                    return;
-                }
-            }
-        }
-    }
-
-    // 2. Two item recipes
-    if (nonAir == 2) {
-        // Planks -> 4 Sticks (2 vertical Planks)
-        if ((c0 == BlockId::Planks && c2 == BlockId::Planks && c1 == BlockId::Air && c3 == BlockId::Air) ||
-            (c1 == BlockId::Planks && c3 == BlockId::Planks && c0 == BlockId::Air && c2 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::Stick, 4);
-            return;
-        }
-
-        // Coal + Stick -> 4 Torches (vertical)
-        if (((c0 == BlockId::Coal || c0 == BlockId::CoalOre) && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
-            ((c1 == BlockId::Coal || c1 == BlockId::CoalOre) && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::Torch, 4);
-            return;
-        }
-
-        // Wooden Shovel: 1 Plank on top, 1 Stick on bottom
-        if ((c0 == BlockId::Planks && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
-            (c1 == BlockId::Planks && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::WoodShovel, 1);
-            return;
-        }
-
-        // Stone Shovel: 1 Cobblestone on top, 1 Stick on bottom
-        if ((c0 == BlockId::Cobblestone && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
-            (c1 == BlockId::Cobblestone && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::StoneShovel, 1);
-            return;
-        }
-
-        // Iron Shovel: 1 Iron Ingot on top, 1 Stick on bottom
-        if ((c0 == BlockId::IronIngot && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
-            (c1 == BlockId::IronIngot && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::IronShovel, 1);
-            return;
-        }
-
-        // Diamond Shovel: 1 Diamond on top, 1 Stick on bottom
-        if ((c0 == BlockId::Diamond && c2 == BlockId::Stick && c1 == BlockId::Air && c3 == BlockId::Air) ||
-            (c1 == BlockId::Diamond && c3 == BlockId::Stick && c0 == BlockId::Air && c2 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::DiamondShovel, 1);
-            return;
-        }
-
-        // Wooden Sword: 1 Plank, 1 Stick diagonal
-        if ((c0 == BlockId::Planks && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
-            (c1 == BlockId::Planks && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::WoodSword, 1);
-            return;
-        }
-
-        // Stone Sword: 1 Cobblestone, 1 Stick diagonal
-        if ((c0 == BlockId::Cobblestone && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
-            (c1 == BlockId::Cobblestone && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::StoneSword, 1);
-            return;
-        }
-
-        // Iron Sword: 1 Iron Ingot, 1 Stick diagonal
-        if ((c0 == BlockId::IronIngot && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
-            (c1 == BlockId::IronIngot && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::IronSword, 1);
-            return;
-        }
-
-        // Diamond Sword: 1 Diamond, 1 Stick diagonal
-        if ((c0 == BlockId::Diamond && c3 == BlockId::Stick && c1 == BlockId::Air && c2 == BlockId::Air) ||
-            (c1 == BlockId::Diamond && c2 == BlockId::Stick && c0 == BlockId::Air && c3 == BlockId::Air)) {
-            m_craftResult = ItemSlot(BlockId::DiamondSword, 1);
-            return;
-        }
-    }
-
-    // 3. Three-item recipes (Pickaxes and Axes in 2x2)
-    if (nonAir == 3) {
-        // Wooden Pickaxe: 2 Planks on top row (0 and 1), 1 Stick on bottom (2 or 3)
-        if (c0 == BlockId::Planks && c1 == BlockId::Planks && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::WoodPickaxe, 1);
-            return;
-        }
-        // Stone Pickaxe: 2 Cobblestone on top row, 1 Stick on bottom
-        if (c0 == BlockId::Cobblestone && c1 == BlockId::Cobblestone && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::StonePickaxe, 1);
-            return;
-        }
-        // Iron Pickaxe: 2 Iron Ingot on top row, 1 Stick on bottom
-        if (c0 == BlockId::IronIngot && c1 == BlockId::IronIngot && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::IronPickaxe, 1);
-            return;
-        }
-        // Diamond Pickaxe: 2 Diamond on top row, 1 Stick on bottom
-        if (c0 == BlockId::Diamond && c1 == BlockId::Diamond && (c2 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::DiamondPickaxe, 1);
-            return;
-        }
-
-        // Wooden Axe: 2 Planks vertical (0 and 2), 1 Stick (1 or 3)
-        if (c0 == BlockId::Planks && c2 == BlockId::Planks && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::WoodAxe, 1);
-            return;
-        }
-        // Stone Axe: 2 Cobblestone vertical (0 and 2), 1 Stick (1 or 3)
-        if (c0 == BlockId::Cobblestone && c2 == BlockId::Cobblestone && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::StoneAxe, 1);
-            return;
-        }
-        // Iron Axe: 2 Iron Ingot vertical (0 and 2), 1 Stick (1 or 3)
-        if (c0 == BlockId::IronIngot && c2 == BlockId::IronIngot && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::IronAxe, 1);
-            return;
-        }
-        // Diamond Axe: 2 Diamond vertical (0 and 2), 1 Stick (1 or 3)
-        if (c0 == BlockId::Diamond && c2 == BlockId::Diamond && (c1 == BlockId::Stick || c3 == BlockId::Stick)) {
-            m_craftResult = ItemSlot(BlockId::DiamondAxe, 1);
-            return;
-        }
-    }
-
-    // 4. Four Planks -> Crafting Table
-    if (nonAir == 4) {
-        if (c0 == BlockId::Planks && c1 == BlockId::Planks &&
-            c2 == BlockId::Planks && c3 == BlockId::Planks) {
-            m_craftResult = ItemSlot(BlockId::CraftingTable, 1);
-            return;
-        }
-    }
+    return true;
 }
 
-void Application::takeCraftResult() {
-    if (m_craftResult.empty()) return;
-
-    if (m_heldItem.empty()) {
-        m_heldItem = m_craftResult;
-        for (int i = 0; i < 4; ++i) {
-            if (!m_craftGrid[i].empty()) {
-                m_craftGrid[i].count--;
-                if (m_craftGrid[i].count <= 0) m_craftGrid[i].clear();
-            }
-        }
-        updateCrafting();
-        m_audioEngine.play(SoundId::ItemPickup, 0.9f, 1.15f);
-    } else if (m_heldItem.id == m_craftResult.id && !isTool(m_heldItem.id) &&
-               m_heldItem.count + m_craftResult.count <= 64) {
-        m_heldItem.count += m_craftResult.count;
-        for (int i = 0; i < 4; ++i) {
-            if (!m_craftGrid[i].empty()) {
-                m_craftGrid[i].count--;
-                if (m_craftGrid[i].count <= 0) m_craftGrid[i].clear();
-            }
-        }
-        updateCrafting();
-        m_audioEngine.play(SoundId::ItemPickup, 0.9f, 1.15f);
+bool Application::craftSelectedRecipe() {
+    if (!canCraftRecipe(m_craftingCategory, m_selectedRecipe)) {
+        m_audioEngine.play(SoundId::Click, 0.45f, 0.75f);
+        return false;
     }
+
+    const auto& categories = getConsoleRecipeCategories();
+    const auto& recipe = categories[m_craftingCategory].recipes[m_selectedRecipe];
+
+    for (int i = 0; i < recipe.ingredientCount; ++i) {
+        const BlockId neededId = recipe.ingredients[i].id;
+        int remaining = recipe.ingredients[i].count;
+
+        for (int h = 0; h < 8 && remaining > 0; ++h) {
+            if (m_hotbar[h].id == neededId) {
+                const int take = std::min(m_hotbar[h].count, remaining);
+                m_hotbar[h].count -= take;
+                remaining -= take;
+                if (m_hotbar[h].count <= 0) m_hotbar[h].clear();
+            }
+        }
+        for (int inv = 0; inv < 24 && remaining > 0; ++inv) {
+            if (m_inventory[inv].id == neededId) {
+                const int take = std::min(m_inventory[inv].count, remaining);
+                m_inventory[inv].count -= take;
+                remaining -= take;
+                if (m_inventory[inv].count <= 0) m_inventory[inv].clear();
+            }
+        }
+    }
+
+    if (!addItem(recipe.outputId, recipe.outputCount)) {
+        m_entityManager.spawnItem(recipe.outputId, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), recipe.outputCount);
+    }
+    m_audioEngine.play(SoundId::ItemPickup, 0.95f, 1.25f);
+    return true;
 }
 
 bool Application::addItem(BlockId id, int count) {
@@ -1061,6 +952,9 @@ bool Application::addItem(BlockId id, int count) {
         }
     }
 
+    // In Creative mode, if no slot is left, discard item cleanly instead of blocking pickup
+    if (m_creativeMode) return true;
+
     return false;
 }
 
@@ -1091,12 +985,28 @@ void Application::toggleCreativeMode() {
     m_player.setCreative(m_creativeMode);
     if (m_creativeMode) {
         populateCreativeCatalog();
+        m_player.setFlying(true); // Automatically enable flight mode in creative!
         m_audioEngine.play(SoundId::ItemPickup, 1.0f, 1.3f);
-        log::info("Creative mode ENABLED");
+        log::info("Creative mode ENABLED (Flying auto-enabled, double-space to toggle)");
     } else {
+        m_player.setFlying(false);
         m_audioEngine.play(SoundId::Click, 0.8f, 0.9f);
         log::info("Creative mode DISABLED (Survival mode)");
     }
+}
+
+float Application::moonLightFactor() const {
+    static const float factors[8] = {
+        1.00f,  // 0: Full Moon (Soft ambient blue moonlight)
+        0.70f,  // 1: Waning Gibbous
+        0.40f,  // 2: Third Quarter
+        0.15f,  // 3: Waning Crescent
+        0.002f, // 4: New Moon (True pitch-black darkness)
+        0.15f,  // 5: Waxing Crescent
+        0.40f,  // 6: First Quarter
+        0.70f   // 7: Waxing Gibbous
+    };
+    return factors[m_dayCount % 8];
 }
 
 float Application::computeSunlight() const {
@@ -1105,14 +1015,22 @@ float Application::computeSunlight() const {
     if (sunSin > 0.0f) {
         return std::clamp(sunSin * 1.35f, 0.0f, 1.0f);
     }
-    return 0.0f;
+    // Lunar phase moonlight during the night
+    const float moonBase = 0.065f * moonLightFactor();
+    const float nightDepth = std::clamp(-sunSin, 0.0f, 1.0f);
+    return moonBase * nightDepth;
 }
 
 glm::vec3 Application::computeSkyColor() const {
     const float t = m_timeOfDay;
+    const float moon = moonLightFactor();
+    const glm::vec3 fullMoonSky(0.012f, 0.016f, 0.038f);
+    const glm::vec3 newMoonSky(0.0005f, 0.0008f, 0.0015f);
+    const glm::vec3 nightSky = glm::mix(newMoonSky, fullMoonSky, moon);
+
     if (t < 0.05f) {
         const float f = (t + 0.05f) / 0.10f;
-        return glm::mix(glm::vec3(0.005f, 0.008f, 0.015f), glm::vec3(0.92f, 0.50f, 0.32f), f);
+        return glm::mix(nightSky, glm::vec3(0.92f, 0.50f, 0.32f), f);
     } else if (t < 0.15f) {
         const float f = (t - 0.05f) / 0.10f;
         return glm::mix(glm::vec3(0.92f, 0.50f, 0.32f), glm::vec3(0.54f, 0.72f, 0.98f), f);
@@ -1126,17 +1044,17 @@ glm::vec3 Application::computeSkyColor() const {
         return glm::mix(glm::vec3(0.95f, 0.42f, 0.20f), glm::vec3(0.12f, 0.08f, 0.22f), f);
     } else if (t < 0.90f) {
         const float f = std::clamp((t - 0.58f) / 0.12f, 0.0f, 1.0f);
-        return glm::mix(glm::vec3(0.12f, 0.08f, 0.22f), glm::vec3(0.005f, 0.008f, 0.015f), f);
+        return glm::mix(glm::vec3(0.12f, 0.08f, 0.22f), nightSky, f);
     } else {
         const float f = (t - 0.90f) / 0.05f;
-        return glm::mix(glm::vec3(0.005f, 0.008f, 0.015f), glm::vec3(0.005f, 0.008f, 0.015f), f);
+        return glm::mix(nightSky, nightSky, f);
     }
 }
 
 glm::vec3 Application::computeFogColor() const {
     const glm::vec3 sky = computeSkyColor();
     const float sunlight = computeSunlight();
-    return glm::mix(sky * 0.40f, sky, sunlight);
+    return glm::mix(sky * (0.15f + 0.25f * moonLightFactor()), sky, sunlight);
 }
 
 void Application::handleCreativeInventoryInput() {
@@ -1307,70 +1225,125 @@ void Application::handleInventoryInput() {
         return;
     }
 
+    const auto& categories = getConsoleRecipeCategories();
+    const int numTabs = static_cast<int>(categories.size());
+
+    // Tab key switches category
+    if (m_input.keyPressed(GLFW_KEY_TAB)) {
+        m_craftingCategory = (m_craftingCategory + 1) % numTabs;
+        m_selectedRecipe = 0;
+        m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
+    }
+
+    const auto& activeCat = categories[m_craftingCategory];
+    const int numRecipes = static_cast<int>(activeCat.recipes.size());
+
+    // Left / Right keys cycle recipes
+    if (m_input.keyPressed(GLFW_KEY_LEFT)) {
+        m_selectedRecipe = (m_selectedRecipe + numRecipes - 1) % numRecipes;
+        m_audioEngine.play(SoundId::Click, 0.5f, 1.3f);
+    }
+    if (m_input.keyPressed(GLFW_KEY_RIGHT)) {
+        m_selectedRecipe = (m_selectedRecipe + 1) % numRecipes;
+        m_audioEngine.play(SoundId::Click, 0.5f, 1.3f);
+    }
+
+    const double scroll = m_input.scrollY();
+    if (scroll > 0.0) {
+        m_selectedRecipe = (m_selectedRecipe + numRecipes - 1) % numRecipes;
+    } else if (scroll < 0.0) {
+        m_selectedRecipe = (m_selectedRecipe + 1) % numRecipes;
+    }
+
+    // Space / Enter / Enter Key crafts the selected recipe
+    if (m_input.keyPressed(GLFW_KEY_SPACE) || m_input.keyPressed(GLFW_KEY_ENTER) || m_input.keyPressed(GLFW_KEY_KP_ENTER)) {
+        craftSelectedRecipe();
+    }
+
     const glm::vec2 mouse = mouseInFramebuffer();
     const float s = computeUiScale();
-    const float slot = 18.0f * s;
-    const float gap = 2.5f * s;
-    const int cols = 8;
-    const int mainRows = 3;
+    const float slot = 16.0f * s;
+    const float gap = 2.0f * s;
 
-    const float gridW = cols * slot + (cols - 1) * gap;
-    const float mainH = mainRows * slot + (mainRows - 1) * gap;
-    const float hotbarH = slot;
-    const float pad = 12.0f * s;
-    const float headerH = 20.0f * s;
-    const float craftSectionH = 2.0f * slot + gap + 16.0f * s;
-    const float labelH = 12.0f * s;
-    const float sectionGap = 8.0f * s;
-    const float footerH = 14.0f * s;
-
-    const float containerW = gridW + 2.0f * pad;
-    const float containerH = pad + headerH + craftSectionH + sectionGap + mainH + sectionGap + labelH + hotbarH + footerH + pad;
-
+    const float containerW = 340.0f * s;
+    const float containerH = 208.0f * s;
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
     const float left = cx - containerW * 0.5f;
     const float bottom = cy - containerH * 0.5f;
 
-    const float headerTop = bottom + containerH - pad;
-    const float craftSectionTop = headerTop - headerH;
-    const float craftSectionY = craftSectionTop - craftSectionH;
-    const float craftGridLeft = left + pad + 24.0f * s;
-    const float craftGridTop = craftSectionTop - 14.0f * s;
+    // 1. Check Tabs click
+    const float tabPad = 8.0f * s;
+    const float tabW = (containerW - 2.0f * tabPad - (numTabs - 1) * 3.0f * s) / numTabs;
+    const float tabH = 18.0f * s;
+    const float tabTop = bottom + containerH;
 
-    const float arrowX = craftGridLeft + 2.0f * (slot + gap) + 12.0f * s;
-    const float resultX = arrowX + 26.0f * s;
-    const float resultY = craftGridTop - slot - gap * 0.5f - slot * 0.5f;
-
-    const float gridLeft = left + pad;
-    const float mainGridTop = craftSectionY - sectionGap;
-    const float dividerY = mainGridTop - mainH - sectionGap * 0.5f;
-    const float subLabelTop = dividerY - 3.0f * s;
-    const float hotbarY = subLabelTop - labelH - slot;
-
-    int hoveredCraftIdx = -1;
-    for (int r = 0; r < 2; ++r) {
-        for (int c = 0; c < 2; ++c) {
-            const int idx = r * 2 + c;
-            const float sx = craftGridLeft + c * (slot + gap);
-            const float sy = craftGridTop - (r + 1) * slot - r * gap;
-            if (mouse.x >= sx && mouse.x <= sx + slot && mouse.y >= sy && mouse.y <= sy + slot) {
-                hoveredCraftIdx = idx;
-                break;
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        for (int t = 0; t < numTabs; ++t) {
+            const float tx = left + tabPad + t * (tabW + 3.0f * s);
+            const float ty = tabTop - tabH;
+            if (mouse.x >= tx && mouse.x <= tx + tabW && mouse.y >= ty && mouse.y <= tabTop) {
+                m_craftingCategory = t;
+                m_selectedRecipe = 0;
+                m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
+                return;
             }
         }
     }
 
-    const bool hoveredResult = (mouse.x >= resultX && mouse.x <= resultX + slot &&
-                                mouse.y >= resultY && mouse.y <= resultY + slot);
+    // 2. Check Recipe selection click
+    const float recipeRowY = tabTop - tabH - 24.0f * s;
+    const float recipeRowX = left + 12.0f * s;
+    const float rSlot = 18.0f * s;
+    const float rGap = 3.0f * s;
+
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        for (int r = 0; r < numRecipes; ++r) {
+            const float rx = recipeRowX + r * (rSlot + rGap);
+            const float ry = recipeRowY;
+            if (mouse.x >= rx && mouse.x <= rx + rSlot && mouse.y >= ry && mouse.y <= ry + rSlot) {
+                m_selectedRecipe = r;
+                m_audioEngine.play(SoundId::Click, 0.55f, 1.25f);
+                return;
+            }
+        }
+    }
+
+    // 3. Check Result slot / Craft button click
+    const float midDividerY = recipeRowY - 6.0f * s;
+    const float leftPanelX = left + 14.0f * s;
+    const float leftPanelTop = midDividerY - 6.0f * s;
+    const float grid3x3Left = leftPanelX;
+    const float grid3x3Top = leftPanelTop - 14.0f * s;
+    const float pSlot = 14.0f * s;
+    const float pGap = 1.5f * s;
+    const float arrowX = grid3x3Left + 3.0f * (pSlot + pGap) + 8.0f * s;
+    const float resX = arrowX + 22.0f * s;
+    const float resY = grid3x3Top - 2.0f * pSlot - 2.0f * s;
+    const float resSlot = 22.0f * s;
+
+    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (mouse.x >= resX && mouse.x <= resX + resSlot && mouse.y >= resY && mouse.y <= resY + resSlot) {
+            craftSelectedRecipe();
+            return;
+        }
+    }
+
+    // 4. Check Inventory & Hotbar slots
+    const float vDivX = left + 148.0f * s;
+    const float rightPanelX = vDivX + 10.0f * s;
+    const float invTop = leftPanelTop;
+    const float mainInvTop = invTop - 14.0f * s;
+    const int cols = 8;
+    const int mainRows = 3;
 
     int hoveredInvIdx = -1;
     for (int row = 0; row < mainRows; ++row) {
         for (int col = 0; col < cols; ++col) {
             const int idx = row * cols + col;
             if (idx >= 24) break;
-            const float x = gridLeft + col * (slot + gap);
-            const float y = mainGridTop - (row + 1) * slot - row * gap;
+            const float x = rightPanelX + col * (slot + gap);
+            const float y = mainInvTop - (row + 1) * slot - row * gap;
             if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= y && mouse.y <= y + slot) {
                 hoveredInvIdx = idx;
                 break;
@@ -1378,10 +1351,13 @@ void Application::handleInventoryInput() {
         }
     }
 
+    const float hbDivY = mainInvTop - mainRows * (slot + gap) - 2.0f * s;
+    const float hbY = hbDivY - 4.0f * s - slot;
+
     int hoveredHotbarIdx = -1;
     for (int i = 0; i < 8; ++i) {
-        const float x = gridLeft + i * (slot + gap);
-        if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= hotbarY && mouse.y <= hotbarY + slot) {
+        const float x = rightPanelX + i * (slot + gap);
+        if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= hbY && mouse.y <= hbY + slot) {
             hoveredHotbarIdx = i;
             break;
         }
@@ -1401,25 +1377,7 @@ void Application::handleInventoryInput() {
     }
 
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        if (hoveredResult) {
-            takeCraftResult();
-        } else if (hoveredCraftIdx >= 0) {
-            m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
-            ItemSlot& target = m_craftGrid[hoveredCraftIdx];
-            if (m_heldItem.empty()) {
-                m_heldItem = target;
-                target.clear();
-            } else if (target.empty()) {
-                target = m_heldItem;
-                m_heldItem.clear();
-            } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count + m_heldItem.count <= 64) {
-                target.count += m_heldItem.count;
-                m_heldItem.clear();
-            } else {
-                std::swap(m_heldItem, target);
-            }
-            updateCrafting();
-        } else if (hoveredInvIdx >= 0) {
+        if (hoveredInvIdx >= 0) {
             m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
             ItemSlot& target = m_inventory[hoveredInvIdx];
             if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
@@ -1446,21 +1404,7 @@ void Application::handleInventoryInput() {
 
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
         if (!m_heldItem.empty()) {
-            if (hoveredCraftIdx >= 0) {
-                m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
-                ItemSlot& target = m_craftGrid[hoveredCraftIdx];
-                if (target.empty()) {
-                    target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
-                    m_heldItem.count--;
-                    if (m_heldItem.count <= 0) m_heldItem.clear();
-                    updateCrafting();
-                } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
-                    target.count++;
-                    m_heldItem.count--;
-                    if (m_heldItem.count <= 0) m_heldItem.clear();
-                    updateCrafting();
-                }
-            } else if (hoveredInvIdx >= 0) {
+            if (hoveredInvIdx >= 0) {
                 m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
                 ItemSlot& target = m_inventory[hoveredInvIdx];
                 if (target.empty()) {
@@ -1496,15 +1440,35 @@ void Application::handleInventoryInput() {
 
 void Application::handlePlayInput() {
     if (m_input.keyPressed(GLFW_KEY_E)) {
-        openInventory();
+        openInventory(false);
         return;
     }
     if (m_input.keyPressed(GLFW_KEY_F4) || m_input.keyPressed(GLFW_KEY_C)) {
         toggleCreativeMode();
     }
-    if (m_input.keyPressed(GLFW_KEY_F))  m_player.toggleFlying();
+    // Flying in creative mode is toggled via double-space / double-jump (Player.cpp)
     if (m_input.keyPressed(GLFW_KEY_F5)) m_player.cyclePerspective();
     if (m_input.keyPressed(GLFW_KEY_G))  m_wireframe = !m_wireframe;
+
+    // "Q" key to drop item (or all items in slot with Ctrl+Q)
+    if (m_input.keyPressed(GLFW_KEY_Q)) {
+        ItemSlot& held = m_hotbar[m_selectedSlot];
+        if (!held.empty()) {
+            const bool dropAll = m_input.keyDown(GLFW_KEY_LEFT_CONTROL) || m_input.keyDown(GLFW_KEY_RIGHT_CONTROL);
+            const int dropCount = dropAll ? held.count : 1;
+            const BlockId dropId = held.id;
+            held.count -= dropCount;
+            if (held.count <= 0) held.clear();
+
+            const glm::vec3 eyePos = m_player.camera().position();
+            const glm::vec3 spawnPos = eyePos + m_player.camera().front() * 0.45f - glm::vec3(0.0f, 0.20f, 0.0f);
+            const glm::vec3 tossVel = m_player.camera().front() * 4.8f + glm::vec3(0.0f, 1.6f, 0.0f);
+
+            m_entityManager.spawnItem(dropId, spawnPos, dropCount, tossVel);
+            m_player.triggerSwing();
+            m_audioEngine.play(SoundId::ItemPickup, 0.65f, 0.85f);
+        }
+    }
 
     const int numberKeys[8] = {
         GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4,
@@ -1517,6 +1481,8 @@ void Application::handlePlayInput() {
     const double scroll = m_input.scrollY();
     if (scroll > 0.0) m_selectedSlot = (m_selectedSlot + 7) % 8;
     else if (scroll < 0.0) m_selectedSlot = (m_selectedSlot + 1) % 8;
+
+    m_player.setHeldItem(m_hotbar[m_selectedSlot].id);
 }
 
 void Application::updateInteraction(float dt) {
@@ -1678,7 +1644,44 @@ void Application::updateInteraction(float dt) {
         m_miningProgress = 0.0f;
     }
 
-    // 3. Block Placement
+    // 3. Right-click on Crafting Table opens 3x3 crafting station
+    if (m_input.cursorCaptured() && m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT) && m_target.hit) {
+        const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
+        if (targetBlock == BlockId::CraftingTable) {
+            m_player.triggerSwing();
+            m_audioEngine.play(SoundId::Click, 0.85f, 1.1f);
+            openInventory(true);
+            m_isMining = false;
+            m_miningProgress = 0.0f;
+            return;
+        }
+    }
+
+    // 4. Shovel tilling: right-click grass or dirt with a shovel to carve a
+    // dirt path. Takes precedence over block placement.
+    if (m_input.cursorCaptured() && m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT) && m_target.hit) {
+        const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
+        if (!held.empty() && isShovel(held.id) &&
+            (targetBlock == BlockId::Grass || targetBlock == BlockId::Dirt)) {
+            m_player.triggerSwing();
+            m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::DirtPath);
+            const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
+            m_audioEngine.play3D(SoundId::DigGrass, blockCenter, camera.position(), camera.front(), 0.85f);
+            m_renderer.spawnDigParticles(glm::vec3(m_target.block), m_target.normal, targetBlock, 6);
+            if (!m_creativeMode && isTool(held.id)) {
+                held.durability--;
+                if (held.durability <= 0) {
+                    held.clear();
+                    m_audioEngine.play(SoundId::ToolBreak);
+                }
+            }
+            m_isMining = false;
+            m_miningProgress = 0.0f;
+            return;
+        }
+    }
+
+    // 4. Block Placement
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT) && m_target.hit) {
         m_player.triggerSwing();
         if (!held.empty() && isPlaceable(held.id)) {
@@ -2037,7 +2040,16 @@ void Application::renderScene() {
     const bool pausedBackground =
         (m_state == GameState::Paused) ||
         (m_state == GameState::Options && m_optionsReturn == GameState::Paused);
-    const Camera& camera = pausedBackground ? m_player.camera() : m_menuCamera;
+    // The sky must be drawn with the same camera as the world: the player
+    // camera during play (and paused/inventory/game-over backgrounds), the
+    // orbiting menu camera in menu states. Using the menu camera here locked
+    // the sky to a frozen viewpoint while the world followed the player.
+    const Camera& camera = (pausedBackground ||
+                            m_state == GameState::Playing ||
+                            m_state == GameState::Inventory ||
+                            m_state == GameState::GameOver)
+                               ? m_player.camera()
+                               : m_menuCamera;
 
     const glm::vec3 eye = (m_state == GameState::Playing || m_state == GameState::Inventory || pausedBackground)
                           ? m_player.eyePosition() : m_menuCamera.position();
@@ -2121,8 +2133,10 @@ void Application::renderScene() {
             m_renderer.drawCreativeInventory(m_selectedSlot, m_hotbar, 8, m_heldItem,
                                              mouseInFramebuffer(), m_creativeTab);
         } else {
-            m_renderer.drawInventory(m_selectedSlot, m_hotbar, 8, m_inventory, 24,
-                                     m_craftGrid, m_craftResult, m_heldItem, mouseInFramebuffer());
+            m_renderer.drawConsoleInventory(m_craftingCategory, m_selectedRecipe,
+                                           m_isCraftingTableOpen,
+                                           m_selectedSlot, m_hotbar, 8, m_inventory, 24,
+                                           m_heldItem, mouseInFramebuffer());
         }
         return;
     }

@@ -72,23 +72,37 @@ Follow-ups: D-pad/controller support, key rebinding, menu sounds, locale text.
 - **Background Music (BGM)**: Multi-format disk track streaming (`.mp3`, `.wav`, `.flac`, `.ogg`) from `assets/music/` and `assets/audio/`, with 16-second procedural ambient chord loop synthesizer fallback.
 - **Future-Proof Saves & Protection**: Persistent project-level `saves/` storage, automated clean-script preservation, legacy folder auto-migration, and forward-compatible block ID sanitization.
 
-## M7 -- Lighting & Visual Immersion (Planned / Next)
+## M7 -- Lighting & Visual Immersion (DONE)
 
 - **4-Corner Vertex Ambient Occlusion (AO)**: Smooth 4-level corner occlusion shading per quad vertex, adding authentic depth to block corners and crevices.
 - **BFS Flood-Fill Light Engine**: Nibble-packed Sunlight (0–15) and Blocklight (0–15) per voxel with breadth-first search light propagation and dynamic torch place/break updates.
-- **Dynamic Flowing Fluids**: Water block height levels (1–8), decaying fluid spread, sloped top surface quads, and underwater fog immersion.
-- **Atmospheric Celestial Shading**: Dynamic horizon dusk/dawn color transitions, night darkness curve, and starry night sky dome.
+- **True Darkness & Celestial Cycle**: Pitch-black natural night and unlit caves, sun/moon orbits, and dynamic sky gradient.
+- **Separate Menu & Exploration Audio**: Distinct procedural title arpeggio and in-game exploration pads with smooth 1-second dynamic crossfading.
 
-## M8 -- Async World Streaming & ChunkSections
+## M8 -- Console Crafting, RPG HUD & Ecological Survival (DONE)
+
+- **Console Edition Crafting UI**: Legacy Console Edition category tabs (`Structures`, `Tools & Weapons`, `Food & Essentials`, `Mechanisms`, `Decorations`), horizontal recipe selector, visual ingredient preview, and direct 1-click crafting.
+- **Interactive 3x3 Crafting Table**: Right-clicking a placed Crafting Table opens full 3x3 workbench crafting with 3x3 recipes (Tools, Weapons, Armor, Mechanisms).
+- **RPG MMO Vitals Card HUD**: Top-left player status card with Steve portrait, Level badge, vertical XP bar, nameplate, red health bar, and Food, Oxygen, and Armor stats with `+20` sub-counters.
+- **8-Phase Lunar Light Cycle**: Authentic lunar cycle ($0..7$) where Full Moon emits soft blue ambient moonlight (`0.065f`) and New Moon plunges the world into pure pitch-black night (`0.002f`).
+- **World Ecology Simulation**: Unsupported tall grass instantly collapses when the ground below is destroyed, and dirt exposed to open sky naturally converts to lush grass blocks over time.
+- **Item Drops & Physics Toss**: 5-minute item despawn, 1.6m magnetic draw range, 0.95m pickup range, 'Q' key for dropping 1 item and Ctrl+'Q' for tossing full stack with forward trajectory impulse and pickup cooldown.
+- **First-Person Held Items**: Camera-locked right arm viewmodel dynamically holding 3D mini-blocks or 2.5D tool sprites with bobbing and swing animations.
+- **Creative Enhancements**: Automatic absorption/clearing of full inventory pickups in creative mode, and double-space / double-jump flight toggle.
+- **Non-Freezing Death Screen**: Mobs, items, particles, and time continue simulating uninterrupted behind the Game Over screen.
+- **Multi-Path World Save Deletion**: Clean removal of saved worlds across all search paths.
+
+**Milestone closed with release v0.M8.0.**
+
+## M9 -- Async World Streaming & ChunkSections (Planned / Next)
 
 - **16x16x16 Sub-Chunk Architecture (ChunkSections)**: Vertical subdivision of chunks into 16x16x16 sections, speeding up block edits $5\times$, dropping empty air sections from GPU RAM, and preparing for expanded world heights ($Y=256$).
 - **Multi-Threaded Chunk Worker Pool**: Background worker threads running terrain noise and mesh calculations off-thread; main thread only performs fast sub-millisecond GPU uploads.
 - **Dynamic Render Distance Radius**: Configurable render radius (4 to 16 chunks) with ring loading and unloader queue.
 - **Stutter-Free Traversal**: Sustained 60+ FPS when sprinting/flying across 1,000+ blocks in any direction.
 
-## M9 -- Survival Mechanics & Hostile Entities
+## M10 -- Survival Hostile Entities & Smelting
 
-- **RPG Survival HUD**: Top-left / configurable Health hearts, Armor defense, Hunger bar with starvation/regeneration mechanics.
 - **Hostile Mobs & Night Spawning**: Zombies and Skeletons spawning at low light levels (Light $< 7$), with 3D pathfinding and melee combat attacks.
 - **Furnace & Smelting System**: 3-slot Furnace UI (Input, Fuel, Output) with burning animation timer for smelting raw ores and cooking meats.
 - **Beds & Day-Skipping**: Craftable wooden beds enabling sleeping through the dangerous night cycle.

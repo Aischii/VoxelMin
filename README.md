@@ -14,25 +14,25 @@ window icon, and the splash-text list.
 
 ## Status
 
-**M7 "Lighting, Visual Immersion & Inventory Evolution" active; current release v0.M7.0**. See
+**M8 "Console Crafting, RPG HUD & Ecological Survival" active; current release v0.M8.0**. See
 [`docs/PROGRESS.md`](docs/PROGRESS.md) for the living status -- including the
 version history and current performance metrics -- and
 [`docs/ROADMAP.md`](docs/ROADMAP.md) for the project roadmap.
 
 ## Features (current)
 
-- **Atmospheric Lighting & Day/Night**: Dual-channel 4-bit Sunlight + 4-bit Blocklight nibble storage in chunks with BFS flood-fill propagation. Smooth 4-corner vertex AO with diagonal flipping. Real pitch-black darkness at night and in deep unlit caverns with celestial sun and moon orbits.
+- **Atmospheric Lighting & 8-Phase Moon Cycle**: Dual-channel 4-bit Sunlight + 4-bit Blocklight nibble storage in chunks with BFS flood-fill propagation. Smooth 4-corner vertex AO with diagonal flipping. 8 lunar phases (Full Moon soft glow down to pitch-black New Moon darkness) and dynamic celestial orbits.
+- **Console Edition Crafting UI & Interactive Workbench**: Authentic Legacy Console Edition crafting interface with 5 category tabs (`Structures`, `Tools & Weapons`, `Food & Essentials`, `Mechanisms`, `Decorations`), horizontal recipe selector, visual ingredient preview, yield slots, and 3x3 Crafting Table interaction.
+- **RPG MMO Vitals Card**: Top-left player card displaying player portrait, Level badge, vertical XP meter, player name, red health bar, and Food, Oxygen, and Armor stats with sub-stat counters, dynamically scaled to window dimensions.
+- **Living World Ecology**: Natural dirt-to-grass spreading under open sunlight, unsupported tall grass collapse when base block is mined, and shovel grass-to-dirt-path tilling.
+- **First-Person Viewmodel & 3D Held Items**: Camera-locked right arm rendering with dynamic item holding (3D mini-blocks and 2.5D tool sprites) with smooth walk bobbing and swing animations.
+- **Enhanced Physics, Item Toss & Double-Jump Flight**: Despawning item entities with 1.6m magnetic draw, 'Q' single item toss, Ctrl+'Q' full stack toss with impulse momentum, and double-space creative flight toggle.
+- **Non-Freezing Game Over**: Continuous world simulation during the Game Over screen (mobs wander, items bob, particles drift).
 - **Separate Menu & In-Game Music**: Dedicated procedural arpeggio title theme for the main menu and mystical ambient pad exploration music in-game, with seamless dynamic crossfading and external file scanning.
-- **Distinct Survival vs Creative Inventories**:
-  - *Survival*: 2x2 Crafting Grid + Result slot, 24-slot backpack, 8-slot hotbar, durability bars, and drag/drop stack management.
-  - *Creative*: Comprehensive Item Catalog with Category Filter Tabs (`All Items`, `Blocks`, `Tools`, `Items & Food`), infinite item generation, quick number key slot copying, and a dedicated trash slot.
 - **Minecraft-Style Block Breaking**: Real 10-stage cracking texture overlays (`destroy_stage_0.png` to `destroy_stage_9.png`) mapped cleanly over targeted voxels.
-- **Future-Proof Persistence**: Versioned binary world saves with header magic, compression metadata, chunk tables, and backward/forward save migration.
-- **Procedural Villages & Structures**: Wells, houses, towers, and lamp posts naturally generated on surface terrain.
+- **Future-Proof Persistence**: Versioned binary world saves with header magic, multi-path save deletion, compression metadata, chunk tables, and backward/forward save migration.
+- **Procedural Villages & Structures**: Wells, houses, towers, and lamp posts naturally generated on surface terrain with resident pigman villagers.
 - **Full Sound Effects Suite**: Procedural digging, block placement, tool breaks, footsteps, damage grunts, eating, burping, and item pickups.
-- **RPG Survival Vitals**: Health, hunger, oxygen with underwater drowning, and screen-edge horror hurt vignettes.
-- **Legacy-Console UI**: Main menu panorama, pause menu, custom world creation, options screen with adjustable GUI Scale (Auto / 1-4).
-- **Profiling & Tools**: `F3` debug overlay with draw calls, FPS, frame times, particle/chunk counts, and headless capture support.
 
 ## Requirements
 
@@ -80,18 +80,18 @@ The game opens on the **main menu**. All menus can be navigated with the keyboar
 | `W` `A` `S` `D` | Move |
 | Mouse | Look |
 | `Left Ctrl` / double-tap `W` | Sprint (dynamic FOV) |
-| `Space` | Jump / fly up / swim up |
+| `Space` | Jump / swim up / double-tap to fly (Creative) |
 | `Left Shift` | Fly down / dive |
-| `F` | Toggle fly / walk |
+| `Q` / `Ctrl+Q` | Drop 1 item / drop full stack |
 | `F4` / `C` | Toggle Creative / Survival mode |
 | `F5` | Cycle perspective (1st person / 3rd person) |
-| `E` | Open / close inventory (Survival crafting or Creative catalog) |
+| `E` | Open / close inventory & crafting |
 | `1`..`8` / scroll | Select hotbar slot |
 | Left click | Hold to mine block / attack mob / pick creative stack |
-| Right click | Place block / eat food / pick single creative item |
+| Right click | Place block / eat food / interact Crafting Table |
 | `G` | Toggle wireframe debug view |
 | `F3` | Toggle profiling overlay |
-| `Esc` | Pause menu |
+| `Esc` | Pause menu / close dialogs |
 
 ## Project layout
 

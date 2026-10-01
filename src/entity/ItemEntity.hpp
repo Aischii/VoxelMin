@@ -44,8 +44,8 @@ private:
 
     static constexpr float HALF_SIZE = 0.12f;
     static constexpr float GRAVITY   = 20.0f;
-    static constexpr float MAGNET_RADIUS = 2.4f;
-    static constexpr float PICKUP_RADIUS = 0.9f;
+    static constexpr float MAGNET_RADIUS = 1.6f;
+    static constexpr float PICKUP_RADIUS = 0.95f;
 };
 
 } // namespace vox

@@ -87,11 +87,13 @@ public:
     const FrameStats& stats() const { return m_stats; }
     FrameStats& stats() { return m_stats; }
 
-    // Inventory modal UI overlay with 2x2 Crafting Grid (Survival Mode).
-    void drawInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
-                       const ItemSlot* inventory, int invCount,
-                       const ItemSlot* craftGrid, const ItemSlot& craftResult,
-                       const ItemSlot& heldItem, const glm::vec2& mousePos);
+    // Console Edition Crafting & Inventory UI Overlay (Attachment 3).
+    void drawConsoleInventory(int activeCategory, int selectedRecipeIndex,
+                              bool hasCraftingTable,
+                              int selectedHotbarSlot,
+                              const ItemSlot* hotbar, int hotbarCount,
+                              const ItemSlot* inventory, int invCount,
+                              const ItemSlot& heldItem, const glm::vec2& mousePos);
 
     // Creative Mode Item Catalog with Category Tabs and Unlimited Item Supply.
     void drawCreativeInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
@@ -145,6 +147,7 @@ private:
 
     Shader m_chunkShader;
     Shader m_skyShader;
+    Shader m_skyDomeShader;
     Shader m_lineShader;
     Shader m_uiShader;
     Shader m_textShader;
@@ -171,6 +174,10 @@ private:
     uint32_t m_starVao = 0;
     uint32_t m_starVbo = 0;
     size_t m_starCount = 0;
+    uint32_t m_skyDomeVao = 0;
+    uint32_t m_skyDomeVbo = 0;
+    uint32_t m_skyDomeEbo = 0;
+    int m_skyDomeIndexCount = 0;
 
     int m_fbWidth = 1;
     int m_fbHeight = 1;

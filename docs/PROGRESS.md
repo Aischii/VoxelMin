@@ -16,6 +16,7 @@ the table below rather than rewritten.
 
 | Version | Legacy tag | Milestone | Headline |
 |---------|------------|-----------|----------|
+| v0.M8.0 | - | M8 | Console Edition Crafting UI, RPG MMO Vitals Card HUD, Moon Phase Lighting Cycle & Darkness, Living Ecology (dirt spread/grass collapse), 3x3 Crafting Table, Item Toss ('Q'/Ctrl+Q), Double-Jump Flight, Non-Freezing Death Simulation, 3D Held Items |
 | v0.M7.0 | - | M7 | Dual-channel BFS light engine (Sunlight/Blocklight), pitch black true night, distinct Menu & In-Game music with crossfading, distinct Survival vs Creative inventory catalogs |
 | v0.M5.6 | - | M5 | 10-stage PNG block break cracks, persistent save protection, BGM audio player & ambient loop synth, celestial sun/moon, Caveman AI skills |
 | v0.M5.5 | - | M5 | Item entities & pickup physics, 2x2 crafting grid, tool durability & mining multipliers (M5 closure) |
@@ -31,18 +32,30 @@ the table below rather than rewritten.
 | v0.M2.0 | v0.1.1 | M2 | Legacy-console menus (M2 delivery), compact crosshair, bidirectional options |
 | v0.M1.0 | v0.1.0 | M1 | Versioning, ChunkPalette, RLE |
 
-**v0.M7.0 is the current build** and delivers **M7 -- Lighting, Visual Immersion & Inventory Evolution**.
+**v0.M8.0 is the current build** and delivers **M8 -- Console Crafting, RPG HUD & Ecological Survival**.
 
 ## Current milestone
 
-**M7 -- Lighting & Visual Immersion (ACTIVE)**: Landed:
+**M8 -- Console Crafting, RPG HUD & Ecological Survival (COMPLETE)**: Landed:
+- Authentic Legacy Console Edition crafting interface with 5 category tabs (`Structures`, `Tools & Weapons`, `Food & Essentials`, `Mechanisms`, `Decorations`), horizontal recipe selector, visual ingredient preview, yield slot, and 1-click recipe crafting.
+- Interactive 3x3 Crafting Table workbench triggered via right-click raycasting on `BlockId::CraftingTable`.
+- RPG MMO Vitals Card HUD anchored top-left with Steve portrait, Level badge, vertical XP bar, player name, red health bar, and Food, Oxygen, and Armor stats with `+20` sub-counters.
+- 8-Phase Lunar Light Cycle ($0..7$) where Full Moon provides soft blue ambient illumination (`0.065f`) and New Moon produces pure pitch-black darkness (`0.002f`).
+- Living world ecology: dirt exposed to sunlight naturally spreads into grass blocks over time, and unsupported tall grass collapses immediately when base ground is destroyed.
+- Item drop physics: 5-minute item despawn, 1.6m magnetic draw, 0.95m pickup range, 'Q' key for single item toss, and Ctrl+'Q' for full stack toss with momentum impulse and pickup cooldown.
+- Camera-locked first-person right arm viewmodel holding 3D mini-blocks or 2.5D tool sprites with walking bob and swing animations.
+- Creative mode enhancements: automatic clean absorption of item pickups when inventory is full, and double-space / double-jump flight toggle.
+- Non-freezing death screen: living world simulation (mobs, items, particles, day/night) continues uninterrupted behind Game Over UI.
+- Multi-path world save deletion across all search paths.
+
+**M7 -- Lighting & Visual Immersion (COMPLETE)**: Landed:
 - Nibble-packed dual 4-bit Sunlight and 4-bit Blocklight storage per voxel in `Chunk`.
 - BFS 3D flood-fill propagation queues with directional attenuation (15 sky down to caves, 14 torches radiating outward).
 - Smooth 4-corner vertex ambient occlusion (AO values: 0.45, 0.65, 0.82, 1.0) with quad diagonal split flipping to prevent anisotropy artifacts.
 - Multi-source shader blend combining sunlight, time-of-day sky factor, warm golden torch illumination (`vec3(0.18, 0.09, 0.02)`), and directional face shading.
 - Pitch black true night and cave darkness (deep caves require torches, no torches automatically spawned in natural caves).
 - Separate procedural background music for Main Menu (arpeggio piano theme) vs In-Game exploration (ambient pads) with smooth dynamic 1.0s crossfading.
-- Distinct Survival Mode (2x2 crafting + 24 bag) vs Creative Mode (Comprehensive item palette with Category Filter Tabs, instant stack generation, number-key hotbar loading, and trash slot) inventories.
+- Distinct Survival Mode vs Creative Mode inventories.
 - Fully integrated into entities (mobs, items, player body, first-person viewmodel arm).
 
 **M5 -- Gameplay & Entities (COMPLETE)**: Landed:
@@ -126,6 +139,41 @@ Open, but not M6 blockers:
   a much larger simulation than M6 needs.
 
 ## Done
+
+### 2026-10-02 -- Milestone M8: Console Crafting UI, RPG MMO Vitals Card HUD, Moon Phases & Living Ecology
+
+- **Legacy Console Edition Crafting Interface & Interactive Workbench**:
+  - Implemented authentic Legacy Console Edition UI (`drawConsoleInventory`) with 5 category tabs (`Structures`, `Tools & Weapons`, `Food & Essentials`, `Mechanisms`, `Decorations`), horizontal recipe selector, visual ingredient preview box, yield slots, and 1-click recipe crafting.
+  - Added full recipe registry in `CraftingRecipes.hpp` covering all tools, weapons, armor, mechanisms, and decorative blocks.
+  - Added interactive right-click on placed Crafting Tables opening 3x3 workbench recipes.
+- **RPG MMO Vitals Card HUD**:
+  - Implemented top-left HUD card (`drawRpgVitalsHud`) with player Steve portrait, Level badge ("1"), vertical XP bar, player name ("Deadzoke"), red health bar, and Food, Oxygen, and Armor stats with `+20` sub-counters. Automatically scales with GUI scale and window size.
+- **8-Phase Moon Lighting Cycle**:
+  - Implemented 8-phase lunar cycle ($0..7$) where Full Moon emits soft blue ambient moonlight (`0.065f`) and New Moon produces pure pitch-black night (`0.002f`).
+- **Living World Ecology**:
+  - Added `World::tickEcology`: dirt exposed to open sky/sunlight spreads into lush grass blocks over time, and unsupported tall grass collapses immediately when its supporting block is mined.
+- **First-Person Viewmodel & 3D Held Items**:
+  - Added dynamic held item rendering in camera-space right arm viewmodel: mini 3D blocks and angled 2.5D tool sprites with bobbing and swing animation.
+- **Item Drop Physics & Creative Double-Jump Flight**:
+  - 5-minute despawn, 1.6m magnetic draw range, 0.95m pickup range, 'Q' key for single item toss, Ctrl+'Q' for full stack toss with trajectory momentum and pickup cooldown.
+  - Creative mode automatically absorbs full inventory pickups cleanly and uses double-space / double-jump within 0.28s to toggle flight.
+- **Non-Freezing Death Simulation & Multi-Path World Deletion**:
+  - Game Over state continues running entity, item, particle, and day/night simulation.
+  - World deletion cleans up `.dat` save files across all directory search paths.
+
+### 2026-10-02 -- Sky camera lock fix, dirt path drops dirt, shovel tilling
+
+- **Sky was locked to a frozen camera**: `Renderer::drawSky` was called with the menu camera during play while the world was drawn with the player camera, so the sun/stars/sky never followed the player's view. `renderScene` now selects the player camera for the sky in `Playing`/`Inventory`/`GameOver` (menu states keep the orbiting menu camera). This was the root cause of the original "sky is locked on my pov" complaint.
+- **Sky dome gradient verified world-locked**: the dome is world-aligned and follows the camera position (`uCamPos`), so the zenith/horizon gradient rotates with the player's view. Captures confirm: looking straight up shows the sun over deep-blue zenith; the horizon band matches the fog colour.
+- **Dirt Path drops Dirt**: `getDropForBlock` mapped `DirtPath` to itself; it now returns `Dirt` like `Grass`.
+- **Shovel tilling**: right-clicking a `Grass` or `Dirt` block with any shovel converts it to `Dirt Path` (with dig sound, debris particles and shovel durability loss in survival). Tilling takes precedence over block placement.
+
+### 2026-10-02 -- Death keeps world simulating, world-delete resurrection fix, creative-only flight, view-direction sky gradient
+
+- **Death no longer freezes the world**: `GameOver` state now updates `EntityManager` every frame, so mobs wander, items bob and particles drift behind the death screen. `Player::takeDamage` early-returns while `m_isDead`, so mobs cannot deal further damage to the corpse.
+- **World deletion resurrection fixed**: `WorldSave::listSavedWorlds()` auto-migrated legacy save copies from stale build folders back into the persistent `saves/` directory *after* a deletion, bringing deleted worlds back on the next scan. Migration now removes the legacy copy after a successful copy, and the stale `build/bin/saves/` directory was deleted. Verified with a standalone test: delete -> re-scan no longer resurrects.
+- **Flight is creative-only**: `F` toggles flying only while creative mode is on; switching back to survival force-disables flight; loaded saves never restore a saved flying state (creative mode is not persisted, so restoring flight would be inconsistent).
+- **Sky gradient dome**: the sky was a flat clear colour, identical in every view direction. Added a camera-centred UV-sphere dome (`skydome.vert`/`skydome.frag`) drawn first in `Renderer::DrawSky` with a zenith/horizon/ground gradient derived from the time-of-day sky colour. Horizon matches the fog colour so distant terrain blends seamlessly; the sky now changes as the player looks around.
 
 ### 2026-10-01 -- Milestone M6 Audio Engine: Miniaudio Integration & Core Procedural SFX
 

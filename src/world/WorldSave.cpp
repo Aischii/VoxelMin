@@ -107,6 +107,11 @@ std::vector<WorldMetadata> WorldSave::listSavedWorlds() {
                         if (!ec) {
                             log::info("Migrated save file '%s' to persistent directory '%s'", filename.c_str(), primaryDir.c_str());
                             targetPath = newPath;
+                            // Remove the legacy copy. Otherwise a world deleted
+                            // from the primary directory is resurrected by the
+                            // stale file on the next scan.
+                            std::error_code removeEc;
+                            std::filesystem::remove(pathStr, removeEc);
                         }
                     } else {
                         targetPath = newPath;
@@ -355,7 +360,10 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
         player.setPosition(pos);
     }
     player.setRotation(yaw, pitch);
-    player.setFlying(flying != 0);
+    // Creative mode is not persisted, and flight is only available in creative
+    // mode, so a saved flying state must not be restored on load.
+    (void)flying;
+    player.setFlying(false);
     selectedSlot = std::clamp(static_cast<int>(selSlot), 0, 7);
 
     log::info("World '%s' (seed %u, %dx%d chunks) loaded successfully from %s",
@@ -366,6 +374,21 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
 bool WorldSave::deleteWorld(const std::string& path) {
     std::error_code ec;
     bool removed = std::filesystem::remove(path, ec);
+
+    std::filesystem::path fsPath(path);
+    const std::string filename = fsPath.filename().string();
+    const std::string primaryDir = getSavesDirectory();
+    const std::vector<std::string> searchDirs = { primaryDir, "saves", "../../saves", "../saves", "." };
+
+    for (const auto& dir : searchDirs) {
+        const std::string altPath = dir + "/" + filename;
+        if (std::filesystem::exists(altPath, ec)) {
+            if (std::filesystem::remove(altPath, ec)) {
+                removed = true;
+            }
+        }
+    }
+
     if (removed) {
         log::info("Deleted world save file: %s", path.c_str());
     } else {

@@ -101,7 +101,63 @@ void World::setBlock(int wx, int wy, int wz, BlockId b) {
     if (lz == Chunk::D - 1)  { if (Chunk* n = chunkAt(cx, cz + 1)) n->dirty = true; }
 
     if (!m_generating) {
+        // If bottom support was removed, collapse supported tall grass above
+        if (b == BlockId::Air && wy + 1 < Chunk::H) {
+            const BlockId above = getBlock(wx, wy + 1, wz);
+            if (above == BlockId::TallGrass) {
+                setBlock(wx, wy + 1, wz, BlockId::Air);
+            }
+        }
         updateLightAround(wx, wy, wz);
+    }
+}
+
+void World::tickEcology(const glm::ivec3& playerPos, int radius,
+                        const std::function<void(const glm::vec3&, BlockId)>& onDrop) {
+    if (m_generating) return;
+
+    // Sample 24 random block coordinates around the active player area
+    for (int i = 0; i < 24; ++i) {
+        const int rx = playerPos.x + (std::rand() % (2 * radius + 1) - radius);
+        const int rz = playerPos.z + (std::rand() % (2 * radius + 1) - radius);
+        const int ry = playerPos.y + (std::rand() % 21 - 10);
+
+        if (rx < 0 || rx >= widthBlocks() || rz < 0 || rz >= depthBlocks() || ry <= 0 || ry >= Chunk::H - 1) {
+            continue;
+        }
+
+        const BlockId blk = getBlock(rx, ry, rz);
+        if (blk == BlockId::TallGrass) {
+            const BlockId below = getBlock(rx, ry - 1, rz);
+            if (below != BlockId::Grass && below != BlockId::Dirt && below != BlockId::DirtPath) {
+                setBlock(rx, ry, rz, BlockId::Air);
+                if (onDrop) onDrop(glm::vec3(rx + 0.5f, ry + 0.5f, rz + 0.5f), blk);
+            }
+        } else if (blk == BlockId::Dirt) {
+            const BlockId above = getBlock(rx, ry + 1, rz);
+            // Dirt exposed to sunlight/sky converts into lush grass over time if adjacent to grass
+            if (above == BlockId::Air && getSunLight(rx, ry + 1, rz) >= 4) {
+                bool hasGrassNeighbor = false;
+                for (int dx = -1; dx <= 1 && !hasGrassNeighbor; ++dx) {
+                    for (int dy = -1; dy <= 1 && !hasGrassNeighbor; ++dy) {
+                        for (int dz = -1; dz <= 1 && !hasGrassNeighbor; ++dz) {
+                            if (getBlock(rx + dx, ry + dy, rz + dz) == BlockId::Grass) {
+                                hasGrassNeighbor = true;
+                            }
+                        }
+                    }
+                }
+                if (hasGrassNeighbor) {
+                    setBlock(rx, ry, rz, BlockId::Grass);
+                }
+            }
+        } else if (blk == BlockId::Grass) {
+            const BlockId above = getBlock(rx, ry + 1, rz);
+            // Grass smothered under opaque blocks decays into dirt
+            if (above != BlockId::Air && isOpaque(above)) {
+                setBlock(rx, ry, rz, BlockId::Dirt);
+            }
+        }
     }
 }
 

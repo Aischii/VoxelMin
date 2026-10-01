@@ -61,6 +61,10 @@ public:
     void computeWorldLighting(const ProgressCallback& onProgress = nullptr);
     void updateLightAround(int wx, int wy, int wz);
 
+    // Ecology: tall grass collapses without support; dirt exposed to sky spreads grass
+    void tickEcology(const glm::ivec3& playerPos, int radius,
+                     const std::function<void(const glm::vec3&, BlockId)>& onDrop = nullptr);
+
     uint32_t seed() const { return m_seed; }
     void setSeed(uint32_t s) { m_seed = s; }
 

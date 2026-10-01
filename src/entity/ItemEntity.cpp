@@ -191,20 +191,25 @@ void ItemEntity::update(float dt, const World& world, const glm::vec3& playerPos
         m_velocity.y = std::max(m_velocity.y, -22.0f);
     }
 
-    // Magnetism towards player when pickup delay has elapsed
+    // Magnetism towards player only when very close and pickup delay elapsed
     const glm::vec3 playerCenter = playerPos + glm::vec3(0.0f, 0.85f, 0.0f);
     const float dist = glm::distance(m_position, playerCenter);
     if (m_pickupDelay <= 0.0f && dist <= MAGNET_RADIUS) {
         const glm::vec3 dir = glm::normalize(playerCenter - m_position);
-        const float pullStrength = 8.0f * (1.0f - dist / MAGNET_RADIUS) + 4.0f;
-        m_velocity = glm::mix(m_velocity, dir * pullStrength, std::min(1.0f, dt * 10.0f));
+        // Gentle, slow glide towards player
+        const float pullStrength = 2.4f * (1.0f - dist / MAGNET_RADIUS) + 1.2f;
+        m_velocity = glm::mix(m_velocity, dir * pullStrength, std::min(1.0f, dt * 5.0f));
         m_onGround = false;
+    } else {
+        // Air resistance when not being pulled
+        m_velocity.x *= std::max(0.0f, 1.0f - 3.5f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 3.5f * dt);
     }
 
     // Ground friction
     if (m_onGround) {
-        m_velocity.x *= std::max(0.0f, 1.0f - 12.0f * dt);
-        m_velocity.z *= std::max(0.0f, 1.0f - 12.0f * dt);
+        m_velocity.x *= std::max(0.0f, 1.0f - 14.0f * dt);
+        m_velocity.z *= std::max(0.0f, 1.0f - 14.0f * dt);
     }
 
     // Axis-by-axis collision movement
@@ -215,6 +220,12 @@ void ItemEntity::update(float dt, const World& world, const glm::vec3& playerPos
 
 void ItemEntity::appendGeometry(std::vector<Vertex>& vertices, const World& world) const {
     if (isAir(m_blockId)) return;
+
+    // Flash/blink when nearing 5-minute despawn (last 15 seconds)
+    if (m_age > 285.0f) {
+        const int flash = static_cast<int>((m_age - 285.0f) * 6.0f);
+        if (flash % 2 == 1) return;
+    }
 
     const BlockDef& def = blockDef(m_blockId);
 
