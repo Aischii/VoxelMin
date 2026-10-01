@@ -95,6 +95,8 @@ private:
     void toggleCreativeMode();
     void populateCreativeCatalog();
 
+    static uint32_t parseSeed(const std::string& input);
+
     // Day / Night cycle & Celestial lighting
     int moonPhase() const { return m_dayCount % 8; }
     float moonLightFactor() const;
@@ -149,6 +151,7 @@ private:
     WorldType m_activeWorldType = WorldType::Default;
 
     std::string m_newWorldName = "World 1";
+    std::string m_newWorldSeedInput;
     uint32_t m_newWorldSeed = 1337;
     WorldType m_newWorldType = WorldType::Default;
 

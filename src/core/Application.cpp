@@ -8,9 +8,14 @@
 #include "world/WorldSave.hpp"
 
 #include <GL/glew.h>
+#if __has_include(<stb/stb_image.h>)
 #include <stb/stb_image.h>
+#elif __has_include(<stb_image.h>)
+#include <stb_image.h>
+#endif
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -485,12 +490,45 @@ void Application::openConfirmDeleteWorld(const std::string& worldName, const std
     setCursorCaptured(false);
 }
 
+uint32_t Application::parseSeed(const std::string& input) {
+    if (input.empty()) {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_int_distribution<uint32_t> dist(100000, 999999999);
+        return dist(gen);
+    }
+    bool isNumeric = true;
+    size_t start = 0;
+    if (input[0] == '+' || input[0] == '-') {
+        start = 1;
+        if (input.size() == 1) isNumeric = false;
+    }
+    for (size_t i = start; i < input.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(input[i]))) {
+            isNumeric = false;
+            break;
+        }
+    }
+    if (isNumeric) {
+        try {
+            long long val = std::stoll(input);
+            return static_cast<uint32_t>(val);
+        } catch (...) {}
+    }
+    // Java String.hashCode() algorithm for alphanumeric seed strings (same as Minecraft)
+    uint32_t hash = 0;
+    for (char c : input) {
+        hash = hash * 31u + static_cast<uint32_t>(static_cast<unsigned char>(c));
+    }
+    return hash;
+}
+
 void Application::buildNewWorldMenu() {
     m_newWorldMenu.clear();
     m_newWorldMenu.logo(false)
                   .title("Create New World")
                   .subtitle("Configure world name, world type, and seed")
-                  .footer("Type name     Left/Right  Change     Enter  Select     Esc  Back");
+                  .footer("Type name/seed     Left/Right  Change     Enter  Select     Esc  Back");
 
     m_newWorldMenu.addOption(
         "World Name",
@@ -513,18 +551,32 @@ void Application::buildNewWorldMenu() {
 
     m_newWorldMenu.addOption(
         "World Seed",
-        [this] { return std::to_string(m_newWorldSeed); },
+        [this] {
+            const bool isSelected = (m_state == GameState::NewWorld && m_newWorldMenu.selection() == 2);
+            const bool blink = (static_cast<int>(m_uiTime * 3.0) % 2 == 0);
+            if (m_newWorldSeedInput.empty()) {
+                return std::string("[Random]") + (isSelected ? (blink ? "_" : " ") : "");
+            }
+            return m_newWorldSeedInput + (isSelected ? (blink ? "_" : " ") : "");
+        },
         [this](int d) {
-            int seedInt = static_cast<int>(m_newWorldSeed) + d * 100;
+            uint32_t current = parseSeed(m_newWorldSeedInput);
+            int seedInt = static_cast<int>(current) + d * 100;
             if (seedInt < 1) seedInt = 1;
             m_newWorldSeed = static_cast<uint32_t>(seedInt);
+            m_newWorldSeedInput = std::to_string(m_newWorldSeed);
         });
 
     m_newWorldMenu.addButton("Roll Random Seed", [this] {
-        m_newWorldSeed = static_cast<uint32_t>(std::rand() % 899999 + 1000);
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_int_distribution<uint32_t> dist(100000, 999999999);
+        m_newWorldSeed = dist(gen);
+        m_newWorldSeedInput = std::to_string(m_newWorldSeed);
     });
 
     m_newWorldMenu.addButton("Create World", [this] {
+        m_newWorldSeed = parseSeed(m_newWorldSeedInput);
         startNewWorld(m_newWorldName, m_newWorldSeed, m_newWorldType);
     });
 
@@ -546,9 +598,16 @@ Menu& Application::activeMenu() {
 }
 
 void Application::handleCharInput(unsigned int codepoint) {
-    if (m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0) {
-        if (codepoint >= 32 && codepoint <= 126 && m_newWorldName.size() < 24) {
-            m_newWorldName.push_back(static_cast<char>(codepoint));
+    if (m_state == GameState::NewWorld) {
+        if (m_newWorldMenu.selection() == 0) {
+            if (codepoint >= 32 && codepoint <= 126 && m_newWorldName.size() < 24) {
+                m_newWorldName.push_back(static_cast<char>(codepoint));
+            }
+        } else if (m_newWorldMenu.selection() == 2) {
+            if (codepoint >= 32 && codepoint <= 126 && m_newWorldSeedInput.size() < 24) {
+                m_newWorldSeedInput.push_back(static_cast<char>(codepoint));
+                m_newWorldSeed = parseSeed(m_newWorldSeedInput);
+            }
         }
     }
 }
@@ -593,6 +652,13 @@ void Application::handleMenuInput() {
                     m_newWorldName.pop_back();
                 }
             }
+        } else if (m_newWorldMenu.selection() == 2) {
+            if (m_input.keyPressed(GLFW_KEY_BACKSPACE)) {
+                if (!m_newWorldSeedInput.empty()) {
+                    m_newWorldSeedInput.pop_back();
+                    m_newWorldSeed = parseSeed(m_newWorldSeedInput);
+                }
+            }
         }
     } else if (m_state == GameState::Paused) {
         if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
@@ -603,20 +669,22 @@ void Application::handleMenuInput() {
 
     Menu& menu = activeMenu();
 
+    const bool isTextEditing = (m_state == GameState::NewWorld && (m_newWorldMenu.selection() == 0 || m_newWorldMenu.selection() == 2));
+
     const int oldSel = menu.selection();
-    if (m_input.keyPressed(GLFW_KEY_UP) || (m_input.keyPressed(GLFW_KEY_W) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
+    if (m_input.keyPressed(GLFW_KEY_UP) || (m_input.keyPressed(GLFW_KEY_W) && !isTextEditing)) {
         menu.moveSelection(-1);
         if (menu.selection() != oldSel) m_audioEngine.play(SoundId::Click, 0.45f, 1.25f);
     }
-    if (m_input.keyPressed(GLFW_KEY_DOWN) || (m_input.keyPressed(GLFW_KEY_S) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
+    if (m_input.keyPressed(GLFW_KEY_DOWN) || (m_input.keyPressed(GLFW_KEY_S) && !isTextEditing)) {
         menu.moveSelection(1);
         if (menu.selection() != oldSel) m_audioEngine.play(SoundId::Click, 0.45f, 1.25f);
     }
-    if (m_input.keyPressed(GLFW_KEY_LEFT) || (m_input.keyPressed(GLFW_KEY_A) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
+    if (m_input.keyPressed(GLFW_KEY_LEFT) || (m_input.keyPressed(GLFW_KEY_A) && !isTextEditing)) {
         menu.adjustSelected(-1);
         m_audioEngine.play(SoundId::Click, 0.55f, 1.15f);
     }
-    if (m_input.keyPressed(GLFW_KEY_RIGHT) || (m_input.keyPressed(GLFW_KEY_D) && !(m_state == GameState::NewWorld && m_newWorldMenu.selection() == 0))) {
+    if (m_input.keyPressed(GLFW_KEY_RIGHT) || (m_input.keyPressed(GLFW_KEY_D) && !isTextEditing)) {
         menu.adjustSelected(1);
         m_audioEngine.play(SoundId::Click, 0.55f, 1.15f);
     }
@@ -682,6 +750,30 @@ void Application::openSelectWorld() {
 }
 
 void Application::openNewWorld() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(100000, 999999999);
+    m_newWorldSeed = dist(gen);
+    m_newWorldSeedInput = std::to_string(m_newWorldSeed);
+
+    const auto savedWorlds = WorldSave::listSavedWorlds();
+    int worldIdx = 1;
+    while (true) {
+        std::string candidate = "World " + std::to_string(worldIdx);
+        bool exists = false;
+        for (const auto& w : savedWorlds) {
+            if (w.name == candidate) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            m_newWorldName = candidate;
+            break;
+        }
+        worldIdx++;
+    }
+
     buildNewWorldMenu();
     m_state = GameState::NewWorld;
     setCursorCaptured(false);
