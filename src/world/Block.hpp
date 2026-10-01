@@ -104,6 +104,7 @@ enum class TextureTile : uint8_t {
     PlayerHead,
     PlayerTorso,
     PlayerArm,
+    PlayerSkin,
     PlayerPants,
     PlayerShoe,
     Stick,

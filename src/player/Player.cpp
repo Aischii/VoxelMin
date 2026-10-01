@@ -638,6 +638,7 @@ void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& wo
     if (m_perspective != Perspective::FirstPerson) return;
 
     const float sp = swingProgress();
+    const float sinSp = std::sin(std::sqrt(sp) * 3.14159265f);
     const float punch = std::sin(sp * 3.14159265f);
 
     // View bobbing in camera space (smoothly swaying X & Y)
@@ -656,20 +657,27 @@ void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& wo
     const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
 
     if (m_heldItem == BlockId::Air) {
-        // --- 1. Empty Hand (Natural angled Steve arm with teal sleeve & skin) ---
-        const glm::vec3 basePos(0.32f + bobX - punch * 0.12f,
-                                -0.28f + bobY + punch * 0.10f,
-                                -0.42f - punch * 0.16f);
+        // --- 1. Empty Hand (Authentic Minecraft first-person arm) ---
+        // Base anchor in bottom-right corner of screen
+        const glm::vec3 basePos(0.36f + bobX - sinSp * 0.16f,
+                                -0.30f + bobY - sinSp * 0.10f,
+                                -0.46f - punch * 0.18f);
 
         glm::mat4 armMat = glm::translate(glm::mat4(1.0f), basePos);
-        armMat = glm::rotate(armMat, glm::radians(-18.0f + punch * 42.0f), glm::vec3(1, 0, 0));
-        armMat = glm::rotate(armMat, glm::radians(-32.0f - punch * 22.0f), glm::vec3(0, 1, 0));
-        armMat = glm::rotate(armMat, glm::radians(15.0f + punch * 20.0f),  glm::vec3(0, 0, 1));
+        // Angles: tilted forward-up, angled inward toward center, slight wrist roll
+        armMat = glm::rotate(armMat, glm::radians(-50.0f - sinSp * 52.0f), glm::vec3(1, 0, 0));
+        armMat = glm::rotate(armMat, glm::radians(-36.0f + sinSp * 34.0f), glm::vec3(0, 1, 0));
+        armMat = glm::rotate(armMat, glm::radians(30.0f - sinSp * 40.0f),  glm::vec3(0, 0, 1));
 
-        // Arm forearm/hand box: 0.14w x 0.14h x 0.44l
-        addOrientedBox(vertices, {0.0f, 0.0f, -0.16f}, {0.14f, 0.14f, 0.44f}, armMat,
-                       TextureTile::PlayerArm, TextureTile::PlayerArm,
-                       TextureTile::PlayerArm, TextureTile::PlayerArm, light, torchLight, 1.0f);
+        // Forearm and hand (Pure skin tone, length along -Z)
+        addOrientedBox(vertices, {0.0f, 0.0f, -0.16f}, {0.13f, 0.13f, 0.40f}, armMat,
+                       TextureTile::PlayerSkin, TextureTile::PlayerSkin,
+                       TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
+
+        // Teal sleeve cuff at the shoulder/screen entrance base
+        addOrientedBox(vertices, {0.0f, 0.0f, 0.08f}, {0.145f, 0.145f, 0.12f}, armMat,
+                       TextureTile::PlayerTorso, TextureTile::PlayerTorso,
+                       TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, 1.0f);
     } else {
         const BlockDef& def = blockDef(m_heldItem);
 
@@ -677,44 +685,54 @@ void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& wo
             m_heldItem == BlockId::IronIngot || m_heldItem == BlockId::Coal || m_heldItem == BlockId::Apple ||
             m_heldItem == BlockId::Bread || m_heldItem == BlockId::RawPorkchop || m_heldItem == BlockId::CookedPorkchop ||
             m_heldItem == BlockId::RawBeef || m_heldItem == BlockId::CookedBeef) {
-            // --- 2. Held Tool / Item (Angled forward, slashing on punch) ---
-            const glm::vec3 basePos(0.30f + bobX - punch * 0.14f,
-                                    -0.24f + bobY + punch * 0.12f,
-                                    -0.42f - punch * 0.18f);
+            // --- 2. Held Tool / Item (Slash swing) ---
+            const glm::vec3 basePos(0.28f + bobX - sinSp * 0.18f,
+                                    -0.20f + bobY - sinSp * 0.12f,
+                                    -0.40f - punch * 0.22f);
 
             glm::mat4 toolMat = glm::translate(glm::mat4(1.0f), basePos);
-            toolMat = glm::rotate(toolMat, glm::radians(10.0f + punch * 48.0f), glm::vec3(1, 0, 0));
-            toolMat = glm::rotate(toolMat, glm::radians(-35.0f - punch * 28.0f), glm::vec3(0, 1, 0));
-            toolMat = glm::rotate(toolMat, glm::radians(-20.0f + punch * 35.0f), glm::vec3(0, 0, 1));
+            toolMat = glm::rotate(toolMat, glm::radians(-15.0f - sinSp * 75.0f), glm::vec3(1, 0, 0));
+            toolMat = glm::rotate(toolMat, glm::radians(-28.0f + sinSp * 40.0f), glm::vec3(0, 1, 0));
+            toolMat = glm::rotate(toolMat, glm::radians(-25.0f - sinSp * 45.0f), glm::vec3(0, 0, 1));
 
-            // Tool sprite box (flat 3D blade): 0.28w x 0.28h x 0.04 thickness
-            addOrientedBox(vertices, {0.0f, 0.12f, -0.06f}, {0.28f, 0.28f, 0.04f}, toolMat,
+            // Tool sprite quad box
+            addOrientedBox(vertices, {0.0f, 0.14f, -0.08f}, {0.32f, 0.32f, 0.035f}, toolMat,
                            def.side, def.side, def.side, def.side, light, torchLight, 1.0f);
 
-            // Supporting hand holding handle
-            addOrientedBox(vertices, {0.0f, -0.06f, 0.0f}, {0.10f, 0.10f, 0.22f}, toolMat,
-                           TextureTile::PlayerArm, TextureTile::PlayerArm,
-                           TextureTile::PlayerArm, TextureTile::PlayerArm, light, torchLight, 1.0f);
+            // Hand gripping handle (Pure skin)
+            addOrientedBox(vertices, {0.0f, -0.04f, 0.02f}, {0.09f, 0.09f, 0.22f}, toolMat,
+                           TextureTile::PlayerSkin, TextureTile::PlayerSkin,
+                           TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
+
+            // Sleeve cuff
+            addOrientedBox(vertices, {0.0f, -0.04f, 0.14f}, {0.105f, 0.105f, 0.09f}, toolMat,
+                           TextureTile::PlayerTorso, TextureTile::PlayerTorso,
+                           TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, 1.0f);
         } else {
-            // --- 3. Held 3D Block (Isometric mini-cube tilted in hand) ---
-            const glm::vec3 basePos(0.28f + bobX - punch * 0.12f,
-                                    -0.22f + bobY + punch * 0.10f,
-                                    -0.40f - punch * 0.16f);
+            // --- 3. Held 3D Block (Isometric tilt) ---
+            const glm::vec3 basePos(0.28f + bobX - sinSp * 0.12f,
+                                    -0.22f + bobY - sinSp * 0.08f,
+                                    -0.38f - punch * 0.14f);
 
             glm::mat4 blockMat = glm::translate(glm::mat4(1.0f), basePos);
-            blockMat = glm::rotate(blockMat, glm::radians(18.0f - punch * 30.0f), glm::vec3(1, 0, 0));
-            blockMat = glm::rotate(blockMat, glm::radians(38.0f + punch * 18.0f), glm::vec3(0, 1, 0));
-            blockMat = glm::rotate(blockMat, glm::radians(-12.0f + punch * 20.0f), glm::vec3(0, 0, 1));
+            blockMat = glm::rotate(blockMat, glm::radians(18.0f - sinSp * 36.0f), glm::vec3(1, 0, 0));
+            blockMat = glm::rotate(blockMat, glm::radians(36.0f + sinSp * 24.0f), glm::vec3(0, 1, 0));
+            blockMat = glm::rotate(blockMat, glm::radians(-10.0f + sinSp * 20.0f), glm::vec3(0, 0, 1));
 
-            // Held Block: 0.22 x 0.22 x 0.22
-            const glm::vec3 blockSize(0.22f);
-            addOrientedBox(vertices, {0.0f, 0.06f, 0.0f}, blockSize, blockMat,
+            // Held 3D Block
+            const glm::vec3 blockSize(0.20f);
+            addOrientedBox(vertices, {0.0f, 0.04f, 0.0f}, blockSize, blockMat,
                            def.top, def.side, def.bottom, def.side, light, torchLight, 1.0f);
 
-            // Supporting hand beneath block
-            addOrientedBox(vertices, {0.02f, -0.10f, 0.02f}, {0.11f, 0.11f, 0.24f}, blockMat,
-                           TextureTile::PlayerArm, TextureTile::PlayerArm,
-                           TextureTile::PlayerArm, TextureTile::PlayerArm, light, torchLight, 1.0f);
+            // Hand supporting beneath
+            addOrientedBox(vertices, {0.02f, -0.10f, 0.04f}, {0.10f, 0.10f, 0.24f}, blockMat,
+                           TextureTile::PlayerSkin, TextureTile::PlayerSkin,
+                           TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
+
+            // Sleeve cuff
+            addOrientedBox(vertices, {0.02f, -0.10f, 0.18f}, {0.115f, 0.115f, 0.10f}, blockMat,
+                           TextureTile::PlayerTorso, TextureTile::PlayerTorso,
+                           TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, 1.0f);
         }
     }
 }

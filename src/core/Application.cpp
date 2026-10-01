@@ -174,6 +174,8 @@ void Application::run() {
             });
         }
 
+        m_player.setHeldItem(m_hotbar[m_selectedSlot].id);
+
         if (m_state == GameState::Playing) {
             if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
                 pauseGame();

@@ -593,6 +593,10 @@ void makePlayerArm(std::vector<uint8_t>& pixels, int tile) {
     }
 }
 
+void makePlayerSkin(std::vector<uint8_t>& pixels, int tile) {
+    fillNoise(pixels, tile, {0.78f, 0.56f, 0.41f}, 0.035f, 975);
+}
+
 void makePlayerPants(std::vector<uint8_t>& pixels, int tile) {
     // Dark indigo / blue denim pants
     fillNoise(pixels, tile, {0.23f, 0.20f, 0.49f}, 0.04f, 980);
@@ -959,6 +963,7 @@ void Texture::createAtlas() {
     const int playerHead = static_cast<int>(TextureTile::PlayerHead);
     const int playerTorso = static_cast<int>(TextureTile::PlayerTorso);
     const int playerArm = static_cast<int>(TextureTile::PlayerArm);
+    const int playerSkin = static_cast<int>(TextureTile::PlayerSkin);
     const int playerPants = static_cast<int>(TextureTile::PlayerPants);
     const int playerShoe = static_cast<int>(TextureTile::PlayerShoe);
     const int stick = static_cast<int>(TextureTile::Stick);
@@ -1073,6 +1078,7 @@ void Texture::createAtlas() {
     makePlayerHead(pixels, playerHead);
     makePlayerTorso(pixels, playerTorso);
     makePlayerArm(pixels, playerArm);
+    makePlayerSkin(pixels, playerSkin);
     makePlayerPants(pixels, playerPants);
     makePlayerShoe(pixels, playerShoe);
 
