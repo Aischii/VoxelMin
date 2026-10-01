@@ -1621,13 +1621,14 @@ void Application::renderScene() {
         m_renderer.drawWorld(m_world, m_player.camera(), skyColor, fogStart, fogEnd);
         m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), skyColor, fogStart, fogEnd);
         m_renderer.drawPlayer(m_player, m_world, m_player.camera(), skyColor, fogStart, fogEnd);
-        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera());
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         if (m_target.hit) {
             const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
             m_renderer.drawSelection(m_player.camera(), m_target.block, targetBlock);
         }
+
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera());
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         if (underwater) {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));

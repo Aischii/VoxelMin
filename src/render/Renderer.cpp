@@ -429,17 +429,32 @@ void Renderer::drawSelection(const Camera& camera, const glm::ivec3& block, Bloc
 
     const BlockBounds bounds = blockBounds(blockId);
     const glm::vec3 size = bounds.maxOffset - bounds.minOffset;
-    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(block) + bounds.minOffset);
-    model = glm::scale(model, size);
 
+    // Slight expansion (0.002f) matching Minecraft's bounding box expansion:
+    // sits 0.001f in front of the front face so lines pass depth test without z-fighting,
+    // while occluded and back edges fail the depth test against solid blocks.
+    const float eps = 0.002f;
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(block) + bounds.minOffset - glm::vec3(eps * 0.5f));
+    model = glm::scale(model, size + glm::vec3(eps));
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
     glDisable(GL_CULL_FACE);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     m_lineShader.use();
     m_lineShader.setMat4("uVP", viewProjection);
     m_lineShader.setMat4("uModel", model);
-    m_lineShader.setVec3("uColor", glm::vec3(0.03f));
+    m_lineShader.setVec3("uColor", glm::vec3(0.0f));
     glBindVertexArray(m_lineVao);
     glDrawArrays(GL_LINES, 0, 24);
     glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
     glEnable(GL_CULL_FACE);
 
     ++m_stats.drawCalls;

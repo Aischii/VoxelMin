@@ -6,5 +6,7 @@ uniform mat4 uVP;
 uniform mat4 uModel;
 
 void main() {
-    gl_Position = uVP * uModel * vec4(aPos, 1.0);
+    vec4 clip = uVP * uModel * vec4(aPos, 1.0);
+    clip.z -= 0.0002 * clip.w;
+    gl_Position = clip;
 }
