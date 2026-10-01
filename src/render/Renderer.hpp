@@ -1,0 +1,139 @@
+#pragma once
+#include "render/Font.hpp"
+#include "render/FrameStats.hpp"
+#include "render/ParticleSystem.hpp"
+#include "render/Shader.hpp"
+#include "render/Texture.hpp"
+#include "world/Block.hpp"
+
+#include <cstdint>
+#include <glm/glm.hpp>
+#include <string>
+#include <vector>
+
+namespace vox {
+
+class World;
+class Camera;
+class EntityManager;
+class Player;
+
+// Owns all GPU resources and exposes the drawing API used by the game and the
+// menus. World drawing is 3D; everything else is a 2D overlay in pixels
+// (origin bottom-left) drawn through small immediate-style primitives.
+class Renderer {
+public:
+    bool init();
+    void shutdown();
+
+    void setViewport(int width, int height);
+    int width() const { return m_fbWidth; }
+    int height() const { return m_fbHeight; }
+
+    // Global 2D UI scale factor (pixels per UI unit). Set once per frame from
+    // the GUI Scale setting; menus and the HUD both read it.
+    void setUIScale(float scale);
+    float uiScale() const { return m_uiScale; }
+
+    void beginFrame(const glm::vec3& clearColor);
+    void drawWorld(const World& world, const Camera& camera,
+                   const glm::vec3& fogColor, float fogStart, float fogEnd);
+    void drawEntities(const EntityManager& entityManager, const World& world, const Camera& camera,
+                      const glm::vec3& fogColor, float fogStart, float fogEnd);
+    void drawPlayer(const Player& player, const World& world, const Camera& camera,
+                    const glm::vec3& fogColor, float fogStart, float fogEnd);
+    void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera);
+    void drawSelection(const Camera& camera, const glm::ivec3& block, BlockId blockId = BlockId::Grass);
+
+    void updateParticles(float dt, const World& world, const glm::vec3& playerPos) {
+        m_particles.update(dt, world, playerPos);
+    }
+    void clearParticles() { m_particles.clear(); }
+    size_t particleCount() const { return m_particles.particleCount(); }
+
+    // HUD shown while playing (crosshair + hotbar).
+    void drawHud(int selectedSlot, const BlockId* hotbar, int slotCount);
+
+    // F3 debug overlay: dark panel with one text line per entry, drawn in the
+    // top-left corner. Rendering only -- the caller owns the content.
+    void drawDebugOverlay(const std::vector<std::string>& lines);
+
+    // Per-frame render counters. resetFrame() is called from beginFrame();
+    // accumulate() is fed the frame delta by Application once the frame is done.
+    const FrameStats& stats() const { return m_stats; }
+    FrameStats& stats() { return m_stats; }
+
+    // Inventory modal UI overlay.
+    void drawInventory(int selectedHotbarSlot, const BlockId* hotbar, int hotbarCount,
+                       const BlockId* inventory, int invCount,
+                       BlockId heldItem, const glm::vec2& mousePos);
+
+    void drawBlockIcon(float x, float y, float w, float h, BlockId id);
+    void drawTexturedRect(float x, float y, float w, float h, TextureTile tile,
+                          const glm::vec4& tint = glm::vec4(1.0f));
+
+    void drawUnderwaterOverlay(float time);
+
+    // --- 2D primitives (screen pixels, origin bottom-left) ------------------
+    void beginUI();
+    void endUI();
+
+    void drawRect(float x, float y, float w, float h, const glm::vec4& color);
+    void drawGradientRect(float x, float y, float w, float h,
+                          const glm::vec4& bottom, const glm::vec4& top);
+    void drawTriangle(const glm::vec2& a, const glm::vec2& b, const glm::vec2& c,
+                      const glm::vec4& color);
+    void drawText(float x, float y, const std::string& text, float scale,
+                  const glm::vec4& color, float rotationRadians = 0.0f);
+
+    float textWidth(const std::string& text, float scale) const;
+    float textHeight(float scale) const { return m_font.textHeight(scale); }
+
+    static std::string resolveAsset(const std::string& relativePath);
+
+private:
+    struct UIVertex {
+        glm::vec2 pos;
+        glm::vec4 color;
+    };
+    struct TextVertex {
+        glm::vec2 pos;
+        glm::vec2 uv;
+    };
+    struct SpriteVertex {
+        glm::vec2 pos;
+        glm::vec2 uv;
+    };
+
+    void uploadUI(const UIVertex* vertices, int count);
+
+    Shader m_chunkShader;
+    Shader m_lineShader;
+    Shader m_uiShader;
+    Shader m_textShader;
+    Shader m_spriteShader;
+    Shader m_underwaterShader;
+    Texture m_atlas;
+    Font m_font;
+    ParticleSystem m_particles;
+
+    uint32_t m_lineVao = 0;
+    uint32_t m_lineVbo = 0;
+    uint32_t m_uiVao = 0;
+    uint32_t m_uiVbo = 0;
+    uint32_t m_textVao = 0;
+    uint32_t m_textVbo = 0;
+    uint32_t m_spriteVao = 0;
+    uint32_t m_spriteVbo = 0;
+    uint32_t m_entityVao = 0;
+    uint32_t m_entityVbo = 0;
+    uint32_t m_underwaterVao = 0;
+    uint32_t m_underwaterVbo = 0;
+
+    int m_fbWidth = 1;
+    int m_fbHeight = 1;
+    float m_uiScale = 3.0f;
+    FrameStats m_stats;
+};
+
+} // namespace vox

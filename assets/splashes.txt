@@ -1,0 +1,36 @@
+Smooth Lighting & Shadows!
+Greedy Meshing inside!
+Made with C++17 and OpenGL!
+16x16 Pixel Perfection!
+Contact AO activated!
+Save and Load ready!
+Creative Inventory unlocked!
+Zero Compiler Warnings!
+Look at that Voxel RAM!
+Chunk borders culled!
+Legacy Console aesthetic!
+Now with Sunlight propagation!
+Dual-pass cutout foliage!
+FerriteCore inspired!
+ImmediatelyFast inspired!
+60 FPS VSync locked!
+Don't dig straight down!
+128x80x128 blocks of pure voxels!
+Press E for Creative inventory!
+Fly with Creative mode!
+Powered by MinGW-w64!
+OpenGL 3.3 Core!
+Custom 5x7 Bitmap Font!
+Infinite possibilities!
+Block by Block!
+Retro 3D Voxel Engine!
+Also try Minecraft!
+Subtle ambient occlusion!
+Seeded value-noise fBm terrain!
+Voxel DDA raycasting!
+RLE world compression!
+Sunken 3D slot bevels!
+Smooth camera smoothing!
+Crisp nearest-neighbor textures!
+Singleplayer Alpha!
+Build anything!

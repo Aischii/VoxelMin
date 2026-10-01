@@ -1,0 +1,30 @@
+# Build output
+/build/
+/out/
+/cmake-build-*/
+/compile_commands.json
+
+# Editor / IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Compiled artifacts
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.pdb
+
+# Local cache & game data
+.cache/
+saves/
+
+# Screenshots & captures
+*.bmp
+capture.png
+
+# OS
+Thumbs.db
+.DS_Store
