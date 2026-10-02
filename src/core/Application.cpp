@@ -1,5 +1,6 @@
 #include "core/Application.hpp"
 #include "core/Log.hpp"
+#include "world/BackroomsGenerator.hpp"
 #include "world/Block.hpp"
 #include "world/Chunk.hpp"
 #include "world/ChunkMesher.hpp"
@@ -99,15 +100,13 @@ bool Application::init() {
     m_activeWorldName = "World 1";
     m_activeWorldPath = WorldSave::getWorldPath(m_activeWorldName);
     m_activeWorldSeed = config::WORLD_SEED;
-    m_world.init(8, 8, m_activeWorldSeed);
-    m_world.generate(WorldType::Default);
-    m_player.spawnAt(m_world,
-                     static_cast<float>(m_world.widthBlocks()) * 0.5f,
-                     static_cast<float>(m_world.depthBlocks()) * 0.5f);
+    m_world.init(m_activeWorldSeed);
+    m_world.generateInitialSpawn(WorldType::Default, 2);
+    m_player.spawnAt(m_world, 0.0f, 0.0f);
     m_entityManager.spawnDefaults(m_world, m_activeWorldSeed);
 
     // Pre-mesh menu chunks immediately for instantaneous rendering
-    for (const auto& chunk : m_world.chunks()) {
+    for (Chunk* chunk : m_world.loadedChunks()) {
         if (!chunk) continue;
         std::vector<Vertex> opVertices, trVertices;
         std::vector<uint32_t> opIndices, trIndices;
@@ -117,8 +116,7 @@ bool Application::init() {
         chunk->dirty = false;
     }
 
-    log::info("Menu panorama ready: %d x %d x %d blocks",
-              m_world.widthBlocks(), m_world.heightBlocks(), m_world.depthBlocks());
+    log::info("Menu panorama ready: %zu chunks loaded", m_world.loadedChunks().size());
 
     loadSplashes();
     buildMenus();
@@ -162,24 +160,63 @@ void Application::run() {
         }
 
         m_audioEngine.setInGame(m_state == GameState::Playing || m_state == GameState::Inventory);
+        m_audioEngine.setInBackrooms(m_world.currentDimension() == DimensionId::Backrooms);
 
         if (m_state == GameState::Playing || m_state == GameState::Inventory || m_state == GameState::GameOver) {
-            m_timeOfDay += dt / config::DAY_CYCLE_SECONDS;
-            if (m_timeOfDay >= 1.0f) {
-                m_timeOfDay -= 1.0f;
-                m_dayCount++;
+            if (m_world.currentDimension() != DimensionId::Backrooms) {
+                m_timeOfDay += dt / config::DAY_CYCLE_SECONDS;
+                if (m_timeOfDay >= 1.0f) {
+                    m_timeOfDay -= 1.0f;
+                    m_dayCount++;
+                }
             }
-            m_world.tickEcology(glm::ivec3(m_player.position()), 24, [this](const glm::vec3& pos, BlockId dropId) {
-                m_entityManager.spawnItem(dropId, pos, 1);
-            });
+            m_ecologyTickTimer += dt;
+            if (m_ecologyTickTimer >= 0.25f) {
+                m_ecologyTickTimer = 0.0f;
+                m_world.tickEcology(glm::ivec3(m_player.position()), 24, [this](const glm::vec3& pos, BlockId dropId) {
+                    m_entityManager.spawnItem(dropId, pos, 1);
+                });
+            }
+
+            m_fluidTickTimer += dt;
+            if (m_fluidTickTimer >= 0.06f) {
+                m_fluidTickTimer = 0.0f;
+                m_world.tickFluids(glm::ivec3(m_player.position()), 24);
+            }
+            m_audioEngine.updateEnvironment(m_world, m_player.camera().position(), m_player.isInWater());
         }
 
         m_player.setHeldItem(m_hotbar[m_selectedSlot].id);
+
+        if (m_bannerTimer > 0.0f) {
+            m_bannerTimer -= dt;
+            if (m_bannerTimer < 0.0f) m_bannerTimer = 0.0f;
+        }
 
         if (m_state == GameState::Playing) {
             if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
                 pauseGame();
             } else {
+                // Dimension travel cooldown
+                if (m_dimensionCooldown > 0.0f) {
+                    m_dimensionCooldown -= static_cast<float>(dt);
+                } else {
+                    // Check reality glitch noclip trigger
+                    const glm::ivec3 feetB(static_cast<int>(std::floor(m_player.position().x)),
+                                           static_cast<int>(std::floor(m_player.position().y)),
+                                           static_cast<int>(std::floor(m_player.position().z)));
+                    const glm::ivec3 eyeB(static_cast<int>(std::floor(m_player.eyePosition().x)),
+                                          static_cast<int>(std::floor(m_player.eyePosition().y)),
+                                          static_cast<int>(std::floor(m_player.eyePosition().z)));
+                    if (m_world.getBlock(feetB.x, feetB.y, feetB.z) == BlockId::GlitchBlock ||
+                        m_world.getBlock(eyeB.x, eyeB.y, eyeB.z) == BlockId::GlitchBlock) {
+                        if (m_world.currentDimension() == DimensionId::Overworld) {
+                            switchDimension(DimensionId::Backrooms, glm::vec3(0.5f, 2.0f, 0.5f));
+                        }
+                    }
+                }
+
+                m_world.updateStreaming(m_player.position(), m_viewDistanceChunks, m_activeWorldType);
                 handlePlayInput();
                 m_player.update(dt, m_input, m_world, &m_audioEngine);
                 m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
@@ -190,6 +227,14 @@ void Application::run() {
                     return false;
                 }, [this](float dmg, const glm::vec3& src) {
                     m_player.takeDamage(dmg, src, &m_audioEngine);
+                    const glm::vec3 hitPos = m_player.position() + glm::vec3(0.0f, 0.9f, 0.0f);
+                    glm::vec3 hitDir = m_player.position() - src;
+                    if (glm::length(hitDir) > 0.001f) {
+                        hitDir = glm::normalize(hitDir);
+                    } else {
+                        hitDir = glm::vec3(0.0f, 1.0f, 0.0f);
+                    }
+                    m_renderer.spawnBloodSplatter(hitPos, hitDir, 14);
                 });
                 m_renderer.updateParticles(dt, m_world, m_player.position());
                 updateInteraction(dt);
@@ -228,6 +273,14 @@ void Application::run() {
                 return false;
             }, [this](float dmg, const glm::vec3& src) {
                 m_player.takeDamage(dmg, src, &m_audioEngine);
+                const glm::vec3 hitPos = m_player.position() + glm::vec3(0.0f, 0.9f, 0.0f);
+                glm::vec3 hitDir = m_player.position() - src;
+                if (glm::length(hitDir) > 0.001f) {
+                    hitDir = glm::normalize(hitDir);
+                } else {
+                    hitDir = glm::vec3(0.0f, 1.0f, 0.0f);
+                }
+                m_renderer.spawnBloodSplatter(hitPos, hitDir, 14);
             });
             m_renderer.updateParticles(dt, m_world, m_player.position());
         } else {
@@ -248,12 +301,8 @@ void Application::run() {
 void Application::shutdown() {
     if (m_state == GameState::Playing || m_state == GameState::Paused || m_state == GameState::Inventory) {
         const std::string savePath = m_activeWorldPath.empty() ? WorldSave::getWorldPath(m_activeWorldName) : m_activeWorldPath;
-        BlockId hb[8];
-        for (int i = 0; i < 8; ++i) hb[i] = m_hotbar[i].id;
-        BlockId inv[24];
-        for (int i = 0; i < 24; ++i) inv[i] = m_inventory[i].id;
         WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
-                            m_world, m_player, m_selectedSlot, hb, inv);
+                            m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
     }
     m_audioEngine.shutdown();
     m_renderer.shutdown();
@@ -333,12 +382,8 @@ void Application::buildMenus() {
     m_pauseMenu.addButton("Options", [this] { openOptions(GameState::Paused); });
     m_pauseMenu.addButton("Save and Quit to Title", [this] {
         const std::string savePath = m_activeWorldPath.empty() ? WorldSave::getWorldPath(m_activeWorldName) : m_activeWorldPath;
-        BlockId hb[8];
-        for (int i = 0; i < 8; ++i) hb[i] = m_hotbar[i].id;
-        BlockId inv[24];
-        for (int i = 0; i < 24; ++i) inv[i] = m_inventory[i].id;
         WorldSave::saveGame(savePath, m_activeWorldName, m_activeWorldSeed,
-                            m_world, m_player, m_selectedSlot, hb, inv);
+                            m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
         quitToTitle();
     });
     m_pauseMenu.resetSelection();
@@ -381,6 +426,13 @@ void Application::buildMenus() {
         [this] { return std::string(m_vsync ? "ON" : "OFF"); },
         [this](int) {
             m_vsync = !m_vsync;
+            applySettings();
+        });
+    m_optionsMenu.addOption(
+        "View Bobbing",
+        [this] { return std::string(m_viewBobbing ? "ON" : "OFF"); },
+        [this](int) {
+            m_viewBobbing = !m_viewBobbing;
             applySettings();
         });
     m_optionsMenu.addOption(
@@ -611,6 +663,12 @@ void Application::handleCharInput(unsigned int codepoint) {
                 m_newWorldSeed = parseSeed(m_newWorldSeedInput);
             }
         }
+    } else if (m_state == GameState::Inventory && m_creativeMode) {
+        if (codepoint >= 32 && codepoint <= 126 && m_creativeSearchQuery.size() < 20) {
+            m_creativeSearchQuery.push_back(static_cast<char>(codepoint));
+            m_creativeTab = 3; // Switch to Search tab
+            m_creativeScrollRow = 0;
+        }
     }
 }
 
@@ -735,7 +793,7 @@ void Application::handleMenuInput() {
 void Application::updateMenuCamera(float dt) {
     (void)dt;
     const float t = static_cast<float>(m_uiTime) * 0.06f;
-    const glm::vec3 center(m_world.widthBlocks() * 0.5f, 30.0f, m_world.depthBlocks() * 0.5f);
+    const glm::vec3 center(0.0f, 30.0f, 0.0f);
     const float radius = 62.0f;
     const glm::vec3 position = center + glm::vec3(std::cos(t) * radius, 20.0f, std::sin(t) * radius);
     m_menuCamera.setPosition(position);
@@ -793,17 +851,16 @@ void Application::startNewWorld(const std::string& name, uint32_t seed, WorldTyp
     };
 
     onProgress(0.02f, "Initializing terrain matrix...");
-    m_world.init(config::WORLD_CHUNKS_X, config::WORLD_CHUNKS_Z, seed);
-    m_world.generate(type, onProgress);
+    m_world.init(seed);
+    const int initialSpawnRadius = std::max(6, m_viewDistanceChunks + 1);
+    m_world.generateInitialSpawn(type, initialSpawnRadius, onProgress);
 
     for (const auto& v : m_world.villages()) {
         log::info("  Village '%s' (type %d) at (%.1f, %.1f, %.1f)", v.name.c_str(), v.templateType, v.center.x, v.center.y, v.center.z);
     }
 
     onProgress(0.85f, "Placing player at spawn point...");
-    m_player.spawnAt(m_world,
-                     static_cast<float>(m_world.widthBlocks()) * 0.5f,
-                     static_cast<float>(m_world.depthBlocks()) * 0.5f);
+    m_player.spawnAt(m_world, 0.0f, 0.0f);
     m_player.setFlying(false);
     m_selectedSlot = 0;
 
@@ -811,11 +868,11 @@ void Application::startNewWorld(const std::string& name, uint32_t seed, WorldTyp
     m_entityManager.spawnDefaults(m_world, seed);
     m_renderer.clearParticles();
 
-    // Pre-mesh all chunks in the world with smooth progress bar updates!
-    const auto& chunks = m_world.chunks();
+    // Pre-mesh initial spawn chunks with smooth progress bar updates!
+    const auto& chunks = m_world.loadedChunks();
     const size_t totalChunks = chunks.size();
     for (size_t i = 0; i < totalChunks; ++i) {
-        Chunk* chunk = chunks[i].get();
+        Chunk* chunk = chunks[i];
         if (!chunk) continue;
         std::vector<Vertex> opVertices, trVertices;
         std::vector<uint32_t> opIndices, trIndices;
@@ -824,23 +881,21 @@ void Application::startNewWorld(const std::string& name, uint32_t seed, WorldTyp
         chunk->transparentMesh.upload(trVertices, trIndices);
         chunk->dirty = false;
 
-        if (i % 64 == 0 || i == totalChunks - 1) {
+        if (i % 4 == 0 || i == totalChunks - 1) {
             float p = 0.90f + 0.08f * (static_cast<float>(i + 1) / static_cast<float>(totalChunks));
             onProgress(p, "Building terrain chunk meshes (" + std::to_string(i + 1) + "/" + std::to_string(totalChunks) + ")...");
         }
     }
 
     onProgress(0.99f, "Saving initial world snapshot...");
-    BlockId hbInit[8];
-    for (int i = 0; i < 8; ++i) hbInit[i] = m_hotbar[i].id;
-    BlockId invInit[24];
-    for (int i = 0; i < 24; ++i) invInit[i] = m_inventory[i].id;
     WorldSave::saveGame(m_activeWorldPath, m_activeWorldName, m_activeWorldSeed,
-                        m_world, m_player, m_selectedSlot, hbInit, invInit);
+                        m_world, m_player, m_selectedSlot, m_hotbar, m_inventory);
 
     onProgress(1.00f, "Entering world...");
     m_state = GameState::Playing;
     setCursorCaptured(true);
+    const DimensionInfo dimInfo = getDimensionInfo(m_world.currentDimension());
+    showTitleBanner(dimInfo.title, dimInfo.subtitle, 4.5f);
 }
 
 void Application::loadWorld(const std::string& path) {
@@ -850,22 +905,45 @@ void Application::loadWorld(const std::string& path) {
     };
 
     onProgress(0.05f, "Reading saved world data...");
-    BlockId hb[8];
-    BlockId inv[24];
-    if (WorldSave::loadGame(path, m_activeWorldName, m_activeWorldSeed, m_world, m_player, m_selectedSlot, hb, inv)) {
-        for (int i = 0; i < 8; ++i) m_hotbar[i] = ItemSlot(hb[i], hb[i] == BlockId::Air ? 0 : 64);
-        for (int i = 0; i < 24; ++i) m_inventory[i] = ItemSlot(inv[i], inv[i] == BlockId::Air ? 0 : 64);
+    if (WorldSave::loadGame(path, m_activeWorldName, m_activeWorldSeed, m_world, m_player, m_selectedSlot, m_hotbar, m_inventory)) {
         m_world.setSeed(m_activeWorldSeed);
         VillageGenerator::locateVillages(m_world, m_activeWorldSeed, m_world.villages());
 
-        onProgress(0.40f, "Populating fauna & entities...");
+        // Ensure all chunks within view distance + 1 around player are loaded or generated
+        const glm::vec3 pPos = m_player.position();
+        const int centerCx = blockToChunk(static_cast<int>(std::floor(pPos.x)));
+        const int centerCz = blockToChunk(static_cast<int>(std::floor(pPos.z)));
+        const int loadRadius = std::max(6, m_viewDistanceChunks + 1);
+        const int minCx = centerCx - loadRadius;
+        const int maxCx = centerCx + loadRadius;
+        const int minCz = centerCz - loadRadius;
+        const int maxCz = centerCz + loadRadius;
+        const int totalRequired = (maxCx - minCx + 1) * (maxCz - minCz + 1);
+        int genCount = 0;
+
+        for (int cz = minCz; cz <= maxCz; ++cz) {
+            for (int cx = minCx; cx <= maxCx; ++cx) {
+                if (!m_world.chunkAt(cx, cz)) {
+                    m_world.generateSingleChunk(cx, cz, m_activeWorldType);
+                }
+                genCount++;
+                if (genCount % 4 == 0 || genCount == totalRequired) {
+                    float p = 0.10f + 0.30f * (static_cast<float>(genCount) / static_cast<float>(totalRequired));
+                    onProgress(p, "Loading world terrain (" + std::to_string(genCount) + "/" + std::to_string(totalRequired) + ")...");
+                }
+            }
+        }
+        m_world.rebuildLoadedList();
+        m_world.computeWorldLighting();
+
+        onProgress(0.45f, "Populating fauna & entities...");
         m_entityManager.spawnDefaults(m_world, m_activeWorldSeed);
         m_renderer.clearParticles();
 
-        const auto& chunks = m_world.chunks();
+        const auto& chunks = m_world.loadedChunks();
         const size_t totalChunks = chunks.size();
         for (size_t i = 0; i < totalChunks; ++i) {
-            Chunk* chunk = chunks[i].get();
+            Chunk* chunk = chunks[i];
             if (!chunk) continue;
             std::vector<Vertex> opVertices, trVertices;
             std::vector<uint32_t> opIndices, trIndices;
@@ -874,7 +952,7 @@ void Application::loadWorld(const std::string& path) {
             chunk->transparentMesh.upload(trVertices, trIndices);
             chunk->dirty = false;
 
-            if (i % 64 == 0 || i == totalChunks - 1) {
+            if (i % 4 == 0 || i == totalChunks - 1) {
                 float p = 0.50f + 0.48f * (static_cast<float>(i + 1) / static_cast<float>(totalChunks));
                 onProgress(p, "Building terrain chunk meshes (" + std::to_string(i + 1) + "/" + std::to_string(totalChunks) + ")...");
             }
@@ -883,7 +961,84 @@ void Application::loadWorld(const std::string& path) {
         onProgress(1.00f, "Entering world...");
         m_state = GameState::Playing;
         setCursorCaptured(true);
+        const DimensionInfo dimInfo = getDimensionInfo(m_world.currentDimension());
+        showTitleBanner(dimInfo.title, dimInfo.subtitle, 4.5f);
     }
+}
+
+void Application::showTitleBanner(const std::string& title, const std::string& subtitle, float duration) {
+    m_bannerTitle = title;
+    m_bannerSubtitle = subtitle;
+    m_bannerTimer = duration;
+    m_bannerDuration = duration;
+}
+
+glm::vec3 Application::findSafeOverworldReturn(const glm::vec3& nearPos) {
+    const int startX = static_cast<int>(std::floor(nearPos.x));
+    const int startY = static_cast<int>(std::floor(nearPos.y));
+    const int startZ = static_cast<int>(std::floor(nearPos.z));
+
+    const int offsets[][2] = {
+        { 2,  0}, {-2,  0}, { 0,  2}, { 0, -2},
+        { 1,  1}, {-1,  1}, { 1, -1}, {-1, -1},
+        { 2,  1}, {-2,  1}, { 2, -1}, {-2, -1},
+        { 1,  2}, {-1,  2}, { 1, -2}, {-1, -2},
+        { 3,  0}, {-3,  0}, { 0,  3}, { 0, -3}
+    };
+
+    for (const auto& off : offsets) {
+        const int wx = startX + off[0];
+        const int wz = startZ + off[1];
+
+        for (int dy = 2; dy >= -3; --dy) {
+            const int wy = startY + dy;
+            if (wy < 1 || wy >= Chunk::H - 2) continue;
+
+            const BlockId floorB = m_world.getBlock(wx, wy - 1, wz);
+            const BlockId feetB  = m_world.getBlock(wx, wy, wz);
+            const BlockId headB  = m_world.getBlock(wx, wy + 1, wz);
+
+            if (isSolid(floorB) && !isGlitch(floorB) &&
+                (isAir(feetB) || isPlant(feetB)) && !isGlitch(feetB) &&
+                isAir(headB) && !isGlitch(headB)) {
+                return glm::vec3(static_cast<float>(wx) + 0.5f,
+                                 static_cast<float>(wy),
+                                 static_cast<float>(wz) + 0.5f);
+            }
+        }
+    }
+
+    return nearPos + glm::vec3(2.0f, 0.0f, 0.0f);
+}
+
+void Application::switchDimension(DimensionId targetDim, const glm::vec3& targetPos) {
+    if (m_world.currentDimension() == targetDim) return;
+
+    if (m_world.currentDimension() == DimensionId::Overworld) {
+        m_overworldReturnPos = m_player.position();
+    }
+
+    m_dimensionCooldown = 2.0f; // 2s cooldown to prevent accidental re-teleport
+
+    glm::vec3 spawnPos = targetPos;
+    m_world.switchDimension(targetDim, targetPos);
+
+    if (targetDim == DimensionId::Backrooms) {
+        spawnPos = BackroomsGenerator(m_world.seed()).findSafeSpawn(m_world, static_cast<int>(std::floor(targetPos.x)), static_cast<int>(std::floor(targetPos.z)));
+        m_entityManager.clearMobs();
+        m_audioEngine.setInBackrooms(true);
+    } else {
+        spawnPos = findSafeOverworldReturn(targetPos);
+        m_entityManager.spawnDefaults(m_world, m_activeWorldSeed);
+        m_audioEngine.setInBackrooms(false);
+    }
+
+    m_player.setPosition(spawnPos);
+    m_player.setFlying(false);
+
+    const DimensionInfo info = getDimensionInfo(targetDim);
+    showTitleBanner(info.title, info.subtitle, 4.5f);
+    m_audioEngine.play(SoundId::ItemPickup, 1.0f, 0.6f);
 }
 
 void Application::startGame() {
@@ -930,37 +1085,95 @@ void Application::openInventory(bool withCraftingTable) {
     m_isMining = false;
     m_miningProgress = 0.0f;
     setCursorCaptured(false);
+
+    // Discover all items currently in player inventory & hotbar
+    for (int i = 0; i < 9; ++i) {
+        if (!m_hotbar[i].empty()) discoverItem(m_hotbar[i].id);
+    }
+    for (int i = 0; i < 27; ++i) {
+        if (!m_inventory[i].empty()) discoverItem(m_inventory[i].id);
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (!m_armor[i].empty()) discoverItem(m_armor[i].id);
+    }
+    if (!m_offhand.empty()) discoverItem(m_offhand.id);
+
+    updateCraftingResult();
 }
 
 void Application::closeInventory() {
+    clearCraftingGrid();
     if (!m_heldItem.empty()) {
         if (!addItem(m_heldItem.id, m_heldItem.count)) {
             m_entityManager.spawnItem(m_heldItem.id, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), m_heldItem.count);
         }
         m_heldItem.clear();
     }
+    m_craftingResult.clear();
     m_isCraftingTableOpen = false;
     m_state = GameState::Playing;
     setCursorCaptured(true);
 }
 
-bool Application::canCraftRecipe(int catIdx, int recIdx) const {
-    const auto& categories = getConsoleRecipeCategories();
-    if (catIdx < 0 || catIdx >= static_cast<int>(categories.size())) return false;
-    const auto& recipes = categories[catIdx].recipes;
-    if (recIdx < 0 || recIdx >= static_cast<int>(recipes.size())) return false;
+void Application::clearCraftingGrid() {
+    for (int i = 0; i < 9; ++i) {
+        if (!m_craftingSlots[i].empty()) {
+            if (!addItem(m_craftingSlots[i].id, m_craftingSlots[i].count)) {
+                m_entityManager.spawnItem(m_craftingSlots[i].id, m_player.position() + glm::vec3(0.0f, 0.5f, 0.0f), m_craftingSlots[i].count);
+            }
+            m_craftingSlots[i].clear();
+        }
+    }
+    m_craftingResult.clear();
+}
 
-    const auto& recipe = recipes[recIdx];
+void Application::discoverItem(BlockId id) {
+    if (id == BlockId::Air || id >= BlockId::Count) return;
+    const size_t idx = static_cast<size_t>(id);
+    if (!m_discoveredItems[idx]) {
+        m_discoveredItems[idx] = true;
+    }
+}
+
+bool Application::isRecipeUnlocked(const ConsoleRecipeDef& recipe) const {
+    if (m_creativeMode) return true;
+    for (int i = 0; i < recipe.ingredientCount; ++i) {
+        const BlockId id = recipe.ingredients[i].id;
+        if (id != BlockId::Air && id < BlockId::Count && m_discoveredItems[static_cast<size_t>(id)]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<ConsoleRecipeDef> Application::getUnlockedRecipes(int categoryIdx) const {
+    const auto& categories = getConsoleRecipeCategories(m_isCraftingTableOpen);
+    if (categoryIdx < 0 || categoryIdx >= static_cast<int>(categories.size())) return {};
+
+    std::vector<ConsoleRecipeDef> unlocked;
+    for (const auto& rec : categories[categoryIdx].recipes) {
+        if (isRecipeUnlocked(rec)) {
+            unlocked.push_back(rec);
+        }
+    }
+    return unlocked;
+}
+
+bool Application::canCraftRecipe(int catIdx, int recIdx) const {
+    const auto unlocked = getUnlockedRecipes(catIdx);
+    if (recIdx < 0 || recIdx >= static_cast<int>(unlocked.size())) return false;
+
+    const auto& recipe = unlocked[recIdx];
     if (recipe.tableOnly && !m_isCraftingTableOpen) return false;
 
     for (int i = 0; i < recipe.ingredientCount; ++i) {
         const BlockId neededId = recipe.ingredients[i].id;
         const int neededCount = recipe.ingredients[i].count;
         int haveCount = 0;
-        for (int h = 0; h < 8; ++h) {
+        for (int h = 0; h < 9; ++h) {
             if (m_hotbar[h].id == neededId) haveCount += m_hotbar[h].count;
         }
-        for (int inv = 0; inv < 24; ++inv) {
+        for (int inv = 0; inv < 27; ++inv) {
             if (m_inventory[inv].id == neededId) haveCount += m_inventory[inv].count;
         }
         if (haveCount < neededCount) return false;
@@ -974,14 +1187,15 @@ bool Application::craftSelectedRecipe() {
         return false;
     }
 
-    const auto& categories = getConsoleRecipeCategories();
-    const auto& recipe = categories[m_craftingCategory].recipes[m_selectedRecipe];
+    const auto unlocked = getUnlockedRecipes(m_craftingCategory);
+    if (m_selectedRecipe < 0 || m_selectedRecipe >= static_cast<int>(unlocked.size())) return false;
+    const auto& recipe = unlocked[m_selectedRecipe];
 
     for (int i = 0; i < recipe.ingredientCount; ++i) {
         const BlockId neededId = recipe.ingredients[i].id;
         int remaining = recipe.ingredients[i].count;
 
-        for (int h = 0; h < 8 && remaining > 0; ++h) {
+        for (int h = 0; h < 9 && remaining > 0; ++h) {
             if (m_hotbar[h].id == neededId) {
                 const int take = std::min(m_hotbar[h].count, remaining);
                 m_hotbar[h].count -= take;
@@ -989,7 +1203,7 @@ bool Application::craftSelectedRecipe() {
                 if (m_hotbar[h].count <= 0) m_hotbar[h].clear();
             }
         }
-        for (int inv = 0; inv < 24 && remaining > 0; ++inv) {
+        for (int inv = 0; inv < 27 && remaining > 0; ++inv) {
             if (m_inventory[inv].id == neededId) {
                 const int take = std::min(m_inventory[inv].count, remaining);
                 m_inventory[inv].count -= take;
@@ -1006,12 +1220,185 @@ bool Application::craftSelectedRecipe() {
     return true;
 }
 
+void Application::updateCraftingResult() {
+    m_craftingResult.clear();
+
+    const int gridDim = m_isCraftingTableOpen ? 3 : 2;
+
+    int minR = 99, maxR = -1, minC = 99, maxC = -1;
+    int totalItems = 0;
+
+    for (int r = 0; r < gridDim; ++r) {
+        for (int c = 0; c < gridDim; ++c) {
+            const int idx = r * gridDim + c;
+            if (!m_craftingSlots[idx].empty()) {
+                totalItems++;
+                minR = std::min(minR, r);
+                maxR = std::max(maxR, r);
+                minC = std::min(minC, c);
+                maxC = std::max(maxC, c);
+            }
+        }
+    }
+
+    if (totalItems == 0) return;
+
+    const int shapeW = maxC - minC + 1;
+    const int shapeH = maxR - minR + 1;
+
+    // 1x1 recipes
+    if (shapeW == 1 && shapeH == 1 && totalItems == 1) {
+        const BlockId b = m_craftingSlots[minR * gridDim + minC].id;
+        if (b == BlockId::Wood || b == BlockId::WoodX || b == BlockId::WoodZ) {
+            m_craftingResult = ItemSlot(BlockId::Planks, 4);
+        } else if (b == BlockId::Stone) {
+            m_craftingResult = ItemSlot(BlockId::Cobblestone, 1);
+        }
+        return;
+    }
+
+    // 1x2 (vertical) recipes
+    if (shapeW == 1 && shapeH == 2 && totalItems == 2) {
+        const BlockId topB = m_craftingSlots[minR * gridDim + minC].id;
+        const BlockId btmB = m_craftingSlots[(minR + 1) * gridDim + minC].id;
+        if (topB == BlockId::Planks && btmB == BlockId::Planks) {
+            m_craftingResult = ItemSlot(BlockId::Stick, 4);
+        } else if (topB == BlockId::Coal && btmB == BlockId::Stick) {
+            m_craftingResult = ItemSlot(BlockId::Torch, 4);
+        } else if (topB == BlockId::RawPorkchop && btmB == BlockId::Coal) {
+            m_craftingResult = ItemSlot(BlockId::CookedPorkchop, 1);
+        } else if (topB == BlockId::RawBeef && btmB == BlockId::Coal) {
+            m_craftingResult = ItemSlot(BlockId::CookedBeef, 1);
+        } else if (topB == BlockId::Leaves && btmB == BlockId::Leaves) {
+            m_craftingResult = ItemSlot(BlockId::TallGrass, 2);
+        }
+        return;
+    }
+
+    // 2x2 recipes
+    if (shapeW == 2 && shapeH == 2 && totalItems == 4) {
+        const BlockId b00 = m_craftingSlots[minR * gridDim + minC].id;
+        const BlockId b01 = m_craftingSlots[minR * gridDim + minC + 1].id;
+        const BlockId b10 = m_craftingSlots[(minR + 1) * gridDim + minC].id;
+        const BlockId b11 = m_craftingSlots[(minR + 1) * gridDim + minC + 1].id;
+
+        if (b00 == BlockId::Planks && b01 == BlockId::Planks && b10 == BlockId::Planks && b11 == BlockId::Planks) {
+            m_craftingResult = ItemSlot(BlockId::CraftingTable, 1);
+        } else if (b00 == BlockId::Dirt && b01 == BlockId::Dirt && b10 == BlockId::Dirt && b11 == BlockId::Dirt) {
+            m_craftingResult = ItemSlot(BlockId::DirtPath, 4);
+        } else if (b00 == BlockId::Leaves && b01 == BlockId::Leaves && b10 == BlockId::Leaves && b11 == BlockId::Leaves) {
+            m_craftingResult = ItemSlot(BlockId::Apple, 2);
+        } else if (b00 == BlockId::IronIngot && b01 == BlockId::IronIngot && b10 == BlockId::IronIngot && b11 == BlockId::IronIngot) {
+            m_craftingResult = ItemSlot(BlockId::IronOre, 1);
+        } else if (b00 == BlockId::Diamond && b01 == BlockId::Diamond && b10 == BlockId::Diamond && b11 == BlockId::Diamond) {
+            m_craftingResult = ItemSlot(BlockId::DiamondOre, 1);
+        }
+        return;
+    }
+
+    // 3x1 (horizontal) recipes: Bread
+    if (shapeW == 3 && shapeH == 1 && totalItems == 3 && m_isCraftingTableOpen) {
+        const BlockId b0 = m_craftingSlots[minR * gridDim + minC].id;
+        const BlockId b1 = m_craftingSlots[minR * gridDim + minC + 1].id;
+        const BlockId b2 = m_craftingSlots[minR * gridDim + minC + 2].id;
+        if (b0 == BlockId::Leaves && b1 == BlockId::Leaves && b2 == BlockId::Leaves) {
+            m_craftingResult = ItemSlot(BlockId::Bread, 1);
+        }
+        return;
+    }
+
+    // 1x3 (vertical) recipes: Swords and Shovels
+    if (shapeW == 1 && shapeH == 3 && totalItems == 3 && m_isCraftingTableOpen) {
+        const BlockId b0 = m_craftingSlots[minR * gridDim + minC].id;
+        const BlockId b1 = m_craftingSlots[(minR + 1) * gridDim + minC].id;
+        const BlockId b2 = m_craftingSlots[(minR + 2) * gridDim + minC].id;
+
+        // Swords: 2 material + 1 stick
+        if (b2 == BlockId::Stick && b0 == b1) {
+            if (b0 == BlockId::Planks) m_craftingResult = ItemSlot(BlockId::WoodSword, 1, maxToolDurability(BlockId::WoodSword));
+            else if (b0 == BlockId::Cobblestone) m_craftingResult = ItemSlot(BlockId::StoneSword, 1, maxToolDurability(BlockId::StoneSword));
+            else if (b0 == BlockId::IronIngot) m_craftingResult = ItemSlot(BlockId::IronSword, 1, maxToolDurability(BlockId::IronSword));
+            else if (b0 == BlockId::Diamond) m_craftingResult = ItemSlot(BlockId::DiamondSword, 1, maxToolDurability(BlockId::DiamondSword));
+            return;
+        }
+
+        // Shovels: 1 material + 2 sticks
+        if (b1 == BlockId::Stick && b2 == BlockId::Stick) {
+            if (b0 == BlockId::Planks) m_craftingResult = ItemSlot(BlockId::WoodShovel, 1, maxToolDurability(BlockId::WoodShovel));
+            else if (b0 == BlockId::Cobblestone) m_craftingResult = ItemSlot(BlockId::StoneShovel, 1, maxToolDurability(BlockId::StoneShovel));
+            else if (b0 == BlockId::IronIngot) m_craftingResult = ItemSlot(BlockId::IronShovel, 1, maxToolDurability(BlockId::IronShovel));
+            else if (b0 == BlockId::Diamond) m_craftingResult = ItemSlot(BlockId::DiamondShovel, 1, maxToolDurability(BlockId::DiamondShovel));
+            return;
+        }
+    }
+
+    // Pickaxes: 3 material top + 2 sticks center column below
+    if (shapeW == 3 && shapeH == 3 && totalItems == 5 && m_isCraftingTableOpen) {
+        const BlockId r0c0 = m_craftingSlots[minR * gridDim + minC].id;
+        const BlockId r0c1 = m_craftingSlots[minR * gridDim + minC + 1].id;
+        const BlockId r0c2 = m_craftingSlots[minR * gridDim + minC + 2].id;
+        const BlockId r1c1 = m_craftingSlots[(minR + 1) * gridDim + minC + 1].id;
+        const BlockId r2c1 = m_craftingSlots[(minR + 2) * gridDim + minC + 1].id;
+
+        if (r0c0 == r0c1 && r0c1 == r0c2 && r1c1 == BlockId::Stick && r2c1 == BlockId::Stick) {
+            if (r0c0 == BlockId::Planks) m_craftingResult = ItemSlot(BlockId::WoodPickaxe, 1, maxToolDurability(BlockId::WoodPickaxe));
+            else if (r0c0 == BlockId::Cobblestone) m_craftingResult = ItemSlot(BlockId::StonePickaxe, 1, maxToolDurability(BlockId::StonePickaxe));
+            else if (r0c0 == BlockId::IronIngot) m_craftingResult = ItemSlot(BlockId::IronPickaxe, 1, maxToolDurability(BlockId::IronPickaxe));
+            else if (r0c0 == BlockId::Diamond) m_craftingResult = ItemSlot(BlockId::DiamondPickaxe, 1, maxToolDurability(BlockId::DiamondPickaxe));
+            return;
+        }
+    }
+
+    // Axes: 2 material top, 1 material middle-left, 2 sticks right column
+    if (shapeW == 2 && shapeH == 3 && totalItems == 5 && m_isCraftingTableOpen) {
+        const BlockId r0c0 = m_craftingSlots[minR * gridDim + minC].id;
+        const BlockId r0c1 = m_craftingSlots[minR * gridDim + minC + 1].id;
+        const BlockId r1c0 = m_craftingSlots[(minR + 1) * gridDim + minC].id;
+        const BlockId r1c1 = m_craftingSlots[(minR + 1) * gridDim + minC + 1].id;
+        const BlockId r2c1 = m_craftingSlots[(minR + 2) * gridDim + minC + 1].id;
+
+        if (r0c0 == r0c1 && r0c1 == r1c0 && r1c1 == BlockId::Stick && r2c1 == BlockId::Stick) {
+            if (r0c0 == BlockId::Planks) m_craftingResult = ItemSlot(BlockId::WoodAxe, 1, maxToolDurability(BlockId::WoodAxe));
+            else if (r0c0 == BlockId::Cobblestone) m_craftingResult = ItemSlot(BlockId::StoneAxe, 1, maxToolDurability(BlockId::StoneAxe));
+            else if (r0c0 == BlockId::IronIngot) m_craftingResult = ItemSlot(BlockId::IronAxe, 1, maxToolDurability(BlockId::IronAxe));
+            else if (r0c0 == BlockId::Diamond) m_craftingResult = ItemSlot(BlockId::DiamondAxe, 1, maxToolDurability(BlockId::DiamondAxe));
+            return;
+        }
+    }
+}
+
+void Application::takeCraftingResult() {
+    if (m_craftingResult.empty()) return;
+
+    if (m_heldItem.empty()) {
+        m_heldItem = m_craftingResult;
+    } else if (m_heldItem.id == m_craftingResult.id && !isTool(m_heldItem.id) && m_heldItem.count + m_craftingResult.count <= 64) {
+        m_heldItem.count += m_craftingResult.count;
+    } else {
+        return; // Cursor cannot accept crafted item
+    }
+
+    const int slotCount = m_isCraftingTableOpen ? 9 : 4;
+    for (int i = 0; i < slotCount; ++i) {
+        if (!m_craftingSlots[i].empty()) {
+            m_craftingSlots[i].count--;
+            if (m_craftingSlots[i].count <= 0) {
+                m_craftingSlots[i].clear();
+            }
+        }
+    }
+
+    m_audioEngine.play(SoundId::ItemPickup, 0.95f, 1.25f);
+    updateCraftingResult();
+}
+
 bool Application::addItem(BlockId id, int count) {
     if (isAir(id) || count <= 0) return true;
+    discoverItem(id);
 
     // 1. Stack into existing hotbar
     if (!isTool(id)) {
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 9; ++i) {
             if (m_hotbar[i].id == id && m_hotbar[i].count < 64) {
                 const int canAdd = std::min(count, 64 - m_hotbar[i].count);
                 m_hotbar[i].count += canAdd;
@@ -1020,7 +1407,7 @@ bool Application::addItem(BlockId id, int count) {
             }
         }
         // 2. Stack into existing inventory
-        for (int i = 0; i < 24; ++i) {
+        for (int i = 0; i < 27; ++i) {
             if (m_inventory[i].id == id && m_inventory[i].count < 64) {
                 const int canAdd = std::min(count, 64 - m_inventory[i].count);
                 m_inventory[i].count += canAdd;
@@ -1031,7 +1418,7 @@ bool Application::addItem(BlockId id, int count) {
     }
 
     // 3. Put in empty hotbar slot
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 9; ++i) {
         if (m_hotbar[i].empty()) {
             m_hotbar[i] = ItemSlot(id, count, maxToolDurability(id));
             return true;
@@ -1039,7 +1426,7 @@ bool Application::addItem(BlockId id, int count) {
     }
 
     // 4. Put in empty inventory slot
-    for (int i = 0; i < 24; ++i) {
+    for (int i = 0; i < 27; ++i) {
         if (m_inventory[i].empty()) {
             m_inventory[i] = ItemSlot(id, count, maxToolDurability(id));
             return true;
@@ -1053,32 +1440,13 @@ bool Application::addItem(BlockId id, int count) {
 }
 
 void Application::populateCreativeCatalog() {
-    const BlockId catalog[32] = {
-        // Hotbar (8 items)
-        BlockId::Dirt, BlockId::Stone, BlockId::Cobblestone, BlockId::Planks,
-        BlockId::Torch, BlockId::DiamondPickaxe, BlockId::DiamondSword, BlockId::CookedBeef,
-        // Main inventory (24 items)
-        BlockId::Grass, BlockId::Sand, BlockId::Wood, BlockId::Leaves,
-        BlockId::TallGrass, BlockId::DirtPath, BlockId::Bedrock, BlockId::CraftingTable,
-        BlockId::CoalOre, BlockId::IronOre, BlockId::GoldOre, BlockId::DiamondOre,
-        BlockId::Coal, BlockId::IronIngot, BlockId::Diamond, BlockId::Stick,
-        BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::DiamondAxe, BlockId::DiamondShovel,
-        BlockId::Apple, BlockId::Bread, BlockId::CookedPorkchop, BlockId::Water
-    };
-
-    for (int i = 0; i < 8; ++i) {
-        m_hotbar[i] = ItemSlot(catalog[i], isTool(catalog[i]) ? 1 : 64, maxToolDurability(catalog[i]));
-    }
-    for (int i = 0; i < 24; ++i) {
-        m_inventory[i] = ItemSlot(catalog[8 + i], isTool(catalog[8 + i]) ? 1 : 64, maxToolDurability(catalog[8 + i]));
-    }
+    // Creative mode uses dynamic full catalog tabs without overwriting player inventory
 }
 
 void Application::toggleCreativeMode() {
     m_creativeMode = !m_creativeMode;
     m_player.setCreative(m_creativeMode);
     if (m_creativeMode) {
-        populateCreativeCatalog();
         m_player.setFlying(true); // Automatically enable flight mode in creative!
         m_audioEngine.play(SoundId::ItemPickup, 1.0f, 1.3f);
         log::info("Creative mode ENABLED (Flying auto-enabled, double-space to toggle)");
@@ -1104,6 +1472,9 @@ float Application::moonLightFactor() const {
 }
 
 float Application::computeSunlight() const {
+    if (m_world.currentDimension() == DimensionId::Backrooms) {
+        return 1.0f; // Fluorescent ambient illumination
+    }
     const float angle = m_timeOfDay * 2.0f * 3.14159265f;
     const float sunSin = std::sin(angle);
     if (sunSin > 0.0f) {
@@ -1116,6 +1487,9 @@ float Application::computeSunlight() const {
 }
 
 glm::vec3 Application::computeSkyColor() const {
+    if (m_world.currentDimension() == DimensionId::Backrooms) {
+        return getDimensionInfo(DimensionId::Backrooms).skyColor;
+    }
     const float t = m_timeOfDay;
     const float moon = moonLightFactor();
     const glm::vec3 fullMoonSky(0.012f, 0.016f, 0.038f);
@@ -1146,6 +1520,9 @@ glm::vec3 Application::computeSkyColor() const {
 }
 
 glm::vec3 Application::computeFogColor() const {
+    if (m_world.currentDimension() == DimensionId::Backrooms) {
+        return getDimensionInfo(DimensionId::Backrooms).fogColor;
+    }
     const glm::vec3 sky = computeSkyColor();
     const float sunlight = computeSunlight();
     return glm::mix(sky * (0.15f + 0.25f * moonLightFactor()), sky, sunlight);
@@ -1157,62 +1534,67 @@ void Application::handleCreativeInventoryInput() {
         return;
     }
 
+    if (m_input.keyPressed(GLFW_KEY_BACKSPACE) && !m_creativeSearchQuery.empty()) {
+        m_creativeSearchQuery.pop_back();
+        m_creativeScrollRow = 0;
+    }
+
     const glm::vec2 mouse = mouseInFramebuffer();
     const float s = computeUiScale();
-    const float slot = 18.0f * s;
-    const float gap = 2.5f * s;
-    const int cols = 8;
-    const int catalogRows = 6;
-
-    const float gridW = cols * slot + (cols - 1) * gap;
-    const float catalogH = catalogRows * slot + (catalogRows - 1) * gap;
-    const float hotbarH = slot;
-    const float pad = 12.0f * s;
-    const float headerH = 22.0f * s;
-    const float tabsH = 16.0f * s;
-    const float labelH = 12.0f * s;
-    const float sectionGap = 8.0f * s;
-    const float footerH = 14.0f * s;
-
-    const float containerW = gridW + 2.0f * pad + 24.0f * s;
-    const float containerH = pad + headerH + tabsH + sectionGap + catalogH + sectionGap + labelH + hotbarH + footerH + pad;
-
+    const float slotSize = 18.0f * s;
+    const float containerW = 195.0f * s;
+    const float containerH = 136.0f * s;
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
-
     const float left = cx - containerW * 0.5f;
     const float bottom = cy - containerH * 0.5f;
 
-    const float headerTop = bottom + containerH - pad;
-    const float tabY = headerTop - headerH;
-    const float tabW = (gridW - 3.0f * 4.0f * s) / 4.0f;
-    const float tabH = 13.0f * s;
-    const float gridLeft = left + pad + 12.0f * s;
-
-    // 1. Check Tabs click
+    // 1. Tabs click
+    const float tabW = 26.0f * s;
+    const float tabH = 20.0f * s;
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        for (int t = 0; t < 4; ++t) {
-            const float tx = gridLeft + t * (tabW + 4.0f * s);
-            if (mouse.x >= tx && mouse.x <= tx + tabW &&
-                mouse.y >= tabY - tabH && mouse.y <= tabY) {
+        for (int t = 0; t < 5; ++t) {
+            const float tx = left + 8.0f * s + t * (tabW + 2.0f * s);
+            const float ty = bottom + containerH;
+            if (mouse.x >= tx && mouse.x <= tx + tabW && mouse.y >= ty && mouse.y <= ty + tabH) {
                 m_creativeTab = t;
+                if (t != 3) {
+                    m_creativeSearchQuery.clear();
+                }
+                m_creativeScrollRow = 0;
                 m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
                 return;
             }
         }
     }
 
-    const auto& catalog = getCreativeCatalog(m_creativeTab);
-    const float catalogTop = tabY - tabH - sectionGap;
+    // 2. Filter catalog items
+    const std::vector<BlockId> filteredCatalog = filterCreativeCatalog(m_creativeTab, m_creativeSearchQuery);
+
+    const int totalItems = static_cast<int>(filteredCatalog.size());
+    const int maxScrollRows = std::max(0, (totalItems + 8) / 9 - 5);
+
+    // Scroll handling
+    const double scroll = m_input.scrollY();
+    if (scroll > 0.0) {
+        m_creativeScrollRow = std::max(0, m_creativeScrollRow - 1);
+    } else if (scroll < 0.0) {
+        m_creativeScrollRow = std::min(maxScrollRows, m_creativeScrollRow + 1);
+    }
+
+    // Catalog 9x5 grid hit test
+    const float searchY = bottom + containerH - 16.0f * s;
+    const float gridStartX = left + 8.0f * s;
+    const float gridStartY = searchY - 4.0f * s;
 
     int hoveredCatalogIdx = -1;
-    for (int row = 0; row < catalogRows; ++row) {
-        for (int col = 0; col < cols; ++col) {
-            const int idx = row * cols + col;
-            const float x = gridLeft + col * (slot + gap);
-            const float y = catalogTop - (row + 1) * slot - row * gap;
-            if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= y && mouse.y <= y + slot) {
-                if (idx < static_cast<int>(catalog.size())) {
+    for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 9; ++col) {
+            const int idx = m_creativeScrollRow * 9 + row * 9 + col;
+            const float sx = gridStartX + col * slotSize;
+            const float sy = gridStartY - (row + 1) * slotSize;
+            if (mouse.x >= sx && mouse.x <= sx + slotSize && mouse.y >= sy && mouse.y <= sy + slotSize) {
+                if (idx < totalItems) {
                     hoveredCatalogIdx = idx;
                 }
                 break;
@@ -1220,29 +1602,31 @@ void Application::handleCreativeInventoryInput() {
         }
     }
 
-    const float dividerY = catalogTop - catalogH - sectionGap * 0.5f;
-    const float subLabelTop = dividerY - 3.0f * s;
-    const float hotbarY = subLabelTop - labelH - slot;
-
+    // Hotbar 1x9 hit test
+    const float hotbarY = bottom + 8.0f * s;
     int hoveredHotbarIdx = -1;
-    for (int i = 0; i < 8; ++i) {
-        const float x = gridLeft + i * (slot + gap);
-        if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= hotbarY && mouse.y <= hotbarY + slot) {
-            hoveredHotbarIdx = i;
+    for (int col = 0; col < 9; ++col) {
+        const float sx = gridStartX + col * slotSize;
+        if (mouse.x >= sx && mouse.x <= sx + slotSize && mouse.y >= hotbarY && mouse.y <= hotbarY + slotSize) {
+            hoveredHotbarIdx = col;
             break;
         }
     }
 
-    const float trashX = gridLeft + 8 * (slot + gap);
-    const bool hoveredTrash = (mouse.x >= trashX && mouse.x <= trashX + slot &&
-                               mouse.y >= hotbarY && mouse.y <= hotbarY + slot);
+    // Trash slot hit test
+    const float trashX = gridStartX + 9 * slotSize + 2.0f * s;
+    const bool hoveredTrash = (mouse.x >= trashX && mouse.x <= trashX + slotSize &&
+                               mouse.y >= hotbarY && mouse.y <= hotbarY + slotSize);
 
-    // Number keys 1-8 to immediately set or swap hotbar
-    const int numKeys[8] = { GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4, GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8 };
-    for (int i = 0; i < 8; ++i) {
+    // Number keys 1-9 to assign hotbar directly
+    const int numKeys[9] = {
+        GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4, GLFW_KEY_5,
+        GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9
+    };
+    for (int i = 0; i < 9; ++i) {
         if (m_input.keyPressed(numKeys[i])) {
             if (hoveredCatalogIdx >= 0) {
-                const BlockId bId = catalog[hoveredCatalogIdx];
+                const BlockId bId = filteredCatalog[hoveredCatalogIdx];
                 m_hotbar[i] = ItemSlot(bId, isTool(bId) ? 1 : 64, maxToolDurability(bId));
                 m_selectedSlot = i;
                 m_audioEngine.play(SoundId::ItemPickup, 0.8f, 1.2f);
@@ -1254,18 +1638,18 @@ void Application::handleCreativeInventoryInput() {
         }
     }
 
-    // Left Click
+    // Left click
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
         if (hoveredTrash) {
             if (!m_heldItem.empty()) {
                 m_heldItem.clear();
                 m_audioEngine.play(SoundId::DigWood, 0.7f, 1.2f);
             } else {
-                for (int i = 0; i < 8; ++i) m_hotbar[i].clear();
+                for (int i = 0; i < 9; ++i) m_hotbar[i].clear();
                 m_audioEngine.play(SoundId::DigWood, 0.7f, 0.9f);
             }
         } else if (hoveredCatalogIdx >= 0) {
-            const BlockId bId = catalog[hoveredCatalogIdx];
+            const BlockId bId = filteredCatalog[hoveredCatalogIdx];
             m_heldItem = ItemSlot(bId, isTool(bId) ? 1 : 64, maxToolDurability(bId));
             m_audioEngine.play(SoundId::ItemPickup, 0.8f, 1.3f);
         } else if (hoveredHotbarIdx >= 0) {
@@ -1282,10 +1666,10 @@ void Application::handleCreativeInventoryInput() {
         }
     }
 
-    // Right Click
+    // Right click
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
         if (hoveredCatalogIdx >= 0) {
-            const BlockId bId = catalog[hoveredCatalogIdx];
+            const BlockId bId = filteredCatalog[hoveredCatalogIdx];
             if (m_heldItem.empty()) {
                 m_heldItem = ItemSlot(bId, 1, maxToolDurability(bId));
             } else if (m_heldItem.id == bId && !isTool(bId) && m_heldItem.count < 64) {
@@ -1319,214 +1703,241 @@ void Application::handleInventoryInput() {
         return;
     }
 
-    const auto& categories = getConsoleRecipeCategories();
-    const int numTabs = static_cast<int>(categories.size());
-
-    // Tab key switches category
-    if (m_input.keyPressed(GLFW_KEY_TAB)) {
-        m_craftingCategory = (m_craftingCategory + 1) % numTabs;
-        m_selectedRecipe = 0;
-        m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
-    }
-
-    const auto& activeCat = categories[m_craftingCategory];
-    const int numRecipes = static_cast<int>(activeCat.recipes.size());
-
-    // Left / Right keys cycle recipes
-    if (m_input.keyPressed(GLFW_KEY_LEFT)) {
-        m_selectedRecipe = (m_selectedRecipe + numRecipes - 1) % numRecipes;
-        m_audioEngine.play(SoundId::Click, 0.5f, 1.3f);
-    }
-    if (m_input.keyPressed(GLFW_KEY_RIGHT)) {
-        m_selectedRecipe = (m_selectedRecipe + 1) % numRecipes;
-        m_audioEngine.play(SoundId::Click, 0.5f, 1.3f);
-    }
-
-    const double scroll = m_input.scrollY();
-    if (scroll > 0.0) {
-        m_selectedRecipe = (m_selectedRecipe + numRecipes - 1) % numRecipes;
-    } else if (scroll < 0.0) {
-        m_selectedRecipe = (m_selectedRecipe + 1) % numRecipes;
-    }
-
-    // Space / Enter / Enter Key crafts the selected recipe
-    if (m_input.keyPressed(GLFW_KEY_SPACE) || m_input.keyPressed(GLFW_KEY_ENTER) || m_input.keyPressed(GLFW_KEY_KP_ENTER)) {
-        craftSelectedRecipe();
-    }
-
     const glm::vec2 mouse = mouseInFramebuffer();
     const float s = computeUiScale();
-    const float slot = 16.0f * s;
-    const float gap = 2.0f * s;
-
-    const float containerW = 340.0f * s;
-    const float containerH = 208.0f * s;
+    const float slotSize = 18.0f * s;
+    const float containerW = 176.0f * s;
+    const float containerH = 166.0f * s;
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
     const float left = cx - containerW * 0.5f;
     const float bottom = cy - containerH * 0.5f;
 
-    // 1. Check Tabs click
-    const float tabPad = 8.0f * s;
-    const float tabW = (containerW - 2.0f * tabPad - (numTabs - 1) * 3.0f * s) / numTabs;
-    const float tabH = 18.0f * s;
-    const float tabTop = bottom + containerH;
+    // Slot references & hit testing
+    ItemSlot* clickedSlot = nullptr;
+    bool isResultSlot = false;
 
-    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        for (int t = 0; t < numTabs; ++t) {
-            const float tx = left + tabPad + t * (tabW + 3.0f * s);
-            const float ty = tabTop - tabH;
-            if (mouse.x >= tx && mouse.x <= tx + tabW && mouse.y >= ty && mouse.y <= tabTop) {
-                m_craftingCategory = t;
-                m_selectedRecipe = 0;
-                m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
-                return;
+    // 1. Armor Slots (4)
+    const float armorX = left + 8.0f * s;
+    const float armorTop = bottom + containerH - 8.0f * s;
+    if (!m_isCraftingTableOpen) {
+        for (int a = 0; a < 4; ++a) {
+            const float ay = armorTop - (a + 1) * slotSize;
+            if (mouse.x >= armorX && mouse.x <= armorX + slotSize && mouse.y >= ay && mouse.y <= ay + slotSize) {
+                clickedSlot = &m_armor[a];
+                break;
             }
+        }
+        // Offhand Slot
+        const float playerBoxW = 51.0f * s;
+        const float offhandX = armorX + slotSize + 2.0f * s + playerBoxW + 2.0f * s;
+        const float offhandY = armorTop - 4 * slotSize;
+        if (mouse.x >= offhandX && mouse.x <= offhandX + slotSize && mouse.y >= offhandY && mouse.y <= offhandY + slotSize) {
+            clickedSlot = &m_offhand;
         }
     }
 
-    // 2. Check Recipe selection click
-    const float recipeRowY = tabTop - tabH - 24.0f * s;
-    const float recipeRowX = left + 12.0f * s;
-    const float rSlot = 18.0f * s;
-    const float rGap = 3.0f * s;
-
-    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        for (int r = 0; r < numRecipes; ++r) {
-            const float rx = recipeRowX + r * (rSlot + rGap);
-            const float ry = recipeRowY;
-            if (mouse.x >= rx && mouse.x <= rx + rSlot && mouse.y >= ry && mouse.y <= ry + rSlot) {
-                m_selectedRecipe = r;
-                m_audioEngine.play(SoundId::Click, 0.55f, 1.25f);
-                return;
-            }
-        }
-    }
-
-    // 3. Check Result slot / Craft button click
-    const float midDividerY = recipeRowY - 6.0f * s;
-    const float leftPanelX = left + 14.0f * s;
-    const float leftPanelTop = midDividerY - 6.0f * s;
-    const float grid3x3Left = leftPanelX;
-    const float grid3x3Top = leftPanelTop - 14.0f * s;
-    const float pSlot = 14.0f * s;
-    const float pGap = 1.5f * s;
-    const float arrowX = grid3x3Left + 3.0f * (pSlot + pGap) + 8.0f * s;
-    const float resX = arrowX + 22.0f * s;
-    const float resY = grid3x3Top - 2.0f * pSlot - 2.0f * s;
-    const float resSlot = 22.0f * s;
-
-    if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        if (mouse.x >= resX && mouse.x <= resX + resSlot && mouse.y >= resY && mouse.y <= resY + resSlot) {
-            craftSelectedRecipe();
+    // 2. Crafting Grid & Result
+    if (m_isCraftingTableOpen) {
+        // Recipe Book button
+        const float bookBtnX = left + 8.0f * s;
+        const float bookBtnY = bottom + containerH - 8.0f * s - 14.0f * s;
+        const float bookBtnSize = 14.0f * s;
+        if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT) &&
+            mouse.x >= bookBtnX && mouse.x <= bookBtnX + bookBtnSize &&
+            mouse.y >= bookBtnY && mouse.y <= bookBtnY + bookBtnSize) {
+            m_recipeBookOpen = !m_recipeBookOpen;
+            m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
             return;
         }
+
+        // 3x3 Grid
+        const float grid3x3StartX = left + 30.0f * s;
+        const float grid3x3Top = bottom + containerH - 8.0f * s - 10.0f * s;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                const int idx = r * 3 + c;
+                const float sx = grid3x3StartX + c * slotSize;
+                const float sy = grid3x3Top - (r + 1) * slotSize;
+                if (mouse.x >= sx && mouse.x <= sx + slotSize && mouse.y >= sy && mouse.y <= sy + slotSize) {
+                    clickedSlot = &m_craftingSlots[idx];
+                    break;
+                }
+            }
+        }
+
+        // 3x3 Result Slot
+        const float arrowX = grid3x3StartX + 3 * slotSize + 8.0f * s;
+        const float resX = arrowX + 26.0f * s;
+        const float resY = grid3x3Top - 2.2f * slotSize;
+        const float resSize = 24.0f * s;
+        if (mouse.x >= resX && mouse.x <= resX + resSize && mouse.y >= resY && mouse.y <= resY + resSize) {
+            isResultSlot = true;
+        }
+    } else {
+        // Recipe Book button in Survival inventory
+        const float craftingGridX = left + 98.0f * s;
+        const float bookBtnX = craftingGridX + 2 * slotSize + 4.0f * s;
+        const float bookBtnY = armorTop - 8.0f * s;
+        const float bookBtnSize = 14.0f * s;
+        if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT) &&
+            mouse.x >= bookBtnX && mouse.x <= bookBtnX + bookBtnSize &&
+            mouse.y >= bookBtnY && mouse.y <= bookBtnY + bookBtnSize) {
+            m_recipeBookOpen = !m_recipeBookOpen;
+            m_audioEngine.play(SoundId::Click, 0.6f, 1.2f);
+            return;
+        }
+
+        // 2x2 Grid (slots 0..3)
+        const float craftingGridTop = armorTop - 10.0f * s;
+        for (int r = 0; r < 2; ++r) {
+            for (int c = 0; c < 2; ++c) {
+                const int idx = r * 2 + c;
+                const float sx = craftingGridX + c * slotSize;
+                const float sy = craftingGridTop - (r + 1) * slotSize;
+                if (mouse.x >= sx && mouse.x <= sx + slotSize && mouse.y >= sy && mouse.y <= sy + slotSize) {
+                    clickedSlot = &m_craftingSlots[idx];
+                    break;
+                }
+            }
+        }
+
+        // 2x2 Result Slot
+        const float arrowX = craftingGridX + 2 * slotSize + 6.0f * s;
+        const float resultX = arrowX + 22.0f * s;
+        const float resultY = craftingGridTop - 1.7f * slotSize;
+        const float resSlotSize = 22.0f * s;
+        if (mouse.x >= resultX && mouse.x <= resultX + resSlotSize && mouse.y >= resultY && mouse.y <= resultY + resSlotSize) {
+            isResultSlot = true;
+        }
     }
 
-    // 4. Check Inventory & Hotbar slots
-    const float vDivX = left + 148.0f * s;
-    const float rightPanelX = vDivX + 10.0f * s;
-    const float invTop = leftPanelTop;
-    const float mainInvTop = invTop - 14.0f * s;
-    const int cols = 8;
-    const int mainRows = 3;
-
-    int hoveredInvIdx = -1;
-    for (int row = 0; row < mainRows; ++row) {
-        for (int col = 0; col < cols; ++col) {
-            const int idx = row * cols + col;
-            if (idx >= 24) break;
-            const float x = rightPanelX + col * (slot + gap);
-            const float y = mainInvTop - (row + 1) * slot - row * gap;
-            if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= y && mouse.y <= y + slot) {
-                hoveredInvIdx = idx;
+    // 3. Main 3x9 Inventory
+    const float invStartX = left + 8.0f * s;
+    const float invStartY = bottom + 74.0f * s;
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 9; ++c) {
+            const int idx = r * 9 + c;
+            const float sx = invStartX + c * slotSize;
+            const float sy = invStartY - (r + 1) * slotSize;
+            if (mouse.x >= sx && mouse.x <= sx + slotSize && mouse.y >= sy && mouse.y <= sy + slotSize) {
+                clickedSlot = &m_inventory[idx];
                 break;
             }
         }
     }
 
-    const float hbDivY = mainInvTop - mainRows * (slot + gap) - 2.0f * s;
-    const float hbY = hbDivY - 4.0f * s - slot;
-
-    int hoveredHotbarIdx = -1;
-    for (int i = 0; i < 8; ++i) {
-        const float x = rightPanelX + i * (slot + gap);
-        if (mouse.x >= x && mouse.x <= x + slot && mouse.y >= hbY && mouse.y <= hbY + slot) {
-            hoveredHotbarIdx = i;
+    // 4. Hotbar 1x9
+    const float hotbarY = invStartY - 3 * slotSize - 4.0f * s - slotSize;
+    for (int c = 0; c < 9; ++c) {
+        const float sx = invStartX + c * slotSize;
+        if (mouse.x >= sx && mouse.x <= sx + slotSize && mouse.y >= hotbarY && mouse.y <= hotbarY + slotSize) {
+            clickedSlot = &m_hotbar[c];
             break;
         }
     }
 
-    const int numKeys[8] = { GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4, GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8 };
-    for (int i = 0; i < 8; ++i) {
+    // Number keys 1-9 swap with hotbar
+    const int numKeys[9] = {
+        GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4, GLFW_KEY_5,
+        GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9
+    };
+    for (int i = 0; i < 9; ++i) {
         if (m_input.keyPressed(numKeys[i])) {
-            if (hoveredInvIdx >= 0) {
-                std::swap(m_hotbar[i], m_inventory[hoveredInvIdx]);
+            if (clickedSlot != nullptr && clickedSlot != &m_hotbar[i]) {
+                std::swap(m_hotbar[i], *clickedSlot);
                 m_selectedSlot = i;
-            } else if (hoveredHotbarIdx >= 0) {
-                std::swap(m_hotbar[i], m_hotbar[hoveredHotbarIdx]);
-                m_selectedSlot = i;
+                m_audioEngine.play(SoundId::Click, 0.6f, 1.1f);
+                updateCraftingResult();
             }
         }
     }
 
+    // Left click
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        if (hoveredInvIdx >= 0) {
+        if (isResultSlot) {
+            takeCraftingResult();
+        } else if (clickedSlot != nullptr) {
             m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
-            ItemSlot& target = m_inventory[hoveredInvIdx];
-            if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
-                const int canAdd = std::min(m_heldItem.count, 64 - target.count);
-                target.count += canAdd;
-                m_heldItem.count -= canAdd;
-                if (m_heldItem.count <= 0) m_heldItem.clear();
+            if (m_input.keyDown(GLFW_KEY_LEFT_SHIFT) || m_input.keyDown(GLFW_KEY_RIGHT_SHIFT)) {
+                // Quick transfer
+                if (!clickedSlot->empty()) {
+                    bool moved = false;
+                    // If clicked is hotbar, try moving to main inventory
+                    bool isHotbar = false;
+                    for (int h = 0; h < 9; ++h) {
+                        if (clickedSlot == &m_hotbar[h]) { isHotbar = true; break; }
+                    }
+                    if (isHotbar) {
+                        for (int inv = 0; inv < 27; ++inv) {
+                            if (m_inventory[inv].empty()) {
+                                m_inventory[inv] = *clickedSlot;
+                                clickedSlot->clear();
+                                moved = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        // Move to hotbar
+                        for (int h = 0; h < 9; ++h) {
+                            if (m_hotbar[h].empty()) {
+                                m_hotbar[h] = *clickedSlot;
+                                clickedSlot->clear();
+                                moved = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (moved) {
+                        updateCraftingResult();
+                    }
+                }
             } else {
-                std::swap(m_heldItem, target);
-            }
-        } else if (hoveredHotbarIdx >= 0) {
-            m_audioEngine.play(SoundId::Click, 0.55f, 1.35f);
-            ItemSlot& target = m_hotbar[hoveredHotbarIdx];
-            if (!m_heldItem.empty() && target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
-                const int canAdd = std::min(m_heldItem.count, 64 - target.count);
-                target.count += canAdd;
-                m_heldItem.count -= canAdd;
-                if (m_heldItem.count <= 0) m_heldItem.clear();
-            } else {
-                std::swap(m_heldItem, target);
+                if (!m_heldItem.empty() && clickedSlot->id == m_heldItem.id && !isTool(clickedSlot->id) && clickedSlot->count < 64) {
+                    const int canAdd = std::min(m_heldItem.count, 64 - clickedSlot->count);
+                    clickedSlot->count += canAdd;
+                    m_heldItem.count -= canAdd;
+                    if (m_heldItem.count <= 0) m_heldItem.clear();
+                } else {
+                    std::swap(m_heldItem, *clickedSlot);
+                }
+                updateCraftingResult();
             }
         }
     }
 
+    // Right click
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT)) {
-        if (!m_heldItem.empty()) {
-            if (hoveredInvIdx >= 0) {
-                m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
-                ItemSlot& target = m_inventory[hoveredInvIdx];
-                if (target.empty()) {
-                    target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
-                    m_heldItem.count--;
-                    if (m_heldItem.count <= 0) m_heldItem.clear();
-                } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
-                    target.count++;
-                    m_heldItem.count--;
-                    if (m_heldItem.count <= 0) m_heldItem.clear();
+        if (isResultSlot) {
+            takeCraftingResult();
+        } else if (clickedSlot != nullptr) {
+            m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
+            if (m_heldItem.empty()) {
+                // Split half stack
+                if (!clickedSlot->empty()) {
+                    const int take = (clickedSlot->count + 1) / 2;
+                    m_heldItem = ItemSlot(clickedSlot->id, take, clickedSlot->durability);
+                    clickedSlot->count -= take;
+                    if (clickedSlot->count <= 0) clickedSlot->clear();
+                    updateCraftingResult();
                 }
-            } else if (hoveredHotbarIdx >= 0) {
-                m_audioEngine.play(SoundId::Click, 0.45f, 1.45f);
-                ItemSlot& target = m_hotbar[hoveredHotbarIdx];
-                if (target.empty()) {
-                    target = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
+            } else {
+                // Deposit 1 item
+                if (clickedSlot->empty()) {
+                    *clickedSlot = ItemSlot(m_heldItem.id, 1, m_heldItem.durability);
                     m_heldItem.count--;
                     if (m_heldItem.count <= 0) m_heldItem.clear();
-                } else if (target.id == m_heldItem.id && !isTool(target.id) && target.count < 64) {
-                    target.count++;
+                    updateCraftingResult();
+                } else if (clickedSlot->id == m_heldItem.id && !isTool(clickedSlot->id) && clickedSlot->count < 64) {
+                    clickedSlot->count++;
                     m_heldItem.count--;
                     if (m_heldItem.count <= 0) m_heldItem.clear();
+                    updateCraftingResult();
                 }
             }
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Gameplay
@@ -1564,17 +1975,17 @@ void Application::handlePlayInput() {
         }
     }
 
-    const int numberKeys[8] = {
-        GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4,
-        GLFW_KEY_5, GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8,
+    const int numberKeys[9] = {
+        GLFW_KEY_1, GLFW_KEY_2, GLFW_KEY_3, GLFW_KEY_4, GLFW_KEY_5,
+        GLFW_KEY_6, GLFW_KEY_7, GLFW_KEY_8, GLFW_KEY_9,
     };
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 9; ++i) {
         if (m_input.keyPressed(numberKeys[i])) m_selectedSlot = i;
     }
 
     const double scroll = m_input.scrollY();
-    if (scroll > 0.0) m_selectedSlot = (m_selectedSlot + 7) % 8;
-    else if (scroll < 0.0) m_selectedSlot = (m_selectedSlot + 1) % 8;
+    if (scroll > 0.0) m_selectedSlot = (m_selectedSlot + 8) % 9;
+    else if (scroll < 0.0) m_selectedSlot = (m_selectedSlot + 1) % 9;
 
     m_player.setHeldItem(m_hotbar[m_selectedSlot].id);
 }
@@ -1632,7 +2043,11 @@ void Application::updateInteraction(float dt) {
         if (hitMob) {
             const int dmg = attackDamage(held.id);
             hitMob->takeDamage(dmg, m_player.position());
-            m_audioEngine.play3D(SoundId::MobHurt, hitMob->position(), camera.position(), camera.front(), 0.85f);
+            const glm::vec3 hitPos = hitMob->position() + glm::vec3(0.0f, hitMob->halfHeight(), 0.0f);
+            const bool isCrit = !m_player.onGround() && !m_player.isFlying() && !m_player.isInWater() && m_player.velocity().y < -0.1f;
+            m_renderer.spawnBloodSplatter(hitPos, camera.front(), 18);
+            m_renderer.spawnHitParticles(hitPos, camera.front(), isCrit, isCrit ? 24 : 14);
+            m_audioEngine.play3D(SoundId::MobHurt, hitMob->position(), camera.position(), camera.front(), 0.85f, &m_world);
             if (!m_creativeMode && isTool(held.id)) {
                 held.durability--;
                 if (held.durability <= 0) {
@@ -1667,8 +2082,8 @@ void Application::updateInteraction(float dt) {
                     m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
                     const SoundId digSnd = getDigSound(targetBlock);
                     const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
-                    m_audioEngine.play3D(digSnd, blockCenter, camera.position(), camera.front(), 0.90f);
-                    m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, 24);
+                    m_audioEngine.play3D(digSnd, blockCenter, camera.position(), camera.front(), 0.90f, &m_world);
+                    m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, m_world, computeSunlight(), 24);
                 }
                 m_isMining = false;
                 m_miningProgress = 0.0f;
@@ -1692,8 +2107,8 @@ void Application::updateInteraction(float dt) {
                     m_digSoundTimer = 0.22f;
                     const SoundId digSnd = getDigSound(targetBlock);
                     const glm::vec3 hitFacePos = glm::vec3(m_target.block) + glm::vec3(0.5f) + glm::vec3(m_target.normal) * 0.5f;
-                    m_audioEngine.play3D(digSnd, hitFacePos, camera.position(), camera.front(), 0.70f);
-                    m_renderer.spawnDigParticles(glm::vec3(m_target.block), m_target.normal, targetBlock, 4);
+                    m_audioEngine.play3D(digSnd, hitFacePos, camera.position(), camera.front(), 0.70f, &m_world);
+                    m_renderer.spawnDigParticles(glm::vec3(m_target.block), m_target.normal, targetBlock, m_world, computeSunlight(), 4);
                 }
 
                 const float breakTime = getBreakTime(held.id, targetBlock);
@@ -1706,9 +2121,9 @@ void Application::updateInteraction(float dt) {
                 if (m_miningProgress >= 1.0f) {
                     m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
                     const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
-                    m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, 24);
+                    m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, m_world, computeSunlight(), 24);
                     const SoundId breakSnd = getDigSound(targetBlock);
-                    m_audioEngine.play3D(breakSnd, blockCenter, camera.position(), camera.front(), 0.95f);
+                    m_audioEngine.play3D(breakSnd, blockCenter, camera.position(), camera.front(), 0.95f, &m_world);
 
                     if (canHarvestBlock(held.id, targetBlock)) {
                         const BlockId drop = getDropForBlock(targetBlock);
@@ -1749,6 +2164,43 @@ void Application::updateInteraction(float dt) {
             m_miningProgress = 0.0f;
             return;
         }
+        if (targetBlock == BlockId::ExitDoor) {
+            m_player.triggerSwing();
+            if (m_world.currentDimension() == DimensionId::Backrooms) {
+                switchDimension(DimensionId::Overworld, m_overworldReturnPos);
+            } else {
+                switchDimension(DimensionId::Backrooms, glm::vec3(0.5f, 2.0f, 0.5f));
+            }
+            m_isMining = false;
+            m_miningProgress = 0.0f;
+            return;
+        }
+        if (targetBlock == BlockId::GlitchBlock) {
+            m_player.triggerSwing();
+            if (m_world.currentDimension() == DimensionId::Overworld) {
+                switchDimension(DimensionId::Backrooms, glm::vec3(0.5f, 2.0f, 0.5f));
+            } else {
+                switchDimension(DimensionId::Overworld, m_overworldReturnPos);
+            }
+            m_isMining = false;
+            m_miningProgress = 0.0f;
+            return;
+        }
+        if (targetBlock == BlockId::AlmondWater) {
+            m_player.triggerSwing();
+            m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
+            if (!addItem(BlockId::AlmondWater, 1)) {
+                // If inventory is full, drink immediately
+                const FoodProperties fp = foodNutrition(BlockId::AlmondWater);
+                m_player.feed(static_cast<float>(fp.hunger), static_cast<float>(fp.health));
+                m_audioEngine.play(SoundId::PlayerBurp, 0.85f, 1.0f);
+            } else {
+                m_audioEngine.play(SoundId::ItemPickup, 0.9f, 1.2f);
+            }
+            m_isMining = false;
+            m_miningProgress = 0.0f;
+            return;
+        }
     }
 
     // 4. Shovel tilling: right-click grass or dirt with a shovel to carve a
@@ -1760,8 +2212,8 @@ void Application::updateInteraction(float dt) {
             m_player.triggerSwing();
             m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::DirtPath);
             const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
-            m_audioEngine.play3D(SoundId::DigGrass, blockCenter, camera.position(), camera.front(), 0.85f);
-            m_renderer.spawnDigParticles(glm::vec3(m_target.block), m_target.normal, targetBlock, 6);
+            m_audioEngine.play3D(SoundId::DigGrass, blockCenter, camera.position(), camera.front(), 0.85f, &m_world);
+            m_renderer.spawnDigParticles(glm::vec3(m_target.block), m_target.normal, targetBlock, m_world, computeSunlight(), 6);
             if (!m_creativeMode && isTool(held.id)) {
                 held.durability--;
                 if (held.durability <= 0) {
@@ -1805,7 +2257,7 @@ void Application::updateInteraction(float dt) {
                 }
                 m_world.setBlock(place.x, place.y, place.z, placed);
                 const glm::vec3 placedPos = glm::vec3(place) + glm::vec3(0.5f, 0.5f, 0.5f);
-                m_audioEngine.play3D(SoundId::PlaceBlock, placedPos, camera.position(), camera.front(), 0.85f);
+                m_audioEngine.play3D(SoundId::PlaceBlock, placedPos, camera.position(), camera.front(), 0.85f, &m_world);
                 if (!m_creativeMode) {
                     held.count--;
                     if (held.count <= 0) {
@@ -1858,15 +2310,13 @@ void Application::handleGameOverInput() {
 }
 
 void Application::respawnPlayer() {
-    const float spawnX = static_cast<float>(m_world.widthBlocks()) * 0.5f;
-    const float spawnZ = static_cast<float>(m_world.depthBlocks()) * 0.5f;
-    m_player.respawn(m_world, spawnX, spawnZ);
+    m_player.respawn(m_world, 0.0f, 0.0f);
     m_state = GameState::Playing;
     setCursorCaptured(true);
 }
 
 void Application::rebuildDirtyMeshes() {
-    int budget = 16; // Rebuild up to 16 chunks/frame prioritizing nearest to camera
+    int budget = 8; // Rebuild up to 8 nearest dirty chunks/frame for instant meshing & smooth 60+ FPS
     const glm::vec3 camPos = (m_state == GameState::MainMenu || m_state == GameState::SelectWorld ||
                               m_state == GameState::NewWorld || m_state == GameState::DeleteWorld ||
                               m_state == GameState::ConfirmDeleteWorld)
@@ -1880,13 +2330,13 @@ void Application::rebuildDirtyMeshes() {
     std::vector<DistanceChunk> dirtyChunks;
     dirtyChunks.reserve(64);
 
-    for (const std::unique_ptr<Chunk>& chunk : m_world.chunks()) {
-        if (!chunk || !chunk->dirty) continue;
+    for (Chunk* chunk : m_world.loadedChunks()) {
+        if (!chunk || !chunk->dirty || !chunk->terrainGenerated) continue;
         const float cx = static_cast<float>(chunk->originX() + Chunk::W / 2);
         const float cz = static_cast<float>(chunk->originZ() + Chunk::D / 2);
         const float dx = cx - camPos.x;
         const float dz = cz - camPos.z;
-        dirtyChunks.push_back({ chunk.get(), dx * dx + dz * dz });
+        dirtyChunks.push_back({ chunk, dx * dx + dz * dz });
     }
 
     if (dirtyChunks.empty()) return;
@@ -1914,6 +2364,7 @@ void Application::rebuildDirtyMeshes() {
 
 void Application::applySettings() {
     m_player.setMouseSensitivity(m_mouseSensitivity);
+    m_player.setBobbingEnabled(m_viewBobbing);
     m_player.camera().setFov(m_fov);
     m_menuCamera.setFov(m_fov);
     glfwSwapInterval(m_vsync ? 1 : 0);
@@ -2106,7 +2557,7 @@ void Application::drawDebugOverlayIfEnabled() {
     lines.emplace_back(buffer);
 
     std::snprintf(buffer, sizeof(buffer), "chunks %zu total, %.1f drawn, %.1f visible, %.1f culled",
-                  m_world.chunks().size(), s.avgChunksDrawn, s.avgChunksVisible, s.avgChunksCulled);
+                  m_world.loadedChunks().size(), s.avgChunksDrawn, s.avgChunksVisible, s.avgChunksCulled);
     lines.emplace_back(buffer);
 
     std::snprintf(buffer, sizeof(buffer), "mobs %zu   particles %zu",
@@ -2156,15 +2607,16 @@ void Application::renderScene() {
     const glm::vec3 rawSky = computeSkyColor();
     const glm::vec3 rawFog = computeFogColor();
 
+    const DimensionInfo dimInfo = getDimensionInfo(m_world.currentDimension());
     const glm::vec3 skyColor = underwater ? glm::vec3(0.06f, 0.18f, 0.44f) : rawSky;
     const glm::vec3 fogColor = underwater ? glm::vec3(0.04f, 0.12f, 0.30f) : rawFog;
-    const float fogEnd = underwater ? 15.0f : static_cast<float>(m_viewDistanceChunks) * 16.0f;
-    const float fogStart = underwater ? 1.0f : fogEnd * 0.45f;
+    const float fogEnd = underwater ? 15.0f : (m_world.currentDimension() == DimensionId::Backrooms ? dimInfo.fogEnd : static_cast<float>(m_viewDistanceChunks) * 16.0f);
+    const float fogStart = underwater ? 1.0f : (m_world.currentDimension() == DimensionId::Backrooms ? dimInfo.fogStart : fogEnd * 0.45f);
 
     m_renderer.setUIScale(computeUiScale());
     m_renderer.beginFrame(skyColor);
 
-    if (!underwater) {
+    if (!underwater && m_world.currentDimension() != DimensionId::Backrooms) {
         m_renderer.drawSky(camera, m_timeOfDay, skyColor, fogColor, sunlight);
     }
 
@@ -2179,7 +2631,7 @@ void Application::renderScene() {
             m_renderer.drawSelection(m_player.camera(), m_target.block, targetBlock);
             if (m_isMining && m_miningBlock == m_target.block && m_miningProgress > 0.0f) {
                 const int stage = std::clamp(static_cast<int>(m_miningProgress * 10.0f), 0, 9);
-                m_renderer.drawBlockBreak(m_player.camera(), m_target.block, targetBlock, stage);
+                m_renderer.drawBlockBreak(m_player.camera(), m_target.block, targetBlock, stage, m_world, sunlight);
             }
         }
 
@@ -2188,19 +2640,30 @@ void Application::renderScene() {
 
         if (underwater) {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
+        } else if (m_world.currentDimension() == DimensionId::Backrooms) {
+            m_renderer.drawBackroomsHorrorOverlay(static_cast<float>(m_uiTime));
         }
 
         // Screen-edge horror hurt/danger vignette
         m_renderer.drawHurtVignette(m_player.hurtTimer(), m_player.health() / m_player.maxHealth(), static_cast<float>(m_uiTime));
 
-        // Top-left RPG Horror Vitals Card (Health, Hunger, Oxygen)
-        m_renderer.drawRpgVitalsHud(m_player.health(), m_player.maxHealth(),
-                                    m_player.hunger(), m_player.maxHunger(),
-                                    m_player.oxygen(), m_player.maxOxygen(),
-                                    m_player.isInWater(), m_player.hurtTimer(),
-                                    static_cast<float>(m_uiTime), m_creativeMode);
+        m_renderer.drawHud(m_selectedSlot, m_hotbar, 9,
+                           m_player.health(), m_player.maxHealth(),
+                           m_player.hunger(), m_player.maxHunger(),
+                           m_player.oxygen(), m_player.maxOxygen(),
+                           m_player.isInWater(), m_player.hurtTimer(),
+                           static_cast<float>(m_uiTime), m_creativeMode);
 
-        m_renderer.drawHud(m_selectedSlot, m_hotbar, 8);
+        if (m_bannerTimer > 0.0f) {
+            float alpha = 1.0f;
+            const float elapsed = m_bannerDuration - m_bannerTimer;
+            if (elapsed < 0.8f) {
+                alpha = elapsed / 0.8f;
+            } else if (m_bannerTimer < 0.8f) {
+                alpha = m_bannerTimer / 0.8f;
+            }
+            m_renderer.drawTitleBanner(m_bannerTitle, m_bannerSubtitle, std::clamp(alpha, 0.0f, 1.0f), static_cast<float>(m_uiTime));
+        }
         return;
     }
 
@@ -2222,15 +2685,21 @@ void Application::renderScene() {
         m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
         if (underwater) {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
+        } else if (m_world.currentDimension() == DimensionId::Backrooms) {
+            m_renderer.drawBackroomsHorrorOverlay(static_cast<float>(m_uiTime));
         }
         if (m_creativeMode) {
-            m_renderer.drawCreativeInventory(m_selectedSlot, m_hotbar, 8, m_heldItem,
-                                             mouseInFramebuffer(), m_creativeTab);
+            m_renderer.drawCreativeInventory(m_selectedSlot, m_hotbar, 9, m_heldItem,
+                                             mouseInFramebuffer(), m_creativeTab,
+                                             m_creativeSearchQuery, m_creativeScrollRow);
+        } else if (m_isCraftingTableOpen) {
+            m_renderer.drawCraftingTableWorkbench(m_selectedSlot, m_hotbar, 9, m_inventory, 27,
+                                                  m_craftingSlots, m_craftingResult, m_heldItem,
+                                                  mouseInFramebuffer(), m_recipeBookOpen);
         } else {
-            m_renderer.drawConsoleInventory(m_craftingCategory, m_selectedRecipe,
-                                           m_isCraftingTableOpen,
-                                           m_selectedSlot, m_hotbar, 8, m_inventory, 24,
-                                           m_heldItem, mouseInFramebuffer());
+            m_renderer.drawSurvivalInventory(m_selectedSlot, m_hotbar, 9, m_inventory, 27,
+                                             m_armor, 4, m_offhand, m_craftingSlots, m_craftingResult,
+                                             m_heldItem, mouseInFramebuffer(), m_recipeBookOpen);
         }
         return;
     }

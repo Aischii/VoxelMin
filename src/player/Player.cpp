@@ -4,6 +4,7 @@
 #include "input/Input.hpp"
 #include "world/Block.hpp"
 #include "world/World.hpp"
+#include "world/BackroomsGenerator.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -13,10 +14,40 @@
 namespace vox {
 
 void Player::spawnAt(const World& world, float x, float z) {
-    const int wx = static_cast<int>(x);
-    const int wz = static_cast<int>(z);
-    const int surface = world.surfaceHeight(wx, wz);
-    m_position = glm::vec3(x + 0.5f, static_cast<float>(surface + 1) + 0.001f, z + 0.5f);
+    if (world.currentDimension() == DimensionId::Backrooms) {
+        const glm::vec3 safe = BackroomsGenerator(world.seed()).findSafeSpawn(const_cast<World&>(world), static_cast<int>(std::floor(x)), static_cast<int>(std::floor(z)));
+        setPosition(safe);
+        m_velocity = glm::vec3(0.0f);
+        m_onGround = true;
+        return;
+    }
+
+    int wx = static_cast<int>(std::floor(x));
+    int wz = static_cast<int>(std::floor(z));
+    int surface = world.surfaceHeight(wx, wz);
+
+    // If spawn coordinate is submerged in water, search outward for nearest dry land
+    if (surface <= 26) {
+        bool foundDry = false;
+        for (int r = 1; r <= 32 && !foundDry; ++r) {
+            for (int dx = -r; dx <= r && !foundDry; ++dx) {
+                for (int dz = -r; dz <= r && !foundDry; ++dz) {
+                    if (std::abs(dx) != r && std::abs(dz) != r) continue;
+                    const int testX = wx + dx;
+                    const int testZ = wz + dz;
+                    const int testH = world.surfaceHeight(testX, testZ);
+                    if (testH > 26 && isSolid(world.getBlock(testX, testH, testZ))) {
+                        wx = testX;
+                        wz = testZ;
+                        surface = testH;
+                        foundDry = true;
+                    }
+                }
+            }
+        }
+    }
+
+    m_position = glm::vec3(static_cast<float>(wx) + 0.5f, static_cast<float>(surface + 1) + 0.001f, static_cast<float>(wz) + 0.5f);
     m_velocity = glm::vec3(0.0f);
     m_onGround = true;
 }
@@ -206,8 +237,13 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
     const int byMid = static_cast<int>(std::floor(m_position.y + 0.9f));
     const int byHead = static_cast<int>(std::floor(m_position.y + config::PLAYER_EYE_HEIGHT));
     const int bz = static_cast<int>(std::floor(m_position.z));
+    const bool wasInWater = m_inWater;
     m_inWater = (isLiquid(world.getBlock(bx, byFeet, bz)) || isLiquid(world.getBlock(bx, byMid, bz)));
     const bool headSubmerged = isLiquid(world.getBlock(bx, byHead, bz));
+
+    if (!wasInWater && m_inWater && audio) {
+        audio->play(SoundId::WaterSplash, 0.75f);
+    }
 
     // Oxygen & Drowning
     if (headSubmerged && !m_creative && !m_isDead) {
@@ -388,15 +424,15 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
     }
     m_camera.setFov(glm::mix(m_camera.fov(), targetFov, std::min(1.0f, dt * 10.0f)));
 
-    // View bobbing (Minecraft style: smooth positional sway without horizon pitch/roll rocking)
+    // View bobbing & Presence Footsteps stride accumulation
     float targetBobIntensity = 0.0f;
     if (m_onGround && !m_flying && !m_inWater && hSpeed > 0.2f) {
-        targetBobIntensity = m_sprinting ? 1.3f : 1.0f;
-        const float freqMult = m_sprinting ? 1.25f : 1.0f;
-        m_bobTimer += hSpeed * dt * 2.8f * freqMult;
+        targetBobIntensity = m_sprinting ? 1.25f : 1.0f;
+        const float freqMult = m_sprinting ? 1.20f : 1.0f;
+        m_bobTimer += hSpeed * dt * 2.85f * freqMult;
 
         m_stepDistance += hSpeed * dt;
-        const float stepInterval = m_sprinting ? 1.75f : 2.15f;
+        const float stepInterval = m_sprinting ? 1.65f : 2.05f;
         if (m_stepDistance >= stepInterval) {
             m_stepDistance = 0.0f;
             if (audio) {
@@ -405,7 +441,9 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
                 const int bz = static_cast<int>(std::floor(m_position.z));
                 const BlockId blockBelow = world.getBlock(bx, by, bz);
                 SoundId stepSnd = SoundId::StepGrass;
-                if (blockBelow == BlockId::Wood || blockBelow == BlockId::WoodX ||
+                if (m_inWater) {
+                    stepSnd = SoundId::WaterFlow;
+                } else if (blockBelow == BlockId::Wood || blockBelow == BlockId::WoodX ||
                     blockBelow == BlockId::WoodZ || blockBelow == BlockId::Planks ||
                     blockBelow == BlockId::CraftingTable) {
                     stepSnd = SoundId::StepWood;
@@ -424,26 +462,29 @@ void Player::update(float dt, const Input& input, const World& world, AudioEngin
         targetBobIntensity = 0.0f;
         m_stepDistance = std::min(m_stepDistance, 0.7f);
     }
-    m_bobIntensity = glm::mix(m_bobIntensity, targetBobIntensity, std::min(1.0f, dt * 6.0f));
+    m_bobIntensity = glm::mix(m_bobIntensity, targetBobIntensity, std::min(1.0f, dt * 7.5f));
 
     float bobX = 0.0f;
     float bobY = 0.0f;
+    float bobPitch = 0.0f;
+    float bobRoll = 0.0f;
 
-    if (m_bobIntensity > 0.001f) {
-        // Continuous smooth sinusoidal motion: horizontal sway (left-right) and gentle vertical dip
-        bobX = std::sin(m_bobTimer * 0.5f) * 0.022f * m_bobIntensity;
-        bobY = -(std::cos(m_bobTimer) * 0.5f + 0.5f) * 0.026f * m_bobIntensity;
+    if (m_bobIntensity > 0.001f && m_bobbingEnabled) {
+        // Lateral sway (sinusoidal) and vertical footfall dip (absolute sine/cosine)
+        bobX = std::sin(m_bobTimer * 0.5f) * 0.026f * m_bobIntensity;
+        bobY = -std::abs(std::sin(m_bobTimer * 0.5f)) * 0.030f * m_bobIntensity;
+        bobRoll = std::sin(m_bobTimer * 0.5f) * 0.45f * m_bobIntensity;
+        bobPitch = -std::abs(std::cos(m_bobTimer * 0.5f)) * 0.30f * m_bobIntensity;
     }
 
-    // Keep camera roll and pitch completely level and stable (prevents dizziness/motion sickness)
-    m_roll = 0.0f;
+    m_roll = bobRoll;
 
     const glm::vec3 eyePos = eyePosition();
 
     if (m_perspective == Perspective::FirstPerson) {
         const glm::vec3 cameraPos = eyePos + right * bobX + glm::vec3(0.0f, bobY, 0.0f);
         m_camera.setPosition(cameraPos);
-        m_camera.setRotation(m_yaw, m_pitch, m_roll);
+        m_camera.setRotation(m_yaw, m_pitch + bobPitch, m_roll);
     } else if (m_perspective == Perspective::ThirdPersonBack) {
         m_camera.setRotation(m_yaw, m_pitch, 0.0f);
         const glm::vec3 lookDir = m_camera.front();
@@ -569,6 +610,99 @@ void addOrientedBox(std::vector<Vertex>& vertices,
     }
 }
 
+void addOrientedItemSprite(std::vector<Vertex>& vertices,
+                           const glm::vec3& center,
+                           float size,
+                           const glm::mat4& transform,
+                           TextureTile tile,
+                           float light,
+                           float torchLight,
+                           float ao) {
+    const glm::vec2 tMin = tileMinUV(tile);
+    const glm::vec2 tSize(1.0f / 16.0f, 1.0f / 16.0f);
+    const float hs = size * 0.5f;
+    const float thick = 0.008f; // Sleek thin item thickness
+
+    // Front Face (+Z)
+    const glm::vec3 f0 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs, -hs,  thick), 1.0f));
+    const glm::vec3 f1 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs, -hs,  thick), 1.0f));
+    const glm::vec3 f2 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs,  hs,  thick), 1.0f));
+    const glm::vec3 f3 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs,  hs,  thick), 1.0f));
+    const glm::vec3 normF = glm::normalize(glm::mat3(transform) * glm::vec3(0, 0, 1));
+
+    vertices.push_back({ f0, normF, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ f1, normF, {1.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ f2, normF, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+
+    vertices.push_back({ f0, normF, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ f2, normF, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ f3, normF, {0.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+
+    // Back Face (-Z)
+    const glm::vec3 b0 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs, -hs, -thick), 1.0f));
+    const glm::vec3 b1 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs, -hs, -thick), 1.0f));
+    const glm::vec3 b2 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs,  hs, -thick), 1.0f));
+    const glm::vec3 b3 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs,  hs, -thick), 1.0f));
+    const glm::vec3 normB = glm::normalize(glm::mat3(transform) * glm::vec3(0, 0, -1));
+
+    vertices.push_back({ b1, normB, {1.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ b0, normB, {0.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ b3, normB, {0.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+
+    vertices.push_back({ b1, normB, {1.0f, 0.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ b3, normB, {0.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+    vertices.push_back({ b2, normB, {1.0f, 1.0f}, tMin, tSize, ao, light, torchLight });
+
+    // Top Rim (+Y)
+    const glm::vec3 normT = glm::normalize(glm::mat3(transform) * glm::vec3(0, 1, 0));
+    vertices.push_back({ f3, normT, {0.0f, 1.0f}, tMin, tSize, ao * 0.95f, light, torchLight });
+    vertices.push_back({ f2, normT, {1.0f, 1.0f}, tMin, tSize, ao * 0.95f, light, torchLight });
+    vertices.push_back({ b2, normT, {1.0f, 1.0f}, tMin, tSize, ao * 0.95f, light, torchLight });
+
+    vertices.push_back({ f3, normT, {0.0f, 1.0f}, tMin, tSize, ao * 0.95f, light, torchLight });
+    vertices.push_back({ b2, normT, {1.0f, 1.0f}, tMin, tSize, ao * 0.95f, light, torchLight });
+    vertices.push_back({ b3, normT, {0.0f, 1.0f}, tMin, tSize, ao * 0.95f, light, torchLight });
+
+    // Bottom Rim (-Y)
+    const glm::vec3 normD = glm::normalize(glm::mat3(transform) * glm::vec3(0, -1, 0));
+    vertices.push_back({ b0, normD, {0.0f, 0.0f}, tMin, tSize, ao * 0.75f, light, torchLight });
+    vertices.push_back({ b1, normD, {1.0f, 0.0f}, tMin, tSize, ao * 0.75f, light, torchLight });
+    vertices.push_back({ f1, normD, {1.0f, 0.0f}, tMin, tSize, ao * 0.75f, light, torchLight });
+
+    vertices.push_back({ b0, normD, {0.0f, 0.0f}, tMin, tSize, ao * 0.75f, light, torchLight });
+    vertices.push_back({ f1, normD, {1.0f, 0.0f}, tMin, tSize, ao * 0.75f, light, torchLight });
+    vertices.push_back({ f0, normD, {0.0f, 0.0f}, tMin, tSize, ao * 0.75f, light, torchLight });
+
+    // Right Rim (+X)
+    const glm::vec3 normR = glm::normalize(glm::mat3(transform) * glm::vec3(1, 0, 0));
+    vertices.push_back({ f1, normR, {1.0f, 0.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ b1, normR, {1.0f, 0.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ b2, normR, {1.0f, 1.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+
+    vertices.push_back({ f1, normR, {1.0f, 0.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ b2, normR, {1.0f, 1.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ f2, normR, {1.0f, 1.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+
+    // Left Rim (-X)
+    const glm::vec3 normL = glm::normalize(glm::mat3(transform) * glm::vec3(-1, 0, 0));
+    vertices.push_back({ b0, normL, {0.0f, 0.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ f0, normL, {0.0f, 0.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ f3, normL, {0.0f, 1.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+
+    vertices.push_back({ b0, normL, {0.0f, 0.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ f3, normL, {0.0f, 1.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+    vertices.push_back({ b3, normL, {0.0f, 1.0f}, tMin, tSize, ao * 0.85f, light, torchLight });
+}
+
+bool isSolidBlockItem(BlockId id) {
+    return id == BlockId::Grass || id == BlockId::Dirt || id == BlockId::Stone ||
+           id == BlockId::Wood || id == BlockId::Leaves || id == BlockId::Sand ||
+           id == BlockId::Bedrock || id == BlockId::Planks || id == BlockId::Cobblestone ||
+           id == BlockId::CoalOre || id == BlockId::IronOre || id == BlockId::GoldOre ||
+           id == BlockId::DiamondOre || id == BlockId::DirtPath || id == BlockId::WoodX ||
+           id == BlockId::WoodZ || id == BlockId::CraftingTable;
+}
+
 } // namespace
 
 void Player::appendGeometry(std::vector<Vertex>& vertices, const World& world) const {
@@ -628,7 +762,7 @@ void Player::appendGeometry(std::vector<Vertex>& vertices, const World& world) c
 
     // 6. Head: 0.48w x 0.48h x 0.48l (Neck at Y = 1.44)
     glm::mat4 headMat = glm::translate(rootMat, glm::vec3(0.0f, 1.44f, 0.0f));
-    headMat = glm::rotate(headMat, glm::radians(m_pitch), glm::vec3(1, 0, 0));
+    headMat = glm::rotate(headMat, glm::radians(-m_pitch), glm::vec3(1, 0, 0));
     addOrientedBox(vertices, {0.0f, 0.24f, 0.0f}, {0.48f, 0.48f, 0.48f}, headMat,
                    TextureTile::PlayerHead, TextureTile::PlayerHead,
                    TextureTile::PlayerHead, TextureTile::PlayerFace, light, torchLight, ao);
@@ -641,12 +775,21 @@ void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& wo
     const float sinSp = std::sin(std::sqrt(sp) * 3.14159265f);
     const float punch = std::sin(sp * 3.14159265f);
 
-    // View bobbing in camera space (smoothly swaying X & Y)
-    float bobX = 0.0f;
-    float bobY = 0.0f;
-    if (m_bobIntensity > 0.001f) {
-        bobX = std::sin(m_bobTimer * 0.5f) * 0.016f * m_bobIntensity;
-        bobY = -(std::cos(m_bobTimer) * 0.5f + 0.5f) * 0.018f * m_bobIntensity;
+    // Hand bobbing in camera space (smoothly swaying X, Y & Z with inertia)
+    float handBobX = 0.0f;
+    float handBobY = 0.0f;
+    float handBobZ = 0.0f;
+    float handRoll = 0.0f;
+    float handPitch = 0.0f;
+
+    // Hand bobbing scales smoothly with locomotion (gentle rhythm maintained if view bobbing disabled)
+    const float armIntensity = m_bobbingEnabled ? m_bobIntensity : (m_bobIntensity * 0.35f);
+    if (armIntensity > 0.001f) {
+        handBobX = -std::sin(m_bobTimer * 0.5f) * 0.024f * armIntensity;
+        handBobY = -std::abs(std::sin(m_bobTimer * 0.5f)) * 0.020f * armIntensity;
+        handBobZ = std::cos(m_bobTimer * 0.5f) * 0.015f * armIntensity;
+        handRoll = std::sin(m_bobTimer * 0.5f) * 3.5f * armIntensity;
+        handPitch = std::abs(std::sin(m_bobTimer * 0.5f)) * 3.0f * armIntensity;
     }
 
     const glm::vec3 eye = eyePosition();
@@ -657,82 +800,90 @@ void Player::appendFirstPersonArm(std::vector<Vertex>& vertices, const World& wo
     const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
 
     if (m_heldItem == BlockId::Air) {
-        // --- 1. Empty Hand (Authentic Minecraft first-person arm) ---
+        // --- 1. Empty Hand (Longer, authentic Minecraft first-person arm) ---
         // Base anchor in bottom-right corner of screen
-        const glm::vec3 basePos(0.36f + bobX - sinSp * 0.16f,
-                                -0.30f + bobY - sinSp * 0.10f,
-                                -0.46f - punch * 0.18f);
+        const glm::vec3 basePos(0.38f + handBobX - sinSp * 0.15f,
+                                -0.28f + handBobY - sinSp * 0.10f,
+                                -0.36f + handBobZ - punch * 0.20f);
 
         glm::mat4 armMat = glm::translate(glm::mat4(1.0f), basePos);
         // Angles: tilted forward-up, angled inward toward center, slight wrist roll
-        armMat = glm::rotate(armMat, glm::radians(-50.0f - sinSp * 52.0f), glm::vec3(1, 0, 0));
-        armMat = glm::rotate(armMat, glm::radians(-36.0f + sinSp * 34.0f), glm::vec3(0, 1, 0));
-        armMat = glm::rotate(armMat, glm::radians(30.0f - sinSp * 40.0f),  glm::vec3(0, 0, 1));
+        armMat = glm::rotate(armMat, glm::radians(-40.0f - handPitch - sinSp * 45.0f), glm::vec3(1, 0, 0));
+        armMat = glm::rotate(armMat, glm::radians(-18.0f + sinSp * 25.0f), glm::vec3(0, 1, 0));
+        armMat = glm::rotate(armMat, glm::radians(18.0f + handRoll - sinSp * 30.0f),  glm::vec3(0, 0, 1));
 
-        // Forearm and hand (Pure skin tone, length along -Z)
-        addOrientedBox(vertices, {0.0f, 0.0f, -0.16f}, {0.13f, 0.13f, 0.40f}, armMat,
+        // Long forearm and hand (Steve skin tone entering from bottom-right)
+        addOrientedBox(vertices, {0.0f, 0.0f, -0.26f}, {0.14f, 0.14f, 0.70f}, armMat,
                        TextureTile::PlayerSkin, TextureTile::PlayerSkin,
                        TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
-
-        // Teal sleeve cuff at the shoulder/screen entrance base
-        addOrientedBox(vertices, {0.0f, 0.0f, 0.08f}, {0.145f, 0.145f, 0.12f}, armMat,
-                       TextureTile::PlayerTorso, TextureTile::PlayerTorso,
-                       TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, 1.0f);
     } else {
         const BlockDef& def = blockDef(m_heldItem);
 
-        if (isTool(m_heldItem) || m_heldItem == BlockId::Stick || m_heldItem == BlockId::Diamond ||
-            m_heldItem == BlockId::IronIngot || m_heldItem == BlockId::Coal || m_heldItem == BlockId::Apple ||
-            m_heldItem == BlockId::Bread || m_heldItem == BlockId::RawPorkchop || m_heldItem == BlockId::CookedPorkchop ||
-            m_heldItem == BlockId::RawBeef || m_heldItem == BlockId::CookedBeef) {
-            // --- 2. Held Tool / Item (Slash swing) ---
-            const glm::vec3 basePos(0.28f + bobX - sinSp * 0.18f,
-                                    -0.20f + bobY - sinSp * 0.12f,
-                                    -0.40f - punch * 0.22f);
+        if (isTorch(m_heldItem)) {
+            // --- 2. Held Torch (Upright 3D stick in hand) ---
+            const glm::vec3 basePos(0.32f + handBobX - sinSp * 0.15f,
+                                    -0.24f + handBobY - sinSp * 0.10f,
+                                    -0.38f + handBobZ - punch * 0.18f);
 
             glm::mat4 toolMat = glm::translate(glm::mat4(1.0f), basePos);
-            toolMat = glm::rotate(toolMat, glm::radians(-15.0f - sinSp * 75.0f), glm::vec3(1, 0, 0));
-            toolMat = glm::rotate(toolMat, glm::radians(-28.0f + sinSp * 40.0f), glm::vec3(0, 1, 0));
-            toolMat = glm::rotate(toolMat, glm::radians(-25.0f - sinSp * 45.0f), glm::vec3(0, 0, 1));
+            toolMat = glm::rotate(toolMat, glm::radians(-18.0f - handPitch - sinSp * 65.0f), glm::vec3(1, 0, 0));
+            toolMat = glm::rotate(toolMat, glm::radians(-24.0f + sinSp * 30.0f), glm::vec3(0, 1, 0));
+            toolMat = glm::rotate(toolMat, glm::radians(20.0f + handRoll - sinSp * 35.0f),  glm::vec3(0, 0, 1));
 
-            // Tool sprite quad box
-            addOrientedBox(vertices, {0.0f, 0.14f, -0.08f}, {0.32f, 0.32f, 0.035f}, toolMat,
-                           def.side, def.side, def.side, def.side, light, torchLight, 1.0f);
-
-            // Hand gripping handle (Pure skin)
-            addOrientedBox(vertices, {0.0f, -0.04f, 0.02f}, {0.09f, 0.09f, 0.22f}, toolMat,
+            // Forearm and hand gripping torch
+            addOrientedBox(vertices, {0.0f, -0.06f, 0.16f}, {0.12f, 0.12f, 0.52f}, toolMat,
                            TextureTile::PlayerSkin, TextureTile::PlayerSkin,
                            TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
 
-            // Sleeve cuff
-            addOrientedBox(vertices, {0.0f, -0.04f, 0.14f}, {0.105f, 0.105f, 0.09f}, toolMat,
-                           TextureTile::PlayerTorso, TextureTile::PlayerTorso,
-                           TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, 1.0f);
+            // Upright 3D Torch
+            addOrientedBox(vertices, {0.0f, 0.14f, -0.06f}, {0.0625f, 0.48f, 0.0625f}, toolMat,
+                           TextureTile::Planks, TextureTile::Planks,
+                           TextureTile::Planks, TextureTile::Planks, light, torchLight, 1.0f);
+            addOrientedBox(vertices, {0.0f, 0.34f, -0.06f}, {0.075f, 0.12f, 0.075f}, toolMat,
+                           TextureTile::Torch, TextureTile::Torch,
+                           TextureTile::Torch, TextureTile::Torch, light, torchLight, 1.0f);
+        } else if (!isSolidBlockItem(m_heldItem)) {
+            // --- 3. Held 2.5D Item Sprite (Tools, Weapons, Food, Materials) ---
+            const glm::vec3 basePos(0.32f + handBobX - sinSp * 0.16f,
+                                    -0.22f + handBobY - sinSp * 0.12f,
+                                    -0.36f + handBobZ - punch * 0.18f);
+
+            glm::mat4 toolMat = glm::translate(glm::mat4(1.0f), basePos);
+            toolMat = glm::rotate(toolMat, glm::radians(-15.0f - handPitch - sinSp * 72.0f), glm::vec3(1, 0, 0));
+            toolMat = glm::rotate(toolMat, glm::radians(-25.0f + sinSp * 35.0f), glm::vec3(0, 1, 0));
+            toolMat = glm::rotate(toolMat, glm::radians(15.0f + handRoll - sinSp * 38.0f),  glm::vec3(0, 0, 1));
+
+            // Forearm and hand gripping handle
+            addOrientedBox(vertices, {0.0f, -0.06f, 0.16f}, {0.12f, 0.12f, 0.52f}, toolMat,
+                           TextureTile::PlayerSkin, TextureTile::PlayerSkin,
+                           TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
+
+            // 2.5D Extruded Item Sprite (Handle in hand, head pointing top-left)
+            glm::mat4 spriteMat = glm::translate(toolMat, glm::vec3(-0.04f, 0.14f, -0.06f));
+            spriteMat = glm::rotate(spriteMat, glm::radians(90.0f), glm::vec3(0, 0, 1));
+            spriteMat = glm::rotate(spriteMat, glm::radians(-12.0f), glm::vec3(0, 1, 0));
+            addOrientedItemSprite(vertices, glm::vec3(0.0f), 0.38f, spriteMat,
+                                 def.side, light, torchLight, 1.0f);
         } else {
-            // --- 3. Held 3D Block (Isometric tilt) ---
-            const glm::vec3 basePos(0.28f + bobX - sinSp * 0.12f,
-                                    -0.22f + bobY - sinSp * 0.08f,
-                                    -0.38f - punch * 0.14f);
+            // --- 4. Held 3D Block (Isometric tilt) ---
+            const glm::vec3 basePos(0.30f + handBobX - sinSp * 0.12f,
+                                    -0.22f + handBobY - sinSp * 0.08f,
+                                    -0.36f + handBobZ - punch * 0.14f);
 
             glm::mat4 blockMat = glm::translate(glm::mat4(1.0f), basePos);
-            blockMat = glm::rotate(blockMat, glm::radians(18.0f - sinSp * 36.0f), glm::vec3(1, 0, 0));
-            blockMat = glm::rotate(blockMat, glm::radians(36.0f + sinSp * 24.0f), glm::vec3(0, 1, 0));
-            blockMat = glm::rotate(blockMat, glm::radians(-10.0f + sinSp * 20.0f), glm::vec3(0, 0, 1));
+            blockMat = glm::rotate(blockMat, glm::radians(18.0f - handPitch - sinSp * 36.0f), glm::vec3(1, 0, 0));
+            blockMat = glm::rotate(blockMat, glm::radians(38.0f + sinSp * 24.0f), glm::vec3(0, 1, 0));
+            blockMat = glm::rotate(blockMat, glm::radians(-12.0f + handRoll + sinSp * 20.0f), glm::vec3(0, 0, 1));
 
-            // Held 3D Block
-            const glm::vec3 blockSize(0.20f);
-            addOrientedBox(vertices, {0.0f, 0.04f, 0.0f}, blockSize, blockMat,
-                           def.top, def.side, def.bottom, def.side, light, torchLight, 1.0f);
-
-            // Hand supporting beneath
-            addOrientedBox(vertices, {0.02f, -0.10f, 0.04f}, {0.10f, 0.10f, 0.24f}, blockMat,
+            // Forearm and hand supporting beneath
+            addOrientedBox(vertices, {0.02f, -0.10f, 0.16f}, {0.12f, 0.12f, 0.50f}, blockMat,
                            TextureTile::PlayerSkin, TextureTile::PlayerSkin,
                            TextureTile::PlayerSkin, TextureTile::PlayerSkin, light, torchLight, 1.0f);
 
-            // Sleeve cuff
-            addOrientedBox(vertices, {0.02f, -0.10f, 0.18f}, {0.115f, 0.115f, 0.10f}, blockMat,
-                           TextureTile::PlayerTorso, TextureTile::PlayerTorso,
-                           TextureTile::PlayerTorso, TextureTile::PlayerTorso, light, torchLight, 1.0f);
+            // Held 3D Mini Block
+            const glm::vec3 blockSize(0.20f);
+            addOrientedBox(vertices, {0.0f, 0.06f, -0.02f}, blockSize, blockMat,
+                           def.top, def.side, def.bottom, def.side, light, torchLight, 1.0f);
         }
     }
 }

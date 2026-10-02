@@ -17,6 +17,7 @@ public:
     void addMob(std::unique_ptr<Mob> mob);
     void spawnItem(BlockId id, const glm::vec3& position, int count = 1, const glm::vec3& initialVelocity = glm::vec3(0.0f));
     void clear();
+    void clearMobs() { m_mobs.clear(); }
 
     void update(float dt, const World& world, const glm::vec3& playerPos,
                 const std::function<bool(BlockId, int)>& onPickup = nullptr,

@@ -5,8 +5,8 @@ first. Format: `YYYY-MM-DD -- summary`.
 
 ## Version scheme
 
-Versions are **milestone-tagged**: `v0.M<milestone>.<bump>`. The milestone part
-ties each version to `docs/ROADMAP.md`, so "M5" and "v0.M5.x" can never drift
+Versions are **milestone-tagged**: `v<major>.M<milestone>.<bump>`. The milestone part
+ties each version to `docs/ROADMAP.md`, so "M1" and "v1.M1.x" can never drift
 apart, and a version number never reads as a percentage of Minecraft.
 
 Releases before this scheme used ad-hoc `v0.N.P` tags. History is preserved in
@@ -16,27 +16,67 @@ the table below rather than rewritten.
 
 | Version | Legacy tag | Milestone | Headline |
 |---------|------------|-----------|----------|
-| v0.M8.0 | - | M8 | Console Edition Crafting UI, RPG MMO Vitals Card HUD, Moon Phase Lighting Cycle & Darkness, Living Ecology (dirt spread/grass collapse), 3x3 Crafting Table, Item Toss ('Q'/Ctrl+Q), Double-Jump Flight, Non-Freezing Death Simulation, 3D Held Items |
-| v0.M7.0 | - | M7 | Dual-channel BFS light engine (Sunlight/Blocklight), pitch black true night, distinct Menu & In-Game music with crossfading, distinct Survival vs Creative inventory catalogs |
-| v0.M5.6 | - | M5 | 10-stage PNG block break cracks, persistent save protection, BGM audio player & ambient loop synth, celestial sun/moon, Caveman AI skills |
-| v0.M5.5 | - | M5 | Item entities & pickup physics, 2x2 crafting grid, tool durability & mining multipliers (M5 closure) |
-| v0.M5.4 | - | M5 | Camera-space locked viewmodel hand, first-person torso removal, multi-directional 3D wall torches |
-| v0.M5.3 | - | M5 | Mob knockback impulse & recoil stun, combat aggro interest timer, wild passive mob spawning fix |
-| v0.M5.2 | - | M5 | Dynamic view bobbing, Source movement (air-strafing & bhop), $512\times 512$ world scale, pigmen & villages, loading screen, Steve model & F5 perspectives |
-| v0.M5.1 | v0.7.0 | M5 | 3D torches, particles, water physics, world types, custom name input, mob AI overhaul, F3 profiling overlay |
-| v0.M5.0 | v0.6.0 | M5 | Sprinting, dynamic FOV, neutral mobs (pigs/cows) |
-| v0.M4.0 | v0.4.0 | M4 | Named worlds, caves, ores, water, torches |
-| v0.M3.1 | v0.5.0 | M3 | Splashes, smooth lighting, tree archetypes, greedy meshing, frustum culling |
-| v0.M3.0 | v0.2.0 | M3 | Save/load, non-freezing inventory |
-| v0.M2.1 | v0.1.2 | M2 | Storage inventory modal |
-| v0.M2.0 | v0.1.1 | M2 | Legacy-console menus (M2 delivery), compact crosshair, bidirectional options |
-| v0.M1.0 | v0.1.0 | M1 | Versioning, ChunkPalette, RLE |
+| v1.M1.0 | - | v1.M1 | Environmental Sound Physics & Spatial Acoustics, Infinite World Generation & Dynamic Chunk Streaming, Fast Spawn Generation ($<150\text{ ms}$), 4-Corner Per-Vertex Smooth Lighting |
+| v0.M9.0 | - | v0.M9 | 4-Corner Per-Vertex Smooth Dynamic Lighting, Trilinear Entity Lighting, Recipe Discovery Progression, Interactive World Seed Input & Hashing, Third-Person Head Pitch Articulation, Distinct 3x3 Workbench UI |
+| v0.M8.0 | - | v0.M8 | Console Edition Crafting UI, RPG MMO Vitals Card HUD, Moon Phase Lighting Cycle & Darkness, Living Ecology (dirt spread/grass collapse), 3x3 Crafting Table, Item Toss ('Q'/Ctrl+Q), Double-Jump Flight, Non-Freezing Death Simulation, 3D Held Items |
+| v0.M7.0 | - | v0.M7 | Dual-channel BFS light engine (Sunlight/Blocklight), pitch black true night, distinct Menu & In-Game music with crossfading, distinct Survival vs Creative inventory catalogs |
+| v0.M5.6 | - | v0.M5 | 10-stage PNG block break cracks, persistent save protection, BGM audio player & ambient loop synth, celestial sun/moon, Caveman AI skills |
+| v0.M5.5 | - | v0.M5 | Item entities & pickup physics, 2x2 crafting grid, tool durability & mining multipliers (M5 closure) |
+| v0.M5.4 | - | v0.M5 | Camera-space locked viewmodel hand, first-person torso removal, multi-directional 3D wall torches |
+| v0.M5.3 | - | v0.M5 | Mob knockback impulse & recoil stun, combat aggro interest timer, wild passive mob spawning fix |
+| v0.M5.2 | - | v0.M5 | Dynamic view bobbing, Source movement (air-strafing & bhop), $512\times 512$ world scale, pigmen & villages, loading screen, Steve model & F5 perspectives |
+| v0.M5.1 | v0.7.0 | v0.M5 | 3D torches, particles, water physics, world types, custom name input, mob AI overhaul, F3 profiling overlay |
+| v0.M5.0 | v0.6.0 | v0.M5 | Sprinting, dynamic FOV, neutral mobs (pigs/cows) |
+| v0.M4.0 | v0.4.0 | v0.M4 | Named worlds, caves, ores, water, torches |
+| v0.M3.1 | v0.5.0 | v0.M3 | Splashes, smooth lighting, tree archetypes, greedy meshing, frustum culling |
+| v0.M3.0 | v0.2.0 | v0.M3 | Save/load, non-freezing inventory |
+| v0.M2.1 | v0.1.2 | v0.M2 | Storage inventory modal |
+| v0.M2.0 | v0.1.1 | v0.M2 | Legacy-console menus (M2 delivery), compact crosshair, bidirectional options |
+| v0.M1.0 | v0.1.0 | v0.M1 | Versioning, ChunkPalette, RLE |
 
-**v0.M8.0 is the current build** and delivers **M8 -- Console Crafting, RPG HUD & Ecological Survival**.
+**v1.M1.0 is the current build** and enters **v1.M1 -- Environmental Sound Physics & Spatial Acoustics**.
 
 ## Current milestone
 
-**M8 -- Console Crafting, RPG HUD & Ecological Survival (COMPLETE)**: Landed:
+**v1.M1 -- Environmental Sound Physics & Spatial Acoustics (DELIVERED / COMPLETE)**:
+- **Falling Leaves & Visuality Particle Physics (Delivered)**:
+  - *Falling Leaves*: Dynamic canopy scanner detects leaf blocks exposed to air beneath trees, spawning drifting leaves with horizontal aerodynamic sway, wind oscillation, terminal velocity, and ground resting simulation.
+  - *Visuality Combat Sparks & Critical Hits*: Striking mobs bursts gold and bright white high-velocity spark particles. Falling attacks automatically trigger heavy critical hit spark bursts ($24\text{ particles}$).
+  - *Directional Blood Splatters*: Melee attacks on mobs and damage dealt to the player spray crimson blood droplets in the attack direction with gravity, velocity drag, and surface resting physics.
+- **Multi-Biome Infinite Terrain Generation (Delivered)**: Continentalness and erosion-driven macro landscapes seamlessly generating:
+  - *Lakes & Deep Waters*: Low depressions below sea level ($Y=26$) with sand/gravel beds and aquatic coastlines.
+  - *Meandering Rivers*: Smooth sinusoidal 2D river carvers cutting continuous channels through hills and mountains, connecting bodies of water.
+  - *Highlands & Plateaus*: Elevated rolling steppes ($Y=38\text{--}50$) with pine/spruce tree clusters and stone bluffs.
+  - *Mountains & Jagged Summits*: Towering alpine peaks reaching $Y=50\text{--}74$ with exposed stone/cobblestone rocky summits and cliff faces.
+  - *Plains & Dense Forests*: Gentle rolling meadows with dense tall grass and multi-tier oak and birch forest canopies.
+  - *Smart Dry Spawn*: `Player::spawnAt` automatically finds dry shoreline land above water level to prevent spawning underwater.
+- **Sound Physics Remastered & Presence Footsteps Integration**: Ray-traced sound occlusion through solid voxels via DDA, dynamic biquad lowpass filtering, cave/room reverberation feedback simulation, material-specific absorption coefficients (stone reflection vs wool/leaves damping), underwater fluid muffling, stride-cadence footstep sound triggers with surface substrate differentiation.
+- **Improved Player Bobbing & View Dynamics**: Harmonic dual-axis camera translation, subtle authentic roll and pitch dip linked to footfall impacts, weighted hand/item stride inertia and sway, with an Options menu toggle ("View Bobbing" ON/OFF) to disable camera motion while maintaining gentle arm breathing.
+- **FastNoiseLite Procedural Noise Engine & Multi-Octave Landforms (Delivered)**: Integrated [`FastNoiseLite`](file:///home/ais/VoxelMin/src/world/FastNoiseLite.hpp) for SIMD-friendly coherent noise evaluation:
+  - *OpenSimplex2 Fractal FBm Continentalness & Erosion*: Macro landscape shaping with 4 octaves and smooth biome transitions.
+  - *Ridged Multifractal Peaks*: Carving dramatic alpine mountain ranges reaching up to $Y=76$.
+  - *Deep Ocean & Lake Depressions*: Low tectonic basins descending to $Y=10$ with aquatic floor beds.
+  - *3D Perlin Noodle & Cheese Caverns*: Subterranean cave networks cutting through bedrock to surface terrain.
+- **The Backrooms Level 0 Dimension ("The Yellow Hell") (Delivered)**:
+  - *Infinite Cellular Maze Generation*: Procedural cellular partitioned corridors, office support pillars, dead ends, mono-yellow wallpaper, moist damp carpet, and acoustic drop ceilings with fluorescent light fixtures on a $4\times 4$ grid ([`BackroomsGenerator`](file:///home/ais/VoxelMin/src/world/BackroomsGenerator.hpp)).
+  - *New Blocks & Items*: Added `BackroomsWallpaper`, `BackroomsCarpet`, `BackroomsCeiling`, `FluorescentLight` (emitted light 15), `GlitchBlock` (reality tear), `ExitDoor` (emergency fire exit), and `AlmondWater` consumable beverage (+45 hunger, +35 health) to [`BlockId`](file:///home/ais/VoxelMin/src/world/Block.hpp) and creative catalogs.
+  - *Dimension Mechanics & Real-Time Noclip*: Stepping into or right-clicking `GlitchBlock` in the Overworld triggers instant Noclip into Level 0. Right-clicking `ExitDoor` in Level 0 teleports the player back to their exact saved Overworld location.
+  - *Cinematic RPG Title Banners*: Dimension entry triggers gold-accented animated title cards (e.g. "LEVEL 0 - The Yellow Hell", "THE OVERWORLD - The Surface Realm") rendered via [`Renderer::drawTitleBanner`](file:///home/ais/VoxelMin/src/render/Renderer.cpp).
+  - *Mono-Yellow Volumetric Atmosphere*: Dimension-specific sky and fog colors (damp yellow haze), tight fog rendering distance (14--32 blocks), and dual-dimension persistent chunk caching.
+- **Missing Chunk Hole Fix & Base Terrain Flag (Delivered)**: Added `terrainGenerated` lifecycle flag on `Chunk` to ensure chunks populated with overhanging tree foliage or foundation blocks prior to full terrain generation are correctly marked and generated by `updateStreaming`, eliminating square void gaps.
+- **Village Water & Ocean Avoidance Checker (Delivered)**: `VillageGenerator::locateVillages` performs a wide multi-ring perimeter footprint scan checking surface elevation ($\ge 28$), surface block type, and elevation variance ($\le 6$), strictly rejecting placement over lakes, rivers, or ocean waters.
+- **Seamless View-Distance Spawn & World Loading (Delivered)**: World initialization and save loading pre-generate, calculate lighting, and GPU-mesh all chunks across the full visible view distance (`max(6, viewDistance + 1)`), eliminating missing chunk void gaps and initial stutter upon entering the world.
+- **Persistent Explored Chunk Cache (Delivered)**: `World::m_savedChunkCache` stores RLE compressed voxel snapshots for all generated and modified chunks, guaranteeing unedited chunks are instantly reloaded from RAM/disk without regenerating noise when revisiting.
+- **Fast Fluid Update Physics (Delivered)**: `scheduleFluidUpdate` with an active fluid queue and direct chunk voxel writes enables fast, natural waterfall cascades without frame drops.
+- **4-Corner Per-Vertex Smooth Dynamic Lighting across chunk voxel meshing**: `computeVertexSmoothLight` samples neighbor voxels along face tangents and bitangents, blending sunlight and torchlight smoothly across vertices.
+- FaceMask vertex lighting matching: Greedy mesher checks all 4 corner light levels before merging quads, preserving lighting gradients.
+- Perceptual non-linear lighting curve: `pow(clamp(vLight, 0.0, 1.0), 1.25)` and `pow(clamp(vTorchLight, 0.0, 1.0), 1.25)` in chunk fragment shader.
+- Trilinear entity ambient lighting: continuous world-space light interpolation for mobs and dropped item entities.
+- Dynamic light-reactive breaking textures and particles: fracture overlays and dig particles darken in caves and at night.
+- Recipe discovery unlocking system: recipes remain hidden until necessary crafting components are acquired.
+- Interactive seed generation & string-to-number hashing: custom seed input on world creation.
+- Third-person head articulation fix: proper camera-aligned pitch without inverted neck tilts.
+- Distinct Workbench 3x3 Crafting UI vs Player Inventory Crafting UI.
 - Authentic Legacy Console Edition crafting interface with 5 category tabs (`Structures`, `Tools & Weapons`, `Food & Essentials`, `Mechanisms`, `Decorations`), horizontal recipe selector, visual ingredient preview, yield slot, and 1-click recipe crafting.
 - Interactive 3x3 Crafting Table workbench triggered via right-click raycasting on `BlockId::CraftingTable`.
 - RPG MMO Vitals Card HUD anchored top-left with Steve portrait, Level badge, vertical XP bar, player name, red health bar, and Food, Oxygen, and Armor stats with `+20` sub-counters.
@@ -139,6 +179,41 @@ Open, but not M6 blockers:
   a much larger simulation than M6 needs.
 
 ## Done
+
+### 2026-10-02 -- Milestone v1.M1: Falling Leaves, Visuality Combat Particles, Multi-Biome Infinite World & Dynamic Fluid Mechanics
+
+- **Persistent Chunk Cache & Infinite World Preservation (Delivered)**:
+  - Added `World::m_savedChunkCache` to store RLE-compressed voxel payloads for all explored/generated chunks across the world.
+  - When walking back to any previously visited chunk, `generateSingleChunk` loads directly from the saved chunk cache via `decompressRle` (0 noise recalculation, 0 block resets, preserving player builds and terrain modifications).
+  - On chunk unload during streaming, modified voxel data is automatically synced to `m_savedChunkCache`.
+  - `WorldSave::saveGame` writes all explored chunks in the world to the `.dat` save file, and `WorldSave::loadGame` restores the entire persistent chunk cache.
+- **Dynamic Water Cascade & Fluid Physics (Delivered)**:
+  - Implemented active fluid simulation queue in `World::scheduleFluidUpdate` / `World::tickFluids`:
+    - Water blocks placed in mid-air or exposed to air below immediately trigger downward waterfall cascades until reaching solid ground.
+    - Water supported by solid ground spreads horizontally in 4 cardinal directions.
+    - Digging/clearing blocks adjacent to or beneath water immediately wakes up neighbor fluid blocks to cascade into the opened space.
+- **View Distance + 2 Chunk Streaming & FPS Optimization**:
+  - Bound dynamic chunk generation strictly to `viewDistanceChunks + 2` radius (`maxGenRadius`), unloading any chunk beyond `viewDistanceChunks + 3`.
+  - Balanced chunk streaming budget to 1 chunk per frame max to prevent frame time spikes.
+  - Adjusted dirty mesh rebuild budget in `Application::rebuildDirtyMeshes` to 4 chunks per frame for high FPS.
+  - Optimized stone ore distribution in `TerrainGenerator` from 4 separate 3D hash evaluations down to 1 single hash evaluation per voxel.
+- **World Creation & Fluid Simulation Optimization (Freeze Fix)**:
+  - Fixed infinite world freeze during world creation and runtime loop:
+    - `TerrainGenerator::generateInitialSpawn` builds `m_loadedList` before lighting passes and village generation.
+    - `World::getSunLight` returns 0 (instead of 15) for unloaded underground chunk lookups, stopping boundary light flooding.
+    - Removed redundant full-volume `updateLightAround` calls from single-chunk meshing and streamlined localized light recalculation radius ($r=8$).
+    - Added rate-limiting simulation timers for fluid spread (`m_fluidTickTimer = 0.15s`) and ecological grass spread (`m_ecologyTickTimer = 0.25s`).
+    - Streamlined torch particle scanning to fast candidate checks in `ParticleSystem::update`, reducing per-frame block lookups from 14,000+ to 48.
+- **Visuality Combat Sparks & Directional Blood Splatters**:
+  - Implemented high-velocity golden impact sparks and critical hit particles (`ParticleType::Spark`) triggered when striking mobs (with extra bursts during falling critical strikes).
+  - Implemented directional crimson blood splatters (`ParticleType::Blood`) with spray momentum, gravity acceleration, and ground contact resting upon mob attacks and player damage.
+- **Multi-Biome Infinite Terrain Generation**:
+  - Implemented continentalness and erosion noise generating Lakes & water basins ($Y=14\text{--}25$), sinusoidal meandering Rivers ($Y=21\text{--}26$), elevated Highlands & steppes ($Y=38\text{--}50$), alpine Mountain summits ($Y=50\text{--}74$), and multi-tier Oak/Birch/Pine forests.
+  - Added smart dry spawn land search in `Player::spawnAt`.
+- **Dynamic Water Flow Mechanics**:
+  - Implemented cellular automaton fluid simulation in `World::tickFluids` causing water to cascade down sheer drops and spread horizontally across surfaces up to 4 blocks.
+- **Spatial Audio & Footstep Acoustics**:
+  - Implemented raytraced voxel sound occlusion, biquad lowpass filtering, and substrate-based footsteps based on Sound Physics Remastered and Presence Footsteps.
 
 ### 2026-10-02 -- Milestone M8: Console Crafting UI, RPG MMO Vitals Card HUD, Moon Phases & Living Ecology
 
@@ -782,7 +857,27 @@ after any change to the world, mesher, or renderer.
       each dirty chunk is rebuilt once rather than twice.
 - [ ] No GL errors after a full frame: `glGetError()` stays `GL_NO_ERROR`.
 
-## Where things live
+## v1.M2.0 (2026-10-02) -- The Backrooms Dimension, TrueType Typography & FastNoiseLite
+
+### Highlights
+- **The Backrooms Level 0 ("The Yellow Hell")**:
+  - Infinite procedural non-linear partition maze with mono-yellow wallpaper, moist damp carpet floor, and acoustic ceiling tiles.
+  - Symmetrical fluorescent ceiling light fixtures with humming ambient diffuse illumination.
+  - Random dark blackout zones and hallway clusters generated via continuous OpenSimplex2 noise.
+  - Reality Glitch blocks (`GlitchBlock`) allowing instant noclip travel into the dimension.
+  - Rare Emergency Fire Exit doors (`ExitDoor`) and Almond Water item caches (`AlmondWater`).
+  - Safe dimension transition offsets and 2-second cooldown to prevent re-teleportation loops.
+  - Custom analog VHS noise shader, voltage flicker, CRT scanlines, and liminal dark edge vignette.
+  - Unsettling ambient synthesized soundtrack for Backrooms with dynamic audio crossfade.
+  - RPG-style cinematic dimension entry banners ("LEVEL 0 - The Yellow Hell").
+- **TrueType / OpenType Typography Engine (`born2bsporty-fs.otf`)**:
+  - Integrated `stb_truetype` rasterization with precise vertical ascent and downward glyph offset calculations.
+  - Automatic fallback to embedded procedural bitmap font atlas if external font files are missing.
+  - Restructured Main Menu and pause screen button layouts with centered labels.
+- **FastNoiseLite & OpenSimplex2 Integration**:
+  - Integrated header-only `FastNoiseLite.hpp` for continuous multi-octave simplex/perlin noise world generation.
+- **Blockbench MCP Integration**:
+  - Integrated headless Blockbench MCP tooling for 3D voxel item, block, and mob modeling workflows.
 
 | Concern | File |
 |---------|------|
@@ -796,6 +891,7 @@ after any change to the world, mesher, or renderer.
 | Particles | `src/render/ParticleSystem.{hpp,cpp}` |
 | Greedy chunk meshing, vertex AO, 3D torch and cross foliage geometry | `src/world/ChunkMesher.cpp` |
 | Terrain, trees, caves, ores, world types, tall grass | `src/world/TerrainGenerator.cpp` |
+| Backrooms Level 0 infinite maze generation | `src/world/BackroomsGenerator.{hpp,cpp}` |
 | Skylight and blocklight propagation | `src/world/World.cpp` |
 | Save format, directory listing (`listSavedWorlds`) and deletion (`deleteWorld`) | `src/world/WorldSave.{hpp,cpp}` |
 | Block ids, tile mapping, solids, block bounds, hotbar colours | `src/world/Block.hpp` |
@@ -805,11 +901,12 @@ after any change to the world, mesher, or renderer.
 | AI goal masks and tuning constants | `src/entity/MobAi.hpp` |
 | Mob list, spawning, entity raycast, batching | `src/entity/EntityManager.{hpp,cpp}` |
 | Menu model and rendering | `src/ui/Menu.cpp` |
-| Bitmap font glyph table and atlas | `src/render/Font.cpp`, `src/render/FontData.hpp` |
+| TTF/OTF & Bitmap font rasterization | `src/render/Font.cpp`, `src/render/FontData.hpp` |
 
 ## See also
 
 - [`ROADMAP.md`](ROADMAP.md) -- what ships next, and what is out of scope.
+- [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md) -- codebase structuring and modularization plan.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) -- how the code fits together.
 - [`SOURCES.md`](SOURCES.md) -- external references and library choices.
 - [`BUILD.md`](BUILD.md) -- toolchain setup and build commands.

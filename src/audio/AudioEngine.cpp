@@ -1,5 +1,7 @@
 #include "audio/AudioEngine.hpp"
 #include "core/Log.hpp"
+#include "world/World.hpp"
+#include "world/Block.hpp"
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -45,9 +47,30 @@ AudioEngine::~AudioEngine() {
     shutdown();
 }
 
+void AudioEngine::initReverb() {
+    // Schroeder / Freeverb tuned delay line sample buffer lengths
+    const size_t combLengthsL[NUM_COMBS] = { 1116, 1188, 1277, 1356 };
+    const size_t combLengthsR[NUM_COMBS] = { 1139, 1211, 1300, 1379 };
+    const size_t allPassLengthsL[NUM_ALLPASS] = { 225, 556 };
+    const size_t allPassLengthsR[NUM_ALLPASS] = { 248, 579 };
+
+    for (size_t i = 0; i < NUM_COMBS; ++i) {
+        m_combsL[i].init(combLengthsL[i]);
+        m_combsR[i].init(combLengthsR[i]);
+    }
+    for (size_t i = 0; i < NUM_ALLPASS; ++i) {
+        m_allPassL[i].init(allPassLengthsL[i]);
+        m_allPassR[i].init(allPassLengthsR[i]);
+    }
+
+    m_underwaterFilterL.setCutoff(420.0f);
+    m_underwaterFilterR.setCutoff(420.0f);
+}
+
 bool AudioEngine::init() {
     if (m_initialized) return true;
 
+    initReverb();
     precomputeSounds();
     scanAndLoadMusic();
 
@@ -79,7 +102,7 @@ bool AudioEngine::init() {
     }
 
     m_initialized = true;
-    log::info("Audio engine initialised (miniaudio 44.1kHz stereo, %d procedural sound banks, BGM active)",
+    log::info("Audio engine initialised (Sound Physics DSP, 44.1kHz stereo, %d sound banks, BGM active)",
               static_cast<int>(m_samples.size()));
     return true;
 }
@@ -219,6 +242,69 @@ void AudioEngine::scanAndLoadMusic() {
     if (!gameFound) {
         synthesizeGameMusic();
     }
+    synthesizeBackroomsMusic();
+}
+
+void AudioEngine::updateEnvironment(const World& world, const glm::vec3& listenerPos, bool isUnderwater) {
+    std::lock_guard<std::mutex> lock(m_envMutex);
+    m_isUnderwater = isUnderwater;
+
+    // 14 acoustic probe rays
+    const glm::vec3 PROBE_DIRS[14] = {
+        { 1.0f,  0.0f,  0.0f}, {-1.0f,  0.0f,  0.0f},
+        { 0.0f,  1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f},
+        { 0.0f,  0.0f,  1.0f}, { 0.0f,  0.0f, -1.0f},
+        { 0.707f, 0.707f, 0.0f}, {-0.707f, 0.707f, 0.0f},
+        { 0.707f,-0.707f, 0.0f}, {-0.707f,-0.707f, 0.0f},
+        { 0.0f, 0.707f, 0.707f}, { 0.0f, -0.707f, 0.707f},
+        { 0.0f, 0.707f,-0.707f}, { 0.0f, -0.707f,-0.707f},
+    };
+
+    float totalDist = 0.0f;
+    int solidHits = 0;
+    float dampSum = 0.0f;
+
+    for (int i = 0; i < 14; ++i) {
+        const glm::vec3 dir = PROBE_DIRS[i];
+        float dist = 24.0f;
+        for (float step = 0.5f; step <= 24.0f; step += 1.0f) {
+            const glm::vec3 p = listenerPos + dir * step;
+            const int bx = static_cast<int>(std::floor(p.x));
+            const int by = static_cast<int>(std::floor(p.y));
+            const int bz = static_cast<int>(std::floor(p.z));
+            const BlockId b = world.getBlock(bx, by, bz);
+            if (isSolid(b)) {
+                dist = step;
+                solidHits++;
+                if (b == BlockId::Leaves || b == BlockId::TallGrass) {
+                    dampSum += 0.8f;
+                } else if (b == BlockId::Dirt || b == BlockId::Grass || b == BlockId::Sand) {
+                    dampSum += 0.5f;
+                } else if (b == BlockId::Wood || b == BlockId::Planks) {
+                    dampSum += 0.4f;
+                } else {
+                    dampSum += 0.15f; // Stone / Cobblestone reflective
+                }
+                break;
+            }
+        }
+        totalDist += dist;
+    }
+
+    const float avgDist = totalDist / 14.0f;
+
+    if (solidHits >= 6) {
+        // Enclosed space / Cave echo
+        const float roomRatio = std::clamp(avgDist / 20.0f, 0.2f, 1.0f);
+        m_targetRoomSize = 0.35f + roomRatio * 0.52f;
+        m_targetWetMix = std::clamp(0.12f + (static_cast<float>(solidHits) / 14.0f) * 0.36f, 0.10f, 0.48f);
+        m_targetDamp = std::clamp(dampSum / static_cast<float>(solidHits), 0.15f, 0.75f);
+    } else {
+        // Open outdoor plains
+        m_targetRoomSize = 0.15f;
+        m_targetWetMix = 0.03f;
+        m_targetDamp = 0.4f;
+    }
 }
 
 void AudioEngine::play(SoundId id, float volume, float pitch) {
@@ -236,6 +322,11 @@ void AudioEngine::play(SoundId id, float volume, float pitch) {
             m_voices[v].pitch = finalPitch;
             m_voices[v].volumeLeft = volume;
             m_voices[v].volumeRight = volume;
+            m_voices[v].lpfLeft.reset();
+            m_voices[v].lpfRight.reset();
+            m_voices[v].lpfLeft.setCutoff(20000.0f);
+            m_voices[v].lpfRight.setCutoff(20000.0f);
+            m_voices[v].isOccluded = false;
             m_voices[v].active = true;
             return;
         }
@@ -243,17 +334,42 @@ void AudioEngine::play(SoundId id, float volume, float pitch) {
 }
 
 void AudioEngine::play3D(SoundId id, const glm::vec3& worldPos, const glm::vec3& listenerPos,
-                        const glm::vec3& listenerFront, float volume) {
+                        const glm::vec3& listenerFront, float volume, const World* world) {
     if (!m_initialized || id == SoundId::None || m_masterVolume <= 0.001f || m_sfxVolume <= 0.001f) return;
 
     const glm::vec3 diff = worldPos - listenerPos;
     const float dist = glm::length(diff);
-    if (dist > 30.0f) return;
+    if (dist > 36.0f) return;
 
     // Distance attenuation
-    const float atten = 1.0f / (1.0f + 0.14f * dist * dist);
-    const float finalVol = volume * atten;
-    if (finalVol < 0.005f) return;
+    const float atten = 1.0f / (1.0f + 0.10f * dist * dist);
+    float finalVol = volume * atten;
+    if (finalVol < 0.004f) return;
+
+    // Ray-traced acoustic occlusion check
+    float occlusionWeight = 0.0f;
+    if (world && dist > 0.8f) {
+        const glm::vec3 rayDir = diff / dist;
+        for (float step = 0.6f; step < dist - 0.4f; step += 0.8f) {
+            const glm::vec3 sampleP = listenerPos + rayDir * step;
+            const int bx = static_cast<int>(std::floor(sampleP.x));
+            const int by = static_cast<int>(std::floor(sampleP.y));
+            const int bz = static_cast<int>(std::floor(sampleP.z));
+            const BlockId b = world->getBlock(bx, by, bz);
+            if (isSolid(b)) {
+                if (b == BlockId::Leaves || b == BlockId::TallGrass) {
+                    occlusionWeight += 0.3f;
+                } else if (b == BlockId::Wood || b == BlockId::Planks) {
+                    occlusionWeight += 0.6f;
+                } else {
+                    occlusionWeight += 1.0f;
+                }
+            }
+        }
+    }
+
+    const float cutoffHz = (occlusionWeight > 0.0f) ? std::max(400.0f, 20000.0f / (1.0f + occlusionWeight * 3.2f)) : 20000.0f;
+    finalVol *= 1.0f / (1.0f + occlusionWeight * 0.45f);
 
     // Stereo panning based on listener right vector
     const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
@@ -285,6 +401,11 @@ void AudioEngine::play3D(SoundId id, const glm::vec3& worldPos, const glm::vec3&
             m_voices[v].pitch = finalPitch;
             m_voices[v].volumeLeft = volL;
             m_voices[v].volumeRight = volR;
+            m_voices[v].lpfLeft.reset();
+            m_voices[v].lpfRight.reset();
+            m_voices[v].lpfLeft.setCutoff(cutoffHz);
+            m_voices[v].lpfRight.setCutoff(cutoffHz);
+            m_voices[v].isOccluded = (occlusionWeight > 0.0f);
             m_voices[v].active = true;
             return;
         }
@@ -295,20 +416,36 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
     std::fill(output, output + frameCount * channels, 0.0f);
     if (!m_initialized || m_masterVolume <= 0.001f) return;
 
+    // Smoothly slew reverberation parameters
+    {
+        std::lock_guard<std::mutex> lock(m_envMutex);
+        m_roomSize += (m_targetRoomSize - m_roomSize) * 0.005f;
+        m_reverbDamp += (m_targetDamp - m_reverbDamp) * 0.005f;
+        m_wetMix += (m_targetWetMix - m_wetMix) * 0.005f;
+
+        for (size_t i = 0; i < NUM_COMBS; ++i) {
+            m_combsL[i].feedback = m_roomSize;
+            m_combsL[i].damp = m_reverbDamp;
+            m_combsR[i].feedback = m_roomSize;
+            m_combsR[i].damp = m_reverbDamp;
+        }
+    }
+
     // 1. Background music (BGM) with smooth crossfade between Menu and In-Game
     if (m_musicVolume > 0.001f) {
         const float musicVol = m_masterVolume * m_musicVolume * 0.45f;
         const float targetMenuGain = m_inGame ? 0.0f : 1.0f;
-        const float targetGameGain = m_inGame ? 1.0f : 0.0f;
-        const float gainSlew = 1.0f / (1.0f * SAMPLE_RATE); // 1.0 second crossfade
+        const float targetGameGain = (m_inGame && !m_inBackrooms) ? 1.0f : 0.0f;
+        const float targetBackroomsGain = (m_inGame && m_inBackrooms) ? 1.0f : 0.0f;
+        const float gainSlew = 1.0f / (1.0f * SAMPLE_RATE);
 
         std::lock_guard<std::mutex> lock(m_musicMutex);
 
         const size_t menuLen = m_menuMusicPcm.size() / 2;
         const size_t gameLen = m_gameMusicPcm.size() / 2;
+        const size_t backroomsLen = m_backroomsMusicPcm.size() / 2;
 
         for (size_t f = 0; f < frameCount; ++f) {
-            // Slew gains
             if (m_menuGain < targetMenuGain) {
                 m_menuGain = std::min(targetMenuGain, m_menuGain + gainSlew);
             } else if (m_menuGain > targetMenuGain) {
@@ -321,10 +458,15 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
                 m_gameGain = std::max(targetGameGain, m_gameGain - gainSlew);
             }
 
+            if (m_backroomsGain < targetBackroomsGain) {
+                m_backroomsGain = std::min(targetBackroomsGain, m_backroomsGain + gainSlew);
+            } else if (m_backroomsGain > targetBackroomsGain) {
+                m_backroomsGain = std::max(targetBackroomsGain, m_backroomsGain - gainSlew);
+            }
+
             float left = 0.0f;
             float right = 0.0f;
 
-            // Menu Music stream
             if (m_menuGain > 0.001f && menuLen > 0) {
                 const size_t frameIdx = static_cast<size_t>(m_menuMusicPos) % menuLen;
                 const float mVol = musicVol * m_menuGain;
@@ -337,7 +479,6 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
                 }
             }
 
-            // Game Music stream
             if (m_gameGain > 0.001f && gameLen > 0) {
                 const size_t frameIdx = static_cast<size_t>(m_gameMusicPos) % gameLen;
                 const float gVol = musicVol * m_gameGain;
@@ -350,6 +491,18 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
                 }
             }
 
+            if (m_backroomsGain > 0.001f && backroomsLen > 0) {
+                const size_t frameIdx = static_cast<size_t>(m_backroomsMusicPos) % backroomsLen;
+                const float bVol = musicVol * m_backroomsGain * 1.25f;
+                left += m_backroomsMusicPcm[frameIdx * 2 + 0] * bVol;
+                right += m_backroomsMusicPcm[frameIdx * 2 + 1] * bVol;
+
+                m_backroomsMusicPos += 1.0f;
+                if (m_backroomsMusicPos >= static_cast<float>(backroomsLen)) {
+                    m_backroomsMusicPos -= static_cast<float>(backroomsLen);
+                }
+            }
+
             output[f * channels + 0] += left;
             if (channels > 1) {
                 output[f * channels + 1] += right;
@@ -357,28 +510,43 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
         }
     }
 
-    // 2. Seamless ambient wind
-    if (m_inGame && m_ambientVolume > 0.001f && !m_windLoop.empty()) {
-        const float windVol = m_masterVolume * m_ambientVolume;
-        const size_t windLen = m_windLoop.size();
-        for (size_t f = 0; f < frameCount; ++f) {
-            size_t idx = static_cast<size_t>(m_windPos);
-            float sample = m_windLoop[idx % windLen] * windVol;
-            m_windPos += 1.0f;
-            if (m_windPos >= static_cast<float>(windLen)) {
-                m_windPos -= static_cast<float>(windLen);
-            }
+    // 2. Seamless ambient wind / underwater ambience
+    if (m_inGame && m_ambientVolume > 0.001f) {
+        const float ambVol = m_masterVolume * m_ambientVolume;
 
-            output[f * channels + 0] += sample;
-            if (channels > 1) {
-                output[f * channels + 1] += sample;
+        if (m_isUnderwater && !m_underwaterLoop.empty()) {
+            const size_t underLen = m_underwaterLoop.size();
+            for (size_t f = 0; f < frameCount; ++f) {
+                size_t idx = static_cast<size_t>(m_underwaterPos);
+                float sample = m_underwaterLoop[idx % underLen] * ambVol * 0.9f;
+                m_underwaterPos += 1.0f;
+                if (m_underwaterPos >= static_cast<float>(underLen)) {
+                    m_underwaterPos -= static_cast<float>(underLen);
+                }
+                output[f * channels + 0] += sample;
+                if (channels > 1) output[f * channels + 1] += sample;
+            }
+        } else if (!m_windLoop.empty()) {
+            const size_t windLen = m_windLoop.size();
+            for (size_t f = 0; f < frameCount; ++f) {
+                size_t idx = static_cast<size_t>(m_windPos);
+                float sample = m_windLoop[idx % windLen] * ambVol;
+                m_windPos += 1.0f;
+                if (m_windPos >= static_cast<float>(windLen)) {
+                    m_windPos -= static_cast<float>(windLen);
+                }
+                output[f * channels + 0] += sample;
+                if (channels > 1) output[f * channels + 1] += sample;
             }
         }
     }
 
-    // 3. Active polyphonic SFX voices
+    // 3. Active polyphonic SFX voices + Reverb Delay Network
     if (m_sfxVolume > 0.001f) {
         const float sfxMaster = m_masterVolume * m_sfxVolume;
+        std::vector<float> reverbInL(frameCount, 0.0f);
+        std::vector<float> reverbInR(frameCount, 0.0f);
+
         std::lock_guard<std::mutex> lock(m_voiceMutex);
         for (size_t v = 0; v < MAX_VOICES; ++v) {
             Voice& voice = m_voices[v];
@@ -400,18 +568,60 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
                     break;
                 }
 
-                const float sample = sampleData[idx];
-                output[f * channels + 0] += sample * voice.volumeLeft * sfxMaster;
-                if (channels > 1) {
-                    output[f * channels + 1] += sample * voice.volumeRight * sfxMaster;
-                }
+                const float rawSample = sampleData[idx];
+                const float filteredL = voice.lpfLeft.process(rawSample);
+                const float filteredR = voice.lpfRight.process(rawSample);
+
+                const float dryL = filteredL * voice.volumeLeft * sfxMaster;
+                const float dryR = filteredR * voice.volumeRight * sfxMaster;
+
+                output[f * channels + 0] += dryL;
+                if (channels > 1) output[f * channels + 1] += dryR;
+
+                // Send to environmental reverb bus (scaled by direct gain)
+                reverbInL[f] += dryL * 0.6f;
+                reverbInR[f] += dryR * 0.6f;
 
                 voice.samplePos += voice.pitch;
             }
         }
+
+        // Process Reverb Delay Network (4 Parallel Combs + 2 Series All-Pass per channel)
+        if (m_wetMix > 0.001f) {
+            for (size_t f = 0; f < frameCount; ++f) {
+                // Comb bank L & R
+                float combOutL = 0.0f;
+                float combOutR = 0.0f;
+                for (size_t c = 0; c < NUM_COMBS; ++c) {
+                    combOutL += m_combsL[c].process(reverbInL[f]);
+                    combOutR += m_combsR[c].process(reverbInR[f]);
+                }
+
+                // Allpass cascade L & R
+                float allPassOutL = combOutL * 0.25f;
+                float allPassOutR = combOutR * 0.25f;
+                for (size_t a = 0; a < NUM_ALLPASS; ++a) {
+                    allPassOutL = m_allPassL[a].process(allPassOutL);
+                    allPassOutR = m_allPassR[a].process(allPassOutR);
+                }
+
+                output[f * channels + 0] += allPassOutL * m_wetMix;
+                if (channels > 1) output[f * channels + 1] += allPassOutR * m_wetMix;
+            }
+        }
     }
 
-    // 4. Soft limiter to prevent clipping
+    // 4. Underwater global low-pass filter
+    if (m_isUnderwater) {
+        for (size_t f = 0; f < frameCount; ++f) {
+            output[f * channels + 0] = m_underwaterFilterL.process(output[f * channels + 0]);
+            if (channels > 1) {
+                output[f * channels + 1] = m_underwaterFilterR.process(output[f * channels + 1]);
+            }
+        }
+    }
+
+    // 5. Soft limiter to prevent clipping
     for (size_t i = 0; i < frameCount * channels; ++i) {
         output[i] = std::clamp(output[i], -1.0f, 1.0f);
     }
@@ -420,7 +630,7 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
 void AudioEngine::precomputeSounds() {
     m_samples.resize(static_cast<size_t>(SoundId::Count));
 
-    // SoundId::Click (Crisp UI button click)
+    // SoundId::Click
     {
         const int n = static_cast<int>(0.022f * SAMPLE_RATE);
         std::vector<float> data(n);
@@ -434,7 +644,7 @@ void AudioEngine::precomputeSounds() {
         m_samples[static_cast<size_t>(SoundId::Click)].data = std::move(data);
     }
 
-    // SoundId::ItemPickup (Cheerful upward chime/pop)
+    // SoundId::ItemPickup
     {
         const int n = static_cast<int>(0.13f * SAMPLE_RATE);
         std::vector<float> data(n);
@@ -451,7 +661,7 @@ void AudioEngine::precomputeSounds() {
         m_samples[static_cast<size_t>(SoundId::ItemPickup)].data = std::move(data);
     }
 
-    // SoundId::StepGrass (Rustling grass step)
+    // SoundId::StepGrass
     {
         const int n = static_cast<int>(0.09f * SAMPLE_RATE);
         std::vector<float> data(n);
@@ -469,7 +679,7 @@ void AudioEngine::precomputeSounds() {
         m_samples[static_cast<size_t>(SoundId::StepGrass)].data = std::move(data);
     }
 
-    // SoundId::StepStone (Hard stone footstep)
+    // SoundId::StepStone
     {
         const int n = static_cast<int>(0.08f * SAMPLE_RATE);
         std::vector<float> data(n);
@@ -488,7 +698,7 @@ void AudioEngine::precomputeSounds() {
         m_samples[static_cast<size_t>(SoundId::StepStone)].data = std::move(data);
     }
 
-    // SoundId::StepWood (Hollow wooden step)
+    // SoundId::StepWood
     {
         const int n = static_cast<int>(0.085f * SAMPLE_RATE);
         std::vector<float> data(n);
@@ -498,363 +708,305 @@ void AudioEngine::precomputeSounds() {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
             const float freq = 290.0f - 110.0f * (t / 0.085f);
             const float env = std::exp(-t * 45.0f);
-            const float wave = std::sin(2.0f * PI * freq * t);
-            const float click = dist(rng) * 0.22f * std::exp(-t * 120.0f);
-            data[i] = (wave * 0.65f + click) * env * 0.42f;
+            const float tone = std::sin(2.0f * PI * freq * t);
+            const float noise = dist(rng) * std::exp(-t * 80.0f);
+            data[i] = (tone * 0.72f + noise * 0.28f) * env * 0.40f;
         }
         m_samples[static_cast<size_t>(SoundId::StepWood)].data = std::move(data);
     }
 
-    // SoundId::DigGrass (Crunchy grass break)
+    // SoundId::DigGrass
     {
-        const int n = static_cast<int>(0.15f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.07f * SAMPLE_RATE);
         std::vector<float> data(n);
-        std::mt19937 rng(999);
+        std::mt19937 rng(777);
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        float filter = 0.0f;
+        float lp = 0.0f;
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::pow(t / 0.15f, 0.3f) * std::exp(-t * 28.0f) * 2.2f;
+            const float env = std::exp(-t * 70.0f);
             const float noise = dist(rng);
-            filter += (noise - filter) * 0.36f;
-            const float pop = 0.32f * std::sin(2.0f * PI * 110.0f * t) * std::exp(-t * 30.0f);
-            data[i] = (filter * 0.8f + pop) * env * 0.45f;
+            lp += (noise - lp) * 0.35f;
+            data[i] = lp * env * 0.35f;
         }
         m_samples[static_cast<size_t>(SoundId::DigGrass)].data = std::move(data);
     }
 
-    // SoundId::DigStone (Rock crack / shatter)
+    // SoundId::DigStone
     {
-        const int n = static_cast<int>(0.18f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.06f * SAMPLE_RATE);
         std::vector<float> data(n);
-        std::mt19937 rng(777);
+        std::mt19937 rng(888);
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        float filter = 0.0f;
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 22.0f);
+            const float env = std::exp(-t * 110.0f);
+            const float tone = 0.6f * std::sin(2.0f * PI * 2100.0f * t) + 0.4f * std::sin(2.0f * PI * 850.0f * t);
             const float noise = dist(rng);
-            filter += (noise - filter) * 0.48f;
-            const float thud = 0.42f * std::sin(2.0f * PI * 85.0f * t) * std::exp(-t * 25.0f);
-            const float clack = 0.32f * std::sin(2.0f * PI * 820.0f * t) * std::exp(-t * 70.0f);
-            data[i] = (filter * 0.52f + thud + clack) * env * 0.50f;
+            data[i] = (tone * 0.65f + noise * 0.35f) * env * 0.42f;
         }
         m_samples[static_cast<size_t>(SoundId::DigStone)].data = std::move(data);
     }
 
-    // SoundId::DigWood (Wood splintering snap)
+    // SoundId::DigWood
     {
-        const int n = static_cast<int>(0.16f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.075f * SAMPLE_RATE);
         std::vector<float> data(n);
-        std::mt19937 rng(4321);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 26.0f);
-            const float freq = 340.0f - 180.0f * (t / 0.16f);
-            const float wave = std::sin(2.0f * PI * freq * t);
-            const float crack = dist(rng) * 0.42f * std::exp(-t * 40.0f);
-            data[i] = (wave * 0.52f + crack) * env * 0.46f;
+            const float env = std::exp(-t * 55.0f);
+            const float wave = std::sin(2.0f * PI * (380.0f - 140.0f * t) * t);
+            data[i] = wave * env * 0.40f;
         }
         m_samples[static_cast<size_t>(SoundId::DigWood)].data = std::move(data);
     }
 
-    // SoundId::PlaceBlock (Solid placement clack)
+    // SoundId::PlaceBlock
     {
         const int n = static_cast<int>(0.11f * SAMPLE_RATE);
         std::vector<float> data(n);
-        std::mt19937 rng(2024);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 38.0f);
-            const float thud = std::sin(2.0f * PI * 140.0f * t);
-            const float snap = dist(rng) * 0.38f * std::exp(-t * 110.0f);
-            data[i] = (thud * 0.62f + snap) * env * 0.44f;
+            const float env = std::exp(-t * 40.0f);
+            const float thud = std::sin(2.0f * PI * (190.0f - 90.0f * t) * t);
+            data[i] = thud * env * 0.48f;
         }
         m_samples[static_cast<size_t>(SoundId::PlaceBlock)].data = std::move(data);
     }
 
-    // SoundId::MobHurt (Fleshy punch / grunt)
+    // SoundId::MobHurt
     {
-        const int n = static_cast<int>(0.18f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.22f * SAMPLE_RATE);
         std::vector<float> data(n);
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 18.0f);
-            const float freq = 150.0f - 80.0f * (t / 0.18f);
-            const float wave = std::sin(2.0f * PI * freq * t);
-            const float distorted = std::tanh(wave * 2.2f) * 0.52f;
-            data[i] = distorted * env * 0.55f;
+            const float norm = t / 0.22f;
+            const float freq = 160.0f + 120.0f * std::sin(norm * PI * 1.5f);
+            const float env = std::sin(norm * PI) * std::exp(-norm * 2.5f);
+            const float wave = 0.5f * std::sin(2.0f * PI * freq * t) + 0.3f * std::sin(2.0f * PI * freq * 2.0f * t);
+            data[i] = wave * env * 0.55f;
         }
         m_samples[static_cast<size_t>(SoundId::MobHurt)].data = std::move(data);
     }
 
-    // SoundId::ToolBreak (Metallic snap & fracture)
+    // SoundId::ToolBreak
     {
-        const int n = static_cast<int>(0.30f * SAMPLE_RATE);
-        std::vector<float> data(n);
-        std::mt19937 rng(8888);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        for (int i = 0; i < n; ++i) {
-            const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 14.0f);
-            const float chime = 0.42f * std::sin(2.0f * PI * 1900.0f * t)
-                              + 0.28f * std::sin(2.0f * PI * 2700.0f * t);
-            const float crunch = dist(rng) * 0.42f * std::exp(-t * 22.0f);
-            data[i] = (chime + crunch) * env * 0.50f;
-        }
-        m_samples[static_cast<size_t>(SoundId::ToolBreak)].data = std::move(data);
-    }
-
-    // SoundId::PlayerHurt (Visceral punch impact + low groan/thud)
-    {
-        const int n = static_cast<int>(0.22f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.35f * SAMPLE_RATE);
         std::vector<float> data(n);
         std::mt19937 rng(999);
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 16.0f);
-            const float freq = 120.0f - 60.0f * (t / 0.22f);
-            const float thud = std::sin(2.0f * PI * freq * t);
-            const float crunch = dist(rng) * 0.35f * std::exp(-t * 30.0f);
-            data[i] = (thud * 0.75f + crunch) * env * 0.65f;
+            const float env = std::exp(-t * 12.0f);
+            const float snap = std::sin(2.0f * PI * 1200.0f * t) * std::exp(-t * 90.0f);
+            const float shatter = dist(rng) * std::exp(-t * 22.0f);
+            data[i] = (snap * 0.6f + shatter * 0.4f) * env * 0.50f;
+        }
+        m_samples[static_cast<size_t>(SoundId::ToolBreak)].data = std::move(data);
+    }
+
+    // SoundId::PlayerHurt
+    {
+        const int n = static_cast<int>(0.20f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::exp(-t * 18.0f);
+            const float oof = std::sin(2.0f * PI * (180.0f - 80.0f * t) * t);
+            data[i] = oof * env * 0.60f;
         }
         m_samples[static_cast<size_t>(SoundId::PlayerHurt)].data = std::move(data);
     }
 
-    // SoundId::PlayerEat (Crisp, crunchy bite/chew)
+    // SoundId::PlayerEat
     {
-        const int n = static_cast<int>(0.12f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.16f * SAMPLE_RATE);
         std::vector<float> data(n);
-        std::mt19937 rng(5555);
+        std::mt19937 rng(333);
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::exp(-t * 26.0f);
-            const float noise = dist(rng);
-            const float tonal = 0.3f * std::sin(2.0f * PI * 850.0f * t) + 0.2f * std::sin(2.0f * PI * 1300.0f * t);
-            data[i] = (noise * 0.7f + tonal) * env * 0.40f;
+            const float env = std::exp(-t * 35.0f);
+            const float crunch = dist(rng) * std::exp(-t * 50.0f);
+            const float chew = std::sin(2.0f * PI * 220.0f * t);
+            data[i] = (crunch * 0.7f + chew * 0.3f) * env * 0.45f;
         }
         m_samples[static_cast<size_t>(SoundId::PlayerEat)].data = std::move(data);
     }
 
-    // SoundId::PlayerBurp (Low resonant burp after full meal)
+    // SoundId::PlayerBurp
     {
-        const int n = static_cast<int>(0.35f * SAMPLE_RATE);
+        const int n = static_cast<int>(0.38f * SAMPLE_RATE);
         std::vector<float> data(n);
-        std::mt19937 rng(777);
-        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
         for (int i = 0; i < n; ++i) {
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float env = std::sin(PI * (t / 0.35f)) * std::exp(-t * 3.5f);
-            const float freq = 85.0f + 15.0f * std::sin(2.0f * PI * 12.0f * t);
-            const float pulse = std::sin(2.0f * PI * freq * t);
-            const float rattle = dist(rng) * 0.25f * (0.5f + 0.5f * std::sin(2.0f * PI * 28.0f * t));
-            data[i] = (pulse * 0.75f + rattle) * env * 0.50f;
+            const float env = std::exp(-t * 8.0f);
+            const float rumble = std::sin(2.0f * PI * (95.0f + 25.0f * std::sin(2.0f * PI * 18.0f * t)) * t);
+            data[i] = rumble * env * 0.50f;
         }
         m_samples[static_cast<size_t>(SoundId::PlayerBurp)].data = std::move(data);
     }
 
-    // Seamless ambient wind loop (~4 seconds)
+    // SoundId::WaterSplash (Dynamic fluid impact splash)
     {
-        const int n = 4 * SAMPLE_RATE;
-        m_windLoop.resize(n);
-        std::mt19937 rng(12345);
+        const int n = static_cast<int>(0.32f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        std::mt19937 rng(404);
         std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-        float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f;
+        float lp = 0.0f;
         for (int i = 0; i < n; ++i) {
-            const float white = dist(rng);
-            b0 = 0.99765f * b0 + white * 0.0990460f;
-            b1 = 0.96300f * b1 + white * 0.2965164f;
-            b2 = 0.57000f * b2 + white * 1.0526913f;
-            float pink = (b0 + b1 + b2 + white * 0.1848f) * 0.05f;
-
             const float t = static_cast<float>(i) / SAMPLE_RATE;
-            const float swell = 0.72f + 0.28f * std::sin(2.0f * PI * 0.25f * t);
-            m_windLoop[i] = pink * swell * 0.14f;
+            const float env = std::pow(t / 0.32f, 0.2f) * std::exp(-t * 14.0f);
+            const float noise = dist(rng);
+            lp += (noise - lp) * (0.6f - 0.4f * (t / 0.32f));
+            const float slap = 0.45f * std::sin(2.0f * PI * 140.0f * t) * std::exp(-t * 35.0f);
+            data[i] = (lp * 0.7f + slap) * env * 0.52f;
         }
-        const int crossfade = 2500;
-        for (int i = 0; i < crossfade; ++i) {
-            const float alpha = static_cast<float>(i) / crossfade;
-            m_windLoop[n - crossfade + i] = glm::mix(m_windLoop[n - crossfade + i], m_windLoop[i], alpha);
+        m_samples[static_cast<size_t>(SoundId::WaterSplash)].data = std::move(data);
+    }
+
+    // SoundId::WaterFlow (Soft rushing fluid stream)
+    {
+        const int n = static_cast<int>(0.45f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        std::mt19937 rng(505);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        float lp = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::sin((t / 0.45f) * PI);
+            const float noise = dist(rng);
+            lp += (noise - lp) * 0.18f;
+            data[i] = lp * env * 0.35f;
+        }
+        m_samples[static_cast<size_t>(SoundId::WaterFlow)].data = std::move(data);
+    }
+
+    // Ambient Wind Loop (10 seconds)
+    {
+        const int n = 10 * SAMPLE_RATE;
+        m_windLoop.resize(n);
+        std::mt19937 rng(101);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        float lp1 = 0.0f;
+        float lp2 = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float swell = 0.6f + 0.4f * std::sin(2.0f * PI * 0.1f * t) * std::cos(2.0f * PI * 0.035f * t);
+            const float noise = dist(rng);
+            lp1 += (noise - lp1) * 0.025f;
+            lp2 += (lp1 - lp2) * 0.015f;
+            m_windLoop[i] = lp2 * swell * 0.22f;
+        }
+    }
+
+    // Ambient Underwater Bubbling Loop (8 seconds)
+    {
+        const int n = 8 * SAMPLE_RATE;
+        m_underwaterLoop.resize(n);
+        std::mt19937 rng(202);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        float lp = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float noise = dist(rng);
+            lp += (noise - lp) * 0.008f;
+            const float bubble1 = 0.08f * std::sin(2.0f * PI * (240.0f + 30.0f * std::sin(2.0f * PI * 1.5f * t)) * t);
+            const float bubble2 = 0.06f * std::sin(2.0f * PI * (360.0f + 45.0f * std::cos(2.0f * PI * 2.2f * t)) * t);
+            m_underwaterLoop[i] = (lp * 0.6f + bubble1 + bubble2) * 0.32f;
         }
     }
 }
 
 void AudioEngine::synthesizeMenuMusic() {
-    // 16-second uplifting, cheerful title melody (Cmaj7 -> Gadd9 -> Am9 -> Fmaj7)
-    constexpr float totalSecs = 16.0f;
-    constexpr size_t totalFrames = static_cast<size_t>(totalSecs * SAMPLE_RATE);
-    std::vector<float> pcm(totalFrames * 2, 0.0f);
+    // 16-second nostalgic procedural title arpeggio
+    const int n = 16 * SAMPLE_RATE;
+    m_menuMusicPcm.assign(n * 2, 0.0f);
 
-    struct Note {
-        float freq;
-        float startTime;
-        float duration;
-        float pan; // -1.0 (L) to +1.0 (R)
-        float amp;
+    const float notes[16] = {
+        261.63f, 329.63f, 392.00f, 523.25f, // C4 - E4 - G4 - C5
+        293.66f, 349.23f, 440.00f, 587.33f, // D4 - F4 - A4 - D5
+        329.63f, 392.00f, 493.88f, 659.25f, // E4 - G4 - B4 - E5
+        261.63f, 329.63f, 392.00f, 523.25f  // C4 - E4 - G4 - C5
     };
 
-    const std::vector<Note> notes = {
-        // Section 1: Cmaj7 (0.0s - 4.0s)
-        { 130.81f, 0.0f, 3.8f,  0.0f, 0.38f }, // C3 root
-        { 196.00f, 0.2f, 3.6f, -0.3f, 0.30f }, // G3
-        { 246.94f, 0.5f, 3.2f,  0.3f, 0.28f }, // B3
-        { 329.63f, 0.9f, 2.8f,  0.1f, 0.24f }, // E4
-        { 392.00f, 1.4f, 2.3f, -0.2f, 0.22f }, // G4
-        { 493.88f, 2.0f, 1.8f,  0.2f, 0.20f }, // B4
-        { 523.25f, 2.6f, 1.3f, -0.1f, 0.18f }, // C5
+    for (int i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / SAMPLE_RATE;
+        const int noteIdx = static_cast<int>(t / 1.0f) % 16;
+        const float noteT = std::fmod(t, 1.0f);
+        const float env = std::exp(-noteT * 3.2f);
+        const float freq = notes[noteIdx];
 
-        // Section 2: Gadd9 (4.0s - 8.0s)
-        {  98.00f, 4.0f, 3.8f,  0.0f, 0.40f }, // G2 root
-        { 146.83f, 4.2f, 3.6f,  0.3f, 0.30f }, // D3
-        { 220.00f, 4.5f, 3.2f, -0.3f, 0.28f }, // A3
-        { 293.66f, 4.9f, 2.8f,  0.2f, 0.25f }, // D4
-        { 392.00f, 5.4f, 2.3f, -0.1f, 0.22f }, // G4
-        { 440.00f, 6.0f, 1.8f,  0.1f, 0.20f }, // A4
-        { 587.33f, 6.6f, 1.3f, -0.2f, 0.18f }, // D5
+        const float wave = 0.65f * std::sin(2.0f * PI * freq * t)
+                         + 0.25f * std::sin(2.0f * PI * freq * 2.0f * t)
+                         + 0.10f * std::sin(2.0f * PI * freq * 0.5f * t);
 
-        // Section 3: Am9 (8.0s - 12.0s)
-        { 110.00f, 8.0f, 3.8f,  0.0f, 0.38f }, // A2 root
-        { 164.81f, 8.2f, 3.6f, -0.3f, 0.30f }, // E3
-        { 220.00f, 8.5f, 3.2f,  0.3f, 0.28f }, // A3
-        { 261.63f, 8.9f, 2.8f, -0.2f, 0.25f }, // C4
-        { 329.63f, 9.4f, 2.3f,  0.2f, 0.22f }, // E4
-        { 493.88f, 10.0f, 1.8f, -0.1f, 0.20f }, // B4
-        { 659.25f, 10.6f, 1.3f,  0.1f, 0.18f }, // E5
-
-        // Section 4: Fmaj7 (12.0s - 16.0s)
-        {  87.31f, 12.0f, 3.8f,  0.0f, 0.40f }, // F2 root
-        { 130.81f, 12.2f, 3.6f,  0.3f, 0.30f }, // C3
-        { 174.61f, 12.5f, 3.2f, -0.3f, 0.28f }, // F3
-        { 220.00f, 12.9f, 2.8f,  0.1f, 0.25f }, // A3
-        { 329.63f, 13.4f, 2.3f, -0.2f, 0.22f }, // E4
-        { 349.23f, 14.0f, 1.8f,  0.2f, 0.20f }, // F4
-        { 523.25f, 14.6f, 1.3f, -0.1f, 0.18f }  // C5
-    };
-
-    for (const auto& note : notes) {
-        const size_t startFrame = static_cast<size_t>(note.startTime * SAMPLE_RATE);
-        const size_t noteFrames = static_cast<size_t>(note.duration * SAMPLE_RATE);
-        const float volL = note.amp * std::clamp(1.0f - note.pan * 0.6f, 0.0f, 1.0f);
-        const float volR = note.amp * std::clamp(1.0f + note.pan * 0.6f, 0.0f, 1.0f);
-
-        for (size_t f = 0; f < noteFrames; ++f) {
-            const size_t targetFrame = (startFrame + f) % totalFrames;
-            const float t = static_cast<float>(f) / SAMPLE_RATE;
-            const float env = std::sin(std::min(1.0f, t * 16.0f) * (PI * 0.5f)) * std::exp(-t * 1.15f);
-            const float harmonic1 = std::sin(2.0f * PI * note.freq * t);
-            const float harmonic2 = 0.42f * std::sin(2.0f * PI * note.freq * 2.0f * t);
-            const float harmonic3 = 0.18f * std::sin(2.0f * PI * note.freq * 3.0f * t);
-            const float wave = (harmonic1 + harmonic2 + harmonic3) * env;
-
-            pcm[targetFrame * 2 + 0] += wave * volL * 0.45f;
-            pcm[targetFrame * 2 + 1] += wave * volR * 0.45f;
-        }
+        const float sample = wave * env * 0.32f;
+        m_menuMusicPcm[i * 2 + 0] = sample;
+        m_menuMusicPcm[i * 2 + 1] = sample;
     }
-
-    // Smooth seamless loop crossfade
-    const size_t crossfadeFrames = static_cast<size_t>(1.5f * SAMPLE_RATE);
-    for (size_t f = 0; f < crossfadeFrames; ++f) {
-        const float alpha = static_cast<float>(f) / static_cast<float>(crossfadeFrames);
-        const size_t tailIdx = (totalFrames - crossfadeFrames + f) * 2;
-        const size_t headIdx = f * 2;
-        pcm[headIdx + 0] = glm::mix(pcm[headIdx + 0], pcm[tailIdx + 0], 1.0f - alpha);
-        pcm[headIdx + 1] = glm::mix(pcm[headIdx + 1], pcm[tailIdx + 1], 1.0f - alpha);
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_musicMutex);
-        m_menuMusicPcm = std::move(pcm);
-        m_menuMusicPos = 0.0f;
-        m_menuMusicLoaded = true;
-    }
-    log::info("Procedural Main Menu background music synthesized (16.0s melodic arpeggio loop)");
+    m_menuMusicLoaded = true;
 }
 
 void AudioEngine::synthesizeGameMusic() {
-    // 20-second calming, mystical ambient in-game exploration pads (D Dorian / Dm9 / G / Am)
-    constexpr float totalSecs = 20.0f;
-    constexpr size_t totalFrames = static_cast<size_t>(totalSecs * SAMPLE_RATE);
-    std::vector<float> pcm(totalFrames * 2, 0.0f);
+    // 24-second ambient exploration soundscape
+    const int n = 24 * SAMPLE_RATE;
+    m_gameMusicPcm.assign(n * 2, 0.0f);
 
-    struct Note {
-        float freq;
-        float startTime;
-        float duration;
-        float pan;
-        float amp;
-    };
+    for (int i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / SAMPLE_RATE;
+        const float chord1 = std::sin(2.0f * PI * 130.81f * t) + std::sin(2.0f * PI * 164.81f * t) + std::sin(2.0f * PI * 196.00f * t);
+        const float chord2 = std::sin(2.0f * PI * 146.83f * t) + std::sin(2.0f * PI * 174.61f * t) + std::sin(2.0f * PI * 220.00f * t);
+        const float blend = 0.5f + 0.5f * std::sin(2.0f * PI * (t / 24.0f));
+        const float pad = (chord1 * (1.0f - blend) + chord2 * blend) * 0.12f;
 
-    const std::vector<Note> notes = {
-        // Pad 1: Dm9 (0.0s - 6.5s)
-        {  73.42f, 0.0f, 6.2f,  0.0f, 0.42f }, // D2 sub
-        { 110.00f, 0.3f, 5.9f, -0.3f, 0.32f }, // A2
-        { 146.83f, 0.6f, 5.6f,  0.3f, 0.28f }, // D3
-        { 174.61f, 1.0f, 5.2f, -0.2f, 0.25f }, // F3
-        { 261.63f, 1.5f, 4.7f,  0.2f, 0.22f }, // C4
-        { 329.63f, 2.2f, 4.0f, -0.1f, 0.20f }, // E4
-        { 587.33f, 3.2f, 3.0f,  0.1f, 0.16f }, // D5 (high flute chime)
-
-        // Pad 2: Gsus2 / B (6.5s - 13.0s)
-        {  61.74f, 6.5f, 6.2f,  0.0f, 0.40f }, // B1
-        {  98.00f, 6.8f, 5.9f,  0.3f, 0.32f }, // G2
-        { 146.83f, 7.2f, 5.5f, -0.3f, 0.28f }, // D3
-        { 220.00f, 7.8f, 4.9f,  0.2f, 0.24f }, // A3
-        { 293.66f, 8.5f, 4.2f, -0.2f, 0.22f }, // D4
-        { 440.00f, 9.5f, 3.2f,  0.2f, 0.18f }, // A4
-
-        // Pad 3: Am11 (13.0s - 20.0s)
-        {  55.00f, 13.0f, 6.7f,  0.0f, 0.42f }, // A1 deep bass
-        {  82.41f, 13.3f, 6.4f, -0.3f, 0.32f }, // E2
-        { 130.81f, 13.7f, 6.0f,  0.3f, 0.28f }, // C3
-        { 196.00f, 14.3f, 5.4f, -0.2f, 0.25f }, // G3
-        { 293.66f, 15.0f, 4.7f,  0.2f, 0.22f }, // D4
-        { 329.63f, 16.0f, 3.7f, -0.1f, 0.20f }, // E4
-        { 523.25f, 17.0f, 2.7f,  0.1f, 0.16f }  // C5
-    };
-
-    for (const auto& note : notes) {
-        const size_t startFrame = static_cast<size_t>(note.startTime * SAMPLE_RATE);
-        const size_t noteFrames = static_cast<size_t>(note.duration * SAMPLE_RATE);
-        const float volL = note.amp * std::clamp(1.0f - note.pan * 0.6f, 0.0f, 1.0f);
-        const float volR = note.amp * std::clamp(1.0f + note.pan * 0.6f, 0.0f, 1.0f);
-
-        for (size_t f = 0; f < noteFrames; ++f) {
-            const size_t targetFrame = (startFrame + f) % totalFrames;
-            const float t = static_cast<float>(f) / SAMPLE_RATE;
-            // Soft slow attack and lingering release for ethereal ambient pads
-            const float env = std::sin(std::min(1.0f, t * 1.5f) * (PI * 0.5f)) * std::exp(-t * 0.45f);
-            const float lfo = 1.0f + 0.004f * std::sin(2.0f * PI * 0.4f * t); // subtle warm chorus pitch drift
-            const float harmonic1 = std::sin(2.0f * PI * (note.freq * lfo) * t);
-            const float harmonic2 = 0.25f * std::sin(2.0f * PI * (note.freq * 2.0f) * t);
-            const float harmonic3 = 0.08f * std::sin(2.0f * PI * (note.freq * 3.0f) * t);
-            const float wave = (harmonic1 + harmonic2 + harmonic3) * env;
-
-            pcm[targetFrame * 2 + 0] += wave * volL * 0.45f;
-            pcm[targetFrame * 2 + 1] += wave * volR * 0.45f;
-        }
+        m_gameMusicPcm[i * 2 + 0] = pad;
+        m_gameMusicPcm[i * 2 + 1] = pad;
     }
+    m_gameMusicLoaded = true;
+}
 
-    // Smooth seamless loop crossfade (last 2.0 seconds)
-    const size_t crossfadeFrames = static_cast<size_t>(2.0f * SAMPLE_RATE);
-    for (size_t f = 0; f < crossfadeFrames; ++f) {
-        const float alpha = static_cast<float>(f) / static_cast<float>(crossfadeFrames);
-        const size_t tailIdx = (totalFrames - crossfadeFrames + f) * 2;
-        const size_t headIdx = f * 2;
-        pcm[headIdx + 0] = glm::mix(pcm[headIdx + 0], pcm[tailIdx + 0], 1.0f - alpha);
-        pcm[headIdx + 1] = glm::mix(pcm[headIdx + 1], pcm[tailIdx + 1], 1.0f - alpha);
-    }
+void AudioEngine::synthesizeBackroomsMusic() {
+    // 32-second haunting, unsettling liminal horror ambient drone
+    const int n = 32 * SAMPLE_RATE;
+    m_backroomsMusicPcm.assign(n * 2, 0.0f);
 
-    {
-        std::lock_guard<std::mutex> lock(m_musicMutex);
-        m_gameMusicPcm = std::move(pcm);
-        m_gameMusicPos = 0.0f;
-        m_gameMusicLoaded = true;
+    for (int i = 0; i < n; ++i) {
+        const float t = static_cast<float>(i) / SAMPLE_RATE;
+
+        // 1. 60Hz Fluorescent Ballast Hum with harmonic saturation & electrical micro-jitter
+        const float humPhaseMod = 0.08f * std::sin(2.0f * PI * 7.3f * t);
+        const float hum60 = std::sin(2.0f * PI * 60.0f * t + humPhaseMod);
+        const float hum120 = 0.45f * std::sin(2.0f * PI * 120.0f * t);
+        const float hum180 = 0.25f * std::sin(2.0f * PI * 180.0f * t);
+        const float hum300 = 0.12f * std::sin(2.0f * PI * 300.0f * t);
+        const float ballastBuzz = (hum60 + hum120 + hum180 + hum300) * 0.16f;
+
+        // 2. Unsettling Dissonant Minor 2nd & Tritone Drones (D#2 = 77.78Hz, A2 = 110.0Hz, C3 = 130.81Hz, F#3 = 185.0Hz)
+        const float drone1 = std::sin(2.0f * PI * 77.78f * t);
+        const float drone2 = std::sin(2.0f * PI * 110.00f * t);
+        const float drone3 = std::sin(2.0f * PI * 130.81f * t);
+        const float drone4 = 0.6f * std::sin(2.0f * PI * 185.00f * t);
+        const float swell = 0.5f + 0.5f * std::sin(2.0f * PI * (t / 16.0f));
+        const float eeriePad = (drone1 * 0.4f + drone2 * 0.35f + drone3 * 0.25f + drone4 * swell * 0.3f) * 0.14f;
+
+        // 3. Phasing Metallic Liminal Resonance
+        const float phaseFreq = 220.0f + 18.0f * std::sin(2.0f * PI * 0.15f * t);
+        const float metallic = 0.08f * std::sin(2.0f * PI * phaseFreq * t) * (0.4f + 0.6f * std::cos(2.0f * PI * 0.08f * t));
+
+        // 4. Subtle flyback resonance / fluorescent whine (12 kHz)
+        const float whine = 0.015f * std::sin(2.0f * PI * 12400.0f * t);
+
+        const float monoSignal = ballastBuzz + eeriePad + metallic + whine;
+
+        // Subtle slow stereo panning drift
+        const float panL = 0.5f + 0.3f * std::sin(2.0f * PI * (t / 11.0f));
+        const float panR = 0.5f - 0.3f * std::sin(2.0f * PI * (t / 11.0f));
+
+        m_backroomsMusicPcm[i * 2 + 0] = monoSignal * panL * 1.35f;
+        m_backroomsMusicPcm[i * 2 + 1] = monoSignal * panR * 1.35f;
     }
-    log::info("Procedural In-Game ambient exploration music synthesized (20.0s atmospheric pad loop)");
+    m_backroomsMusicLoaded = true;
 }
 
 } // namespace vox

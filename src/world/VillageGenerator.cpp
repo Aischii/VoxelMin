@@ -20,17 +20,13 @@ uint32_t hashCoord(int x, int z, uint32_t seed) {
 }
 
 void safeSet(World& world, int x, int y, int z, BlockId b) {
-    if (x >= 0 && x < world.widthBlocks() &&
-        z >= 0 && z < world.depthBlocks() &&
-        y >= 0 && y < Chunk::H) {
+    if (y >= 0 && y < Chunk::H) {
         world.setBlock(x, y, z, b);
     }
 }
 
 BlockId safeGet(const World& world, int x, int y, int z) {
-    if (x >= 0 && x < world.widthBlocks() &&
-        z >= 0 && z < world.depthBlocks() &&
-        y >= 0 && y < Chunk::H) {
+    if (y >= 0 && y < Chunk::H) {
         return world.getBlock(x, y, z);
     }
     return BlockId::Air;
@@ -509,80 +505,61 @@ void VillageGenerator::buildVillage(World& world, int centerX, int centerZ, int 
 void VillageGenerator::locateVillages(const World& world, uint32_t seed, std::vector<Village>& outVillages) {
     outVillages.clear();
 
-    const int worldW = world.widthBlocks();
-    const int worldD = world.depthBlocks();
+    int bestX = 0;
+    int bestZ = 0;
+    int bestElevation = 0;
+    bool foundSpot = false;
 
-    if (worldW < 180 || worldD < 180) {
-        // Single central village for small worlds / menu panoramas
-        const int centerX = worldW / 2;
-        const int centerZ = worldD / 2;
-        int sy = world.surfaceHeight(centerX, centerZ);
-        if (sy < 26) sy = 28;
+    // Search outward from spawn for a wide, flat, dry land area
+    for (int r = 16; r <= 96 && !foundSpot; r += 8) {
+        for (int dz = -r; dz <= r && !foundSpot; dz += 8) {
+            for (int dx = -r; dx <= r && !foundSpot; dx += 8) {
+                if (std::abs(dx) != r && std::abs(dz) != r) continue;
 
-        const int templateType = static_cast<int>(seed % 4);
+                const int testX = dx;
+                const int testZ = dz;
 
-        Village v;
-        v.center = glm::vec3(static_cast<float>(centerX) + 0.5f,
-                             static_cast<float>(sy + 1),
-                             static_cast<float>(centerZ) + 0.5f);
-        v.radius = 32;
-        v.templateType = templateType;
-        v.name = "Panorama Pigman Village";
-        outVillages.push_back(v);
-        return;
-    }
+                // Test entire footprint (radius 18) for water/ocean avoidance
+                bool validDryArea = true;
+                int sumY = 0;
+                int samples = 0;
+                int minY = 999;
+                int maxY = -999;
 
-    // In a 512x512 world, place 4 distinct villages across the 4 world quadrants
-    const struct { float minX, maxX, minZ, maxZ; const char* name; } regions[4] = {
-        { 0.15f, 0.40f, 0.15f, 0.40f, "Oakhaven Pigman Village" },
-        { 0.60f, 0.85f, 0.15f, 0.40f, "Sunrise Pigman Hamlet" },
-        { 0.15f, 0.40f, 0.60f, 0.85f, "Riverdale Pigman Settlement" },
-        { 0.60f, 0.85f, 0.60f, 0.85f, "Highland Pigman Enclave" },
-    };
+                for (int fz = -18; fz <= 18 && validDryArea; fz += 6) {
+                    for (int fx = -18; fx <= 18 && validDryArea; fx += 6) {
+                        const int sx = testX + fx;
+                        const int sz = testZ + fz;
+                        const int sy = world.surfaceHeight(sx, sz);
+                        const BlockId b = safeGet(world, sx, sy, sz);
 
-    for (int i = 0; i < 4; ++i) {
-        const auto& r = regions[i];
-        const int regMinX = static_cast<int>(r.minX * static_cast<float>(worldW));
-        const int regMaxX = static_cast<int>(r.maxX * static_cast<float>(worldW));
-        const int regMinZ = static_cast<int>(r.minZ * static_cast<float>(worldD));
-        const int regMaxZ = static_cast<int>(r.maxZ * static_cast<float>(worldD));
+                        // Strict rejection of ocean, water, sandy coastlines, or steep cliffs
+                        if (sy < 28 || sy > 52 || b == BlockId::Water || b == BlockId::Sand) {
+                            validDryArea = false;
+                            break;
+                        }
+                        if (sy < minY) minY = sy;
+                        if (sy > maxY) maxY = sy;
+                        sumY += sy;
+                        samples++;
+                    }
+                }
 
-        const uint32_t hx = hashCoord(i, 101, seed);
-        const uint32_t hz = hashCoord(i, 202, seed);
-
-        const int spanX = std::max(1, regMaxX - regMinX);
-        const int spanZ = std::max(1, regMaxZ - regMinZ);
-        int bestX = regMinX + static_cast<int>(hx % spanX);
-        int bestZ = regMinZ + static_cast<int>(hz % spanZ);
-
-        // Search in a local window for a scenic grassy surface above water
-        int bestElevation = 0;
-        bool foundSpot = false;
-
-        for (int dz = -20; dz <= 20; dz += 10) {
-            for (int dx = -20; dx <= 20; dx += 10) {
-                int testX = std::clamp(bestX + dx, 35, worldW - 35);
-                int testZ = std::clamp(bestZ + dz, 35, worldD - 35);
-                int sy = world.surfaceHeight(testX, testZ);
-                BlockId b = safeGet(world, testX, sy, testZ);
-
-                if (sy >= 27 && sy <= 42 && b == BlockId::Grass) {
+                // If height variance is gentle and zero water in village footprint
+                if (validDryArea && samples > 0 && (maxY - minY <= 6)) {
                     bestX = testX;
                     bestZ = testZ;
-                    bestElevation = sy;
+                    bestElevation = sumY / samples;
                     foundSpot = true;
                     break;
                 }
             }
-            if (foundSpot) break;
         }
+    }
 
-        if (!foundSpot) {
-            bestElevation = world.surfaceHeight(bestX, bestZ);
-            if (bestElevation < 26) bestElevation = 28;
-        }
-
-        const int templateType = (i + static_cast<int>(seed % 4)) % 4;
+    // Only place village if a valid dry land area was located
+    if (foundSpot) {
+        const int templateType = static_cast<int>(seed % 4);
 
         Village v;
         v.center = glm::vec3(static_cast<float>(bestX) + 0.5f,
@@ -590,7 +567,7 @@ void VillageGenerator::locateVillages(const World& world, uint32_t seed, std::ve
                              static_cast<float>(bestZ) + 0.5f);
         v.radius = 36;
         v.templateType = templateType;
-        v.name = r.name;
+        v.name = "Pigman Village";
         outVillages.push_back(v);
     }
 }

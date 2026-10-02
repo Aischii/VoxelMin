@@ -34,3 +34,14 @@ Smooth camera smoothing!
 Crisp nearest-neighbor textures!
 Singleplayer Alpha!
 Build anything!
+Smooth Per-Vertex Lighting!
+Dynamic Light Gradients!
+Recipe Discovery Progression!
+Custom World Seeds & Hashes!
+Trilinear Entity Lighting!
+Light-Reactive Break Particles!
+Articulated Head Tilts!
+3x3 Crafting Workbench!
+Console Crafting Edition!
+RPG MMO Vitals Card HUD!
+8-Phase Lunar Cycle!

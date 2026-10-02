@@ -1,5 +1,6 @@
 #pragma once
 #include "world/Block.hpp"
+#include "world/ItemSlot.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -26,11 +27,11 @@ public:
 
     static bool saveGame(const std::string& path, const std::string& worldName, uint32_t seed,
                          const World& world, const Player& player,
-                         int selectedSlot, const BlockId* hotbar, const BlockId* inventory);
+                         int selectedSlot, const ItemSlot* hotbar, const ItemSlot* inventory);
 
     static bool loadGame(const std::string& path, std::string& outWorldName, uint32_t& outSeed,
                          World& world, Player& player,
-                         int& selectedSlot, BlockId* hotbar, BlockId* inventory);
+                         int& selectedSlot, ItemSlot* hotbar, ItemSlot* inventory);
 
     static bool saveExists(const std::string& path);
     static bool deleteWorld(const std::string& path);

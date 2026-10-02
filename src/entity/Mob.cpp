@@ -569,11 +569,33 @@ void Mob::update(float dt, const World& world, const glm::vec3& playerPos) {
 }
 
 void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) const {
-    const int bx = static_cast<int>(std::floor(m_position.x));
-    const int by = static_cast<int>(std::floor(m_position.y + 0.5f));
-    const int bz = static_cast<int>(std::floor(m_position.z));
-    const float light = static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f;
-    const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
+    // Trilinear smooth ambient light sampling at mob center
+    const float fx = m_position.x - 0.5f;
+    const float fy = m_position.y + 0.5f;
+    const float fz = m_position.z - 0.5f;
+    const int x0 = static_cast<int>(std::floor(fx));
+    const int y0 = static_cast<int>(std::floor(fy));
+    const int z0 = static_cast<int>(std::floor(fz));
+    const float tx = fx - static_cast<float>(x0);
+    const float ty = fy - static_cast<float>(y0);
+    const float tz = fz - static_cast<float>(z0);
+
+    float sunSum = 0.0f;
+    float torchSum = 0.0f;
+    for (int dz = 0; dz <= 1; ++dz) {
+        for (int dy = 0; dy <= 1; ++dy) {
+            for (int dx = 0; dx <= 1; ++dx) {
+                const float w = (dx ? tx : (1.0f - tx)) *
+                                (dy ? ty : (1.0f - ty)) *
+                                (dz ? tz : (1.0f - tz));
+                sunSum += static_cast<float>(world.getSunLight(x0 + dx, y0 + dy, z0 + dz)) * w;
+                torchSum += static_cast<float>(world.getBlockLight(x0 + dx, y0 + dy, z0 + dz)) * w;
+            }
+        }
+    }
+
+    const float light = sunSum / 15.0f;
+    const float torchLight = torchSum / 15.0f;
     
     // Flash vibrant red on hurt
     const float ao = (m_hurtTimer > 0.0f) ? -1.0f : 1.0f;

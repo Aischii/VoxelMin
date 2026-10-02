@@ -1,6 +1,8 @@
 #pragma once
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <string>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -65,6 +67,13 @@ enum class BlockId : uint8_t {
     CookedBeef,
     Apple,
     Bread,
+    BackroomsWallpaper,
+    BackroomsCarpet,
+    BackroomsCeiling,
+    FluorescentLight,
+    GlitchBlock,
+    ExitDoor,
+    AlmondWater,
     Count
 };
 
@@ -146,6 +155,31 @@ enum class TextureTile : uint8_t {
     Destroy7,
     Destroy8,
     Destroy9,
+    HeartFull,
+    HeartHalf,
+    HeartEmpty,
+    FoodFull,
+    FoodHalf,
+    FoodEmpty,
+    ArmorFull,
+    ArmorHalf,
+    ArmorEmpty,
+    AirBubble,
+    RecipeBook,
+    OffhandIcon,
+    HelmetIcon,
+    ChestplateIcon,
+    LeggingsIcon,
+    BootsIcon,
+    CraftingArrow,
+    SearchIcon,
+    BackroomsWallpaper,
+    BackroomsCarpet,
+    BackroomsCeiling,
+    FluorescentLight,
+    GlitchBlock,
+    ExitDoor,
+    AlmondWater,
     Count
 };
 
@@ -211,6 +245,13 @@ inline const BlockDef& blockDef(BlockId id) {
         {"Cooked Beef",      TextureTile::CookedBeef,   TextureTile::CookedBeef,   TextureTile::CookedBeef,   false},
         {"Apple",            TextureTile::Apple,        TextureTile::Apple,        TextureTile::Apple,        false},
         {"Bread",            TextureTile::Bread,        TextureTile::Bread,        TextureTile::Bread,        false},
+        {"Mono-Yellow Wallpaper", TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, true},
+        {"Moist Carpet",     TextureTile::BackroomsCarpet, TextureTile::BackroomsCarpet, TextureTile::BackroomsCarpet, true},
+        {"Acoustic Ceiling", TextureTile::BackroomsCeiling, TextureTile::BackroomsCeiling, TextureTile::BackroomsCeiling, true},
+        {"Fluorescent Light",TextureTile::FluorescentLight, TextureTile::FluorescentLight, TextureTile::FluorescentLight, true},
+        {"Reality Glitch",   TextureTile::GlitchBlock,  TextureTile::GlitchBlock,  TextureTile::GlitchBlock,  false},
+        {"Fire Exit Door",   TextureTile::ExitDoor,     TextureTile::ExitDoor,     TextureTile::ExitDoor,     false},
+        {"Almond Water",     TextureTile::AlmondWater,  TextureTile::AlmondWater,  TextureTile::AlmondWater,  false},
     };
     return defs[static_cast<int>(id)];
 }
@@ -234,6 +275,8 @@ inline BlockBounds blockBounds(BlockId id) {
             return { {0.35f, 0.15f, 0.0f}, {0.65f, 0.85f, 0.55f} };
         case BlockId::TallGrass:
             return { {0.15f, 0.0f, 0.15f}, {0.85f, 0.80f, 0.85f} };
+        case BlockId::AlmondWater:
+            return { {0.25f, 0.0f, 0.25f}, {0.75f, 0.65f, 0.75f} };
         default:
             return { {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f} };
     }
@@ -249,11 +292,25 @@ inline bool isTorch(BlockId id) {
            id == BlockId::TorchWallSouth ||
            id == BlockId::TorchWallNorth;
 }
-inline bool isTransparent(BlockId id) { return id == BlockId::Leaves || id == BlockId::Water || isTorch(id) || id == BlockId::TallGrass; }
+inline bool isTransparent(BlockId id) {
+    return id == BlockId::Leaves || id == BlockId::Water || isTorch(id) ||
+           id == BlockId::TallGrass || id == BlockId::GlitchBlock || id == BlockId::ExitDoor ||
+           id == BlockId::AlmondWater;
+}
 inline bool isOpaque(BlockId id)      { return id != BlockId::Air && !isTransparent(id) && isSolid(id); }
-inline bool isLightSource(BlockId id) { return isTorch(id); }
+inline bool isLightSource(BlockId id) { return isTorch(id) || id == BlockId::FluorescentLight || id == BlockId::GlitchBlock; }
+
+inline uint8_t emittedLight(BlockId id) {
+    if (id == BlockId::FluorescentLight) return 15;
+    if (id == BlockId::GlitchBlock) return 10;
+    if (isTorch(id)) return 14;
+    return 0;
+}
+
 inline bool isBreakable(BlockId id)   { return id != BlockId::Air && id != BlockId::Water && id != BlockId::Bedrock; }
 inline bool isPlant(BlockId id)       { return id == BlockId::TallGrass; }
+inline bool isGlitch(BlockId id)      { return id == BlockId::GlitchBlock; }
+inline bool isExitDoor(BlockId id)    { return id == BlockId::ExitDoor; }
 
 inline bool isPickaxe(BlockId id) {
     return id == BlockId::WoodPickaxe || id == BlockId::StonePickaxe ||
@@ -287,7 +344,7 @@ struct FoodProperties {
 inline bool isFood(BlockId id) {
     return id == BlockId::RawPorkchop || id == BlockId::CookedPorkchop ||
            id == BlockId::RawBeef || id == BlockId::CookedBeef ||
-           id == BlockId::Apple || id == BlockId::Bread;
+           id == BlockId::Apple || id == BlockId::Bread || id == BlockId::AlmondWater;
 }
 
 inline FoodProperties foodNutrition(BlockId id) {
@@ -298,6 +355,7 @@ inline FoodProperties foodNutrition(BlockId id) {
         case BlockId::CookedPorkchop: return {40, 20};
         case BlockId::RawBeef:        return {15, 0};
         case BlockId::CookedBeef:     return {40, 20};
+        case BlockId::AlmondWater:    return {45, 35};
         default:                      return {0, 0};
     }
 }
@@ -381,6 +439,7 @@ inline float blockHardness(BlockId id) {
         case BlockId::TorchWallWest:
         case BlockId::TorchWallSouth:
         case BlockId::TorchWallNorth:
+        case BlockId::AlmondWater:
             return 0.0f;
         case BlockId::Leaves:
             return 0.35f;
@@ -544,6 +603,13 @@ inline glm::vec3 blockColor(BlockId id) {
         case BlockId::CookedBeef:     return {0.55f, 0.28f, 0.16f};
         case BlockId::Apple:          return {0.92f, 0.15f, 0.15f};
         case BlockId::Bread:          return {0.85f, 0.62f, 0.25f};
+        case BlockId::BackroomsWallpaper: return {0.88f, 0.82f, 0.35f};
+        case BlockId::BackroomsCarpet:    return {0.68f, 0.58f, 0.38f};
+        case BlockId::BackroomsCeiling:   return {0.75f, 0.73f, 0.65f};
+        case BlockId::FluorescentLight:   return {1.00f, 0.98f, 0.85f};
+        case BlockId::GlitchBlock:        return {0.45f, 0.15f, 0.70f};
+        case BlockId::ExitDoor:           return {0.85f, 0.18f, 0.18f};
+        case BlockId::AlmondWater:        return {0.80f, 0.90f, 0.95f};
         default:                   return {1.00f, 0.00f, 1.00f};
     }
 }
@@ -556,6 +622,8 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         BlockId::Bedrock, BlockId::Water, BlockId::Torch, BlockId::CraftingTable,
         BlockId::TallGrass, BlockId::DirtPath, BlockId::CoalOre, BlockId::IronOre,
         BlockId::GoldOre, BlockId::DiamondOre,
+        BlockId::BackroomsWallpaper, BlockId::BackroomsCarpet, BlockId::BackroomsCeiling,
+        BlockId::FluorescentLight, BlockId::GlitchBlock, BlockId::ExitDoor,
         // Tools & Combat
         BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondPickaxe,
         BlockId::WoodAxe, BlockId::StoneAxe, BlockId::IronAxe, BlockId::DiamondAxe,
@@ -564,7 +632,7 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         // Materials & Food
         BlockId::Stick, BlockId::Coal, BlockId::IronIngot, BlockId::Diamond,
         BlockId::Apple, BlockId::Bread, BlockId::RawPorkchop, BlockId::CookedPorkchop,
-        BlockId::RawBeef, BlockId::CookedBeef
+        BlockId::RawBeef, BlockId::CookedBeef, BlockId::AlmondWater
     };
 
     static const std::vector<BlockId> buildingItems = {
@@ -572,7 +640,9 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         BlockId::Wood, BlockId::Planks, BlockId::Leaves, BlockId::Sand,
         BlockId::Bedrock, BlockId::Water, BlockId::Torch, BlockId::CraftingTable,
         BlockId::TallGrass, BlockId::DirtPath, BlockId::CoalOre, BlockId::IronOre,
-        BlockId::GoldOre, BlockId::DiamondOre
+        BlockId::GoldOre, BlockId::DiamondOre,
+        BlockId::BackroomsWallpaper, BlockId::BackroomsCarpet, BlockId::BackroomsCeiling,
+        BlockId::FluorescentLight, BlockId::GlitchBlock, BlockId::ExitDoor
     };
 
     static const std::vector<BlockId> toolItems = {
@@ -585,16 +655,39 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
     static const std::vector<BlockId> foodMatItems = {
         BlockId::Stick, BlockId::Coal, BlockId::IronIngot, BlockId::Diamond,
         BlockId::Apple, BlockId::Bread, BlockId::RawPorkchop, BlockId::CookedPorkchop,
-        BlockId::RawBeef, BlockId::CookedBeef
+        BlockId::RawBeef, BlockId::CookedBeef, BlockId::AlmondWater
     };
 
     switch (tab) {
-        case 1: return buildingItems;
-        case 2: return toolItems;
-        case 3: return foodMatItems;
-        case 0:
+        case 0: return buildingItems;
+        case 1: return toolItems;
+        case 2: return foodMatItems;
+        case 3: // Search tab (default to all items)
+        case 4: // All tab
         default: return allItems;
     }
+}
+
+inline std::vector<BlockId> filterCreativeCatalog(int tab, const std::string& searchQuery) {
+    const auto& base = getCreativeCatalog(tab);
+    if (searchQuery.empty()) {
+        return base;
+    }
+    std::string qLower = searchQuery;
+    for (char& c : qLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    const auto& all = getCreativeCatalog(4);
+    std::vector<BlockId> filtered;
+    filtered.reserve(all.size());
+    for (BlockId id : all) {
+        std::string name = blockDef(id).name;
+        std::string nameLower = name;
+        for (char& c : nameLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (nameLower.find(qLower) != std::string::npos) {
+            filtered.push_back(id);
+        }
+    }
+    return filtered;
 }
 
 } // namespace vox

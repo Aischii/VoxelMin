@@ -151,8 +151,8 @@ void Menu::render(Renderer& renderer, double uiTime) {
     }
 
     // --- Buttons ------------------------------------------------------------
-    const float buttonW = std::min(170.0f * uiScale, width * 0.6f);
-    const float buttonH = 14.0f * uiScale;
+    const float buttonW = std::min(180.0f * uiScale, width * 0.65f);
+    const float buttonH = 18.0f * uiScale;
     const float gap = 4.0f * uiScale;
     const float count = static_cast<float>(m_rows.size());
     const float totalH = count * buttonH + std::max(0.0f, count - 1.0f) * gap;

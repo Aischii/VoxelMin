@@ -186,6 +186,7 @@ public:
     Mesh mesh;                 // Opaque GPU geometry
     Mesh transparentMesh;      // Transparent/cutout GPU geometry
     bool dirty = true;         // needs (re)meshing
+    bool terrainGenerated = false; // base terrain noise/blocks generated
 
 private:
     int m_cx, m_cz;

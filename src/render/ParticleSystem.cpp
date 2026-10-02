@@ -4,6 +4,7 @@
 #include "world/World.hpp"
 
 #include <GL/glew.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
@@ -82,10 +83,81 @@ void ParticleSystem::spawnSmoke(const glm::vec3& pos) {
     m_particles.push_back(p);
 }
 
-void ParticleSystem::spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, uint8_t blockId, int count) {
+void ParticleSystem::spawnFallingLeaf(const glm::vec3& pos, const glm::vec3& color) {
+    if (m_particles.size() >= 1024) return;
+    Particle p;
+    p.pos = pos + glm::vec3(randF(-0.35f, 0.35f), randF(-0.1f, 0.0f), randF(-0.35f, 0.35f));
+    p.vel = glm::vec3(randF(-0.1f, 0.2f), -0.55f, randF(-0.1f, 0.1f));
+    const float cVar = randF(0.88f, 1.12f);
+    p.color = glm::vec4(color.r * cVar, color.g * cVar, color.b * cVar, 0.95f);
+    p.size = randF(0.09f, 0.14f);
+    p.maxLife = randF(4.0f, 6.5f);
+    p.life = p.maxLife;
+    p.gravity = 0.0f;
+    p.type = ParticleType::Leaf;
+    p.swayPhase = randF(0.0f, 6.28f);
+    p.swaySpeed = randF(2.0f, 3.2f);
+    p.resting = false;
+    m_particles.push_back(p);
+}
+
+void ParticleSystem::spawnHitParticles(const glm::vec3& pos, const glm::vec3& hitDir, bool isCrit, int count) {
+    if (m_particles.size() >= 1024) return;
+    for (int i = 0; i < count; ++i) {
+        Particle p;
+        p.pos = pos + glm::vec3(randF(-0.15f, 0.15f), randF(-0.15f, 0.15f), randF(-0.15f, 0.15f));
+        const glm::vec3 spread(randF(-0.6f, 0.6f), randF(-0.3f, 0.6f), randF(-0.6f, 0.6f));
+        const float speed = isCrit ? randF(3.5f, 6.5f) : randF(2.0f, 4.2f);
+        p.vel = glm::normalize(hitDir + spread) * speed;
+        if (isCrit) {
+            p.color = glm::vec4(1.0f, randF(0.85f, 1.0f), randF(0.2f, 0.4f), 1.0f); // Bright Gold/White spark
+            p.size = randF(0.08f, 0.14f);
+            p.maxLife = randF(0.25f, 0.45f);
+        } else {
+            p.color = glm::vec4(1.0f, randF(0.92f, 1.0f), randF(0.80f, 0.95f), 1.0f); // White slash flash
+            p.size = randF(0.06f, 0.10f);
+            p.maxLife = randF(0.18f, 0.32f);
+        }
+        p.life = p.maxLife;
+        p.gravity = 4.0f;
+        p.type = ParticleType::Spark;
+        p.resting = false;
+        m_particles.push_back(p);
+    }
+}
+
+void ParticleSystem::spawnBloodSplatter(const glm::vec3& pos, const glm::vec3& hitDir, int count) {
+    if (m_particles.size() >= 1024) return;
+    for (int i = 0; i < count; ++i) {
+        Particle p;
+        p.pos = pos + glm::vec3(randF(-0.12f, 0.12f), randF(-0.12f, 0.12f), randF(-0.12f, 0.12f));
+        const glm::vec3 sprayDir = hitDir + glm::vec3(randF(-0.55f, 0.55f), randF(-0.2f, 0.7f), randF(-0.55f, 0.55f));
+        const float speed = randF(1.5f, 4.0f);
+        p.vel = glm::normalize(sprayDir) * speed + glm::vec3(0.0f, randF(0.5f, 1.8f), 0.0f);
+        const float redShade = randF(0.65f, 0.95f);
+        p.color = glm::vec4(redShade, randF(0.04f, 0.12f), randF(0.06f, 0.14f), 0.95f); // Crimson blood
+        p.size = randF(0.06f, 0.12f);
+        p.maxLife = randF(0.60f, 1.8f);
+        p.life = p.maxLife;
+        p.gravity = 18.0f;
+        p.type = ParticleType::Blood;
+        p.resting = false;
+        m_particles.push_back(p);
+    }
+}
+
+void ParticleSystem::spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, uint8_t blockId,
+                                       const World& world, float sunlight, int count) {
     if (m_particles.size() >= 1024) return;
     const glm::vec3 baseCol = blockColor(static_cast<BlockId>(blockId));
     const glm::vec3 n(normal);
+
+    const int bx = static_cast<int>(std::floor(blockPos.x + n.x * 0.5f));
+    const int by = static_cast<int>(std::floor(blockPos.y + n.y * 0.5f));
+    const int bz = static_cast<int>(std::floor(blockPos.z + n.z * 0.5f));
+    const float sunLight = static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f;
+    const float blockLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
+    const float light = std::clamp(sunLight * sunlight + blockLight * (1.0f - sunLight * sunlight * 0.5f), 0.08f, 1.0f);
 
     for (int i = 0; i < count; ++i) {
         Particle p;
@@ -93,7 +165,7 @@ void ParticleSystem::spawnDigParticles(const glm::vec3& blockPos, const glm::ive
                 glm::vec3(randF(-0.35f, 0.35f), randF(-0.35f, 0.35f), randF(-0.35f, 0.35f));
         p.vel = n * randF(1.2f, 2.5f) +
                 glm::vec3(randF(-1.5f, 1.5f), randF(0.8f, 2.2f), randF(-1.5f, 1.5f));
-        const float cVar = randF(0.85f, 1.15f);
+        const float cVar = randF(0.85f, 1.15f) * light;
         p.color = glm::vec4(baseCol.r * cVar, baseCol.g * cVar, baseCol.b * cVar, 1.0f);
         p.size = randF(0.06f, 0.12f);
         p.maxLife = randF(0.30f, 0.55f);
@@ -103,16 +175,24 @@ void ParticleSystem::spawnDigParticles(const glm::vec3& blockPos, const glm::ive
     }
 }
 
-void ParticleSystem::spawnBlockBreakParticles(const glm::vec3& blockPos, uint8_t blockId, int count) {
+void ParticleSystem::spawnBlockBreakParticles(const glm::vec3& blockPos, uint8_t blockId,
+                                              const World& world, float sunlight, int count) {
     if (m_particles.size() >= 1024) return;
     const glm::vec3 baseCol = blockColor(static_cast<BlockId>(blockId));
     const glm::vec3 center = blockPos + glm::vec3(0.5f);
+
+    const int bx = static_cast<int>(std::floor(blockPos.x));
+    const int by = static_cast<int>(std::floor(blockPos.y));
+    const int bz = static_cast<int>(std::floor(blockPos.z));
+    const float sunLight = static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f;
+    const float blockLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
+    const float light = std::clamp(sunLight * sunlight + blockLight * (1.0f - sunLight * sunlight * 0.5f), 0.08f, 1.0f);
 
     for (int i = 0; i < count; ++i) {
         Particle p;
         p.pos = center + glm::vec3(randF(-0.40f, 0.40f), randF(-0.40f, 0.40f), randF(-0.40f, 0.40f));
         p.vel = glm::vec3(randF(-2.5f, 2.5f), randF(1.5f, 4.2f), randF(-2.5f, 2.5f));
-        const float cVar = randF(0.80f, 1.20f);
+        const float cVar = randF(0.80f, 1.20f) * light;
         p.color = glm::vec4(baseCol.r * cVar, baseCol.g * cVar, baseCol.b * cVar, 1.0f);
         p.size = randF(0.08f, 0.16f);
         p.maxLife = randF(0.45f, 0.85f);
@@ -124,67 +204,131 @@ void ParticleSystem::spawnBlockBreakParticles(const glm::vec3& blockPos, uint8_t
 
 void ParticleSystem::update(float dt, const World& world, const glm::vec3& playerPos) {
     m_spawnTimer += dt;
+    m_leafScanTimer += dt;
 
-    // Scan nearby blocks around player for torches to emit flame & smoke
-    if (m_spawnTimer >= 0.04f) {
+    const int px = static_cast<int>(std::floor(playerPos.x));
+    const int py = static_cast<int>(std::floor(playerPos.y));
+    const int pz = static_cast<int>(std::floor(playerPos.z));
+
+    // 1. Scan nearby blocks around player for torches to emit flame & smoke
+    if (m_spawnTimer >= 0.08f) {
         m_spawnTimer = 0.0f;
+        const int radius = 12;
 
-        const int px = static_cast<int>(std::floor(playerPos.x));
-        const int py = static_cast<int>(std::floor(playerPos.y));
-        const int pz = static_cast<int>(std::floor(playerPos.z));
-        const int radius = 14;
+        for (int i = 0; i < 48; ++i) {
+            const int wx = px + (std::rand() % (2 * radius + 1) - radius);
+            const int wz = pz + (std::rand() % (2 * radius + 1) - radius);
+            const int wy = py + (std::rand() % 13 - 6);
+            if (wy < 0 || wy >= Chunk::H) continue;
+            const BlockId blk = world.getBlock(wx, wy, wz);
+            if (isTorch(blk)) {
+                glm::vec3 torchTop(static_cast<float>(wx) + 0.5f,
+                                   static_cast<float>(wy) + 0.62f,
+                                   static_cast<float>(wz) + 0.5f);
+                if (blk == BlockId::TorchWallWest) {
+                    torchTop = glm::vec3(static_cast<float>(wx) + 0.32f,
+                                         static_cast<float>(wy) + 0.72f,
+                                         static_cast<float>(wz) + 0.5f);
+                } else if (blk == BlockId::TorchWallEast) {
+                    torchTop = glm::vec3(static_cast<float>(wx) + 0.68f,
+                                         static_cast<float>(wy) + 0.72f,
+                                         static_cast<float>(wz) + 0.5f);
+                } else if (blk == BlockId::TorchWallNorth) {
+                    torchTop = glm::vec3(static_cast<float>(wx) + 0.5f,
+                                         static_cast<float>(wy) + 0.72f,
+                                         static_cast<float>(wz) + 0.32f);
+                } else if (blk == BlockId::TorchWallSouth) {
+                    torchTop = glm::vec3(static_cast<float>(wx) + 0.5f,
+                                         static_cast<float>(wy) + 0.72f,
+                                         static_cast<float>(wz) + 0.68f);
+                }
 
-        for (int dz = -radius; dz <= radius; ++dz) {
-            for (int dx = -radius; dx <= radius; ++dx) {
-                for (int dy = -8; dy <= 8; ++dy) {
-                    const int wx = px + dx;
-                    const int wy = py + dy;
-                    const int wz = pz + dz;
-                    const BlockId blk = world.getBlock(wx, wy, wz);
-                    if (isTorch(blk)) {
-                        if (randF(0.0f, 1.0f) < 0.60f) {
-                            glm::vec3 torchTop(static_cast<float>(wx) + 0.5f,
-                                               static_cast<float>(wy) + 0.62f,
-                                               static_cast<float>(wz) + 0.5f);
-                            if (blk == BlockId::TorchWallWest) {
-                                torchTop = glm::vec3(static_cast<float>(wx) + 0.32f,
-                                                     static_cast<float>(wy) + 0.72f,
-                                                     static_cast<float>(wz) + 0.5f);
-                            } else if (blk == BlockId::TorchWallEast) {
-                                torchTop = glm::vec3(static_cast<float>(wx) + 0.68f,
-                                                     static_cast<float>(wy) + 0.72f,
-                                                     static_cast<float>(wz) + 0.5f);
-                            } else if (blk == BlockId::TorchWallNorth) {
-                                torchTop = glm::vec3(static_cast<float>(wx) + 0.5f,
-                                                     static_cast<float>(wy) + 0.72f,
-                                                     static_cast<float>(wz) + 0.32f);
-                            } else if (blk == BlockId::TorchWallSouth) {
-                                torchTop = glm::vec3(static_cast<float>(wx) + 0.5f,
-                                                     static_cast<float>(wy) + 0.72f,
-                                                     static_cast<float>(wz) + 0.68f);
-                            }
+                spawnFlame(torchTop);
+                if (randF(0.0f, 1.0f) < 0.40f) {
+                    spawnSmoke(torchTop);
+                }
+            }
+        }
+    }
 
-                            spawnFlame(torchTop);
-                            if (randF(0.0f, 1.0f) < 0.40f) {
-                                spawnSmoke(torchTop);
-                            }
-                        }
+    // 2. Falling Leaves spawner (Fourmisain-inspired canopy particles)
+    if (m_leafScanTimer >= 0.08f) {
+        m_leafScanTimer = 0.0f;
+        const int leafRadius = 18;
+
+        for (int i = 0; i < 16; ++i) {
+            const int rx = px + (std::rand() % (2 * leafRadius + 1) - leafRadius);
+            const int rz = pz + (std::rand() % (2 * leafRadius + 1) - leafRadius);
+            const int ry = py + (std::rand() % 17 - 4);
+
+            if (ry > 1 && ry < Chunk::H - 1) {
+                const BlockId blk = world.getBlock(rx, ry, rz);
+                if (blk == BlockId::Leaves) {
+                    const BlockId below = world.getBlock(rx, ry - 1, rz);
+                    if (below == BlockId::Air) {
+                        const glm::vec3 leafPos(static_cast<float>(rx) + 0.5f,
+                                                static_cast<float>(ry) - 0.05f,
+                                                static_cast<float>(rz) + 0.5f);
+                        spawnFallingLeaf(leafPos);
                     }
                 }
             }
         }
     }
 
-    // Update particles
+    // 3. Update active particles & physics
     for (auto it = m_particles.begin(); it != m_particles.end(); ) {
         it->life -= dt;
         if (it->life <= 0.0f) {
             it = m_particles.erase(it);
         } else {
-            it->vel.y -= it->gravity * dt;
-            it->pos += it->vel * dt;
-            const float progress = it->life / it->maxLife;
-            it->color.a = progress * 0.95f;
+            if (it->resting) {
+                // Fade out softly while resting on surface
+                const float progress = it->life / it->maxLife;
+                it->color.a = progress * 0.85f;
+            } else if (it->type == ParticleType::Leaf) {
+                it->swayPhase += dt * it->swaySpeed;
+                it->vel.x = std::sin(it->swayPhase) * 0.45f + 0.12f;
+                it->vel.z = std::cos(it->swayPhase * 0.85f) * 0.35f;
+                it->vel.y = -0.55f;
+                it->pos += it->vel * dt;
+
+                const int bx = static_cast<int>(std::floor(it->pos.x));
+                const int by = static_cast<int>(std::floor(it->pos.y));
+                const int bz = static_cast<int>(std::floor(it->pos.z));
+                const BlockId groundBlk = world.getBlock(bx, by, bz);
+                if (isSolid(groundBlk) || groundBlk == BlockId::Water) {
+                    it->resting = true;
+                    it->vel = glm::vec3(0.0f);
+                    it->pos.y = static_cast<float>(by + 1) + 0.02f;
+                    it->life = std::min(it->life, 1.8f);
+                }
+                const float progress = it->life / it->maxLife;
+                it->color.a = progress * 0.95f;
+            } else if (it->type == ParticleType::Blood) {
+                it->vel.y -= it->gravity * dt;
+                it->vel.x *= std::max(0.0f, 1.0f - dt * 2.2f);
+                it->vel.z *= std::max(0.0f, 1.0f - dt * 2.2f);
+                it->pos += it->vel * dt;
+
+                const int bx = static_cast<int>(std::floor(it->pos.x));
+                const int by = static_cast<int>(std::floor(it->pos.y));
+                const int bz = static_cast<int>(std::floor(it->pos.z));
+                const BlockId groundBlk = world.getBlock(bx, by, bz);
+                if (isSolid(groundBlk)) {
+                    it->resting = true;
+                    it->vel = glm::vec3(0.0f);
+                    it->pos.y = static_cast<float>(by + 1) + 0.015f;
+                    it->life = std::min(it->life, 2.2f);
+                }
+                const float progress = it->life / it->maxLife;
+                it->color.a = progress * 0.95f;
+            } else {
+                it->vel.y -= it->gravity * dt;
+                it->pos += it->vel * dt;
+                const float progress = it->life / it->maxLife;
+                it->color.a = progress * 0.95f;
+            }
             ++it;
         }
     }

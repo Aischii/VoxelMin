@@ -19,21 +19,21 @@ uint32_t hashSpawn(uint32_t a, uint32_t b, uint32_t c) {
 
 void EntityManager::spawnDefaults(const World& world, uint32_t seed) {
     clear();
+    if (world.currentDimension() == DimensionId::Backrooms) return;
 
     const int worldW = world.widthBlocks();
     const int worldD = world.depthBlocks();
 
-    // 1. Spawn Wild Passive Mobs (Pigs & Cows) across the world
-    const int targetWildMobs = (worldW <= 180) ? 20 : 72;
+    const int targetWildMobs = 24;
     int spawnedWild = 0;
 
-    for (uint32_t i = 0; i < 3000 && spawnedWild < targetWildMobs; ++i) {
+    for (uint32_t i = 0; i < 1500 && spawnedWild < targetWildMobs; ++i) {
         const uint32_t rx = hashSpawn(seed, i, 101);
         const uint32_t rz = hashSpawn(seed, i, 202);
         const uint32_t ryaw = hashSpawn(seed, i, 303);
 
-        const int x = 12 + static_cast<int>(rx % (worldW - 24));
-        const int z = 12 + static_cast<int>(rz % (worldD - 24));
+        const int x = -30 + static_cast<int>(rx % 61);
+        const int z = -30 + static_cast<int>(rz % 61);
 
         // Find true solid ground surface (probe down past leaves, logs, tall grass)
         int groundY = world.surfaceHeight(x, z);

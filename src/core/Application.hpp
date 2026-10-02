@@ -90,12 +90,23 @@ private:
     void rebuildDirtyMeshes();
     bool playerOccupies(const glm::ivec3& block) const;
     bool addItem(BlockId id, int count = 1);
+    void discoverItem(BlockId id);
+    bool isRecipeUnlocked(const ConsoleRecipeDef& recipe) const;
+    std::vector<ConsoleRecipeDef> getUnlockedRecipes(int categoryIdx) const;
     bool canCraftRecipe(int catIdx, int recIdx) const;
     bool craftSelectedRecipe();
+    void updateCraftingResult();
+    void takeCraftingResult();
+    void clearCraftingGrid();
     void toggleCreativeMode();
     void populateCreativeCatalog();
 
     static uint32_t parseSeed(const std::string& input);
+
+    // Dimensions and RPG Title Banners
+    void showTitleBanner(const std::string& title, const std::string& subtitle, float duration = 4.0f);
+    void switchDimension(DimensionId targetDim, const glm::vec3& targetPos);
+    glm::vec3 findSafeOverworldReturn(const glm::vec3& nearPos);
 
     // Day / Night cycle & Celestial lighting
     int moonPhase() const { return m_dayCount % 8; }
@@ -158,19 +169,35 @@ private:
     std::string m_pendingDeleteWorldName;
     std::string m_pendingDeleteWorldPath;
 
-    ItemSlot m_hotbar[8] = {};
-    ItemSlot m_inventory[24] = {};
+    ItemSlot m_hotbar[9] = {};
+    ItemSlot m_inventory[27] = {};
+    ItemSlot m_armor[4] = {};
+    ItemSlot m_offhand;
+    ItemSlot m_craftingSlots[9] = {};
+    ItemSlot m_craftingResult;
     ItemSlot m_heldItem;
     int m_selectedSlot = 0;
 
+    bool m_discoveredItems[static_cast<size_t>(BlockId::Count)] = {};
     int m_craftingCategory = 0;
     int m_selectedRecipe = 0;
     bool m_isCraftingTableOpen = false;
+    bool m_recipeBookOpen = false;
 
     bool m_creativeMode = false;
     int m_creativeTab = 0;
+    std::string m_creativeSearchQuery;
+    int m_creativeScrollRow = 0;
     float m_timeOfDay = 0.22f; // Starts in the morning (~08:30 AM)
     int m_dayCount = 0;
+
+    // Dimension travel & RPG title banner state
+    std::string m_bannerTitle;
+    std::string m_bannerSubtitle;
+    float m_bannerTimer = 0.0f;
+    float m_bannerDuration = 4.0f;
+    float m_dimensionCooldown = 0.0f;
+    glm::vec3 m_overworldReturnPos{0.5f, 65.0f, 0.5f};
 
     // Mining / Block breaking state
     bool m_isMining = false;
@@ -182,6 +209,9 @@ private:
     float m_eatingTimer = 0.0f;
     float m_eatSoundTimer = 0.0f;
 
+    // Simulation ticks
+    float m_fluidTickTimer = 0.0f;
+    float m_ecologyTickTimer = 0.0f;
 
     RayHit m_target;
     double m_lastTime = 0.0;
@@ -196,6 +226,7 @@ private:
     int m_guiScale = 0; // 0 = auto, otherwise a fixed multiplier (1..4)
     bool m_vsync = true;
     bool m_fullscreen = false;
+    bool m_viewBobbing = true;
     float m_masterVolume = 0.8f;
     float m_sfxVolume = 0.8f;
     float m_ambientVolume = 0.35f;

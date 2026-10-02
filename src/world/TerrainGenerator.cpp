@@ -1,6 +1,7 @@
 #include "world/TerrainGenerator.hpp"
 #include "world/Block.hpp"
 #include "world/Chunk.hpp"
+#include "world/FastNoiseLite.hpp"
 #include "world/VillageGenerator.hpp"
 #include "world/World.hpp"
 
@@ -9,6 +10,79 @@
 #include <cstdlib>
 
 namespace vox {
+
+namespace {
+
+FastNoiseLite makeContinentalnessNoise(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 101));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    fnl.SetFractalType(FastNoiseLite::FractalType_FBm);
+    fnl.SetFractalOctaves(4);
+    fnl.SetFractalLacunarity(2.0f);
+    fnl.SetFractalGain(0.5f);
+    fnl.SetFrequency(0.0030f);
+    return fnl;
+}
+
+FastNoiseLite makeErosionNoise(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 202));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    fnl.SetFractalType(FastNoiseLite::FractalType_FBm);
+    fnl.SetFractalOctaves(3);
+    fnl.SetFractalLacunarity(2.0f);
+    fnl.SetFractalGain(0.5f);
+    fnl.SetFrequency(0.0070f);
+    return fnl;
+}
+
+FastNoiseLite makePeaksNoise(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 777));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    fnl.SetFractalType(FastNoiseLite::FractalType_Ridged);
+    fnl.SetFractalOctaves(3);
+    fnl.SetFractalLacunarity(2.0f);
+    fnl.SetFractalGain(0.55f);
+    fnl.SetFrequency(0.012f);
+    return fnl;
+}
+
+FastNoiseLite makeDetailNoise(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 303));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    fnl.SetFractalType(FastNoiseLite::FractalType_FBm);
+    fnl.SetFractalOctaves(3);
+    fnl.SetFractalLacunarity(2.0f);
+    fnl.SetFractalGain(0.5f);
+    fnl.SetFrequency(0.024f);
+    return fnl;
+}
+
+FastNoiseLite makeRiverNoise(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 404));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    fnl.SetFrequency(0.0035f);
+    return fnl;
+}
+
+FastNoiseLite makeCaveNoise1(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 501));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    fnl.SetFractalType(FastNoiseLite::FractalType_FBm);
+    fnl.SetFractalOctaves(2);
+    fnl.SetFrequency(0.045f);
+    return fnl;
+}
+
+FastNoiseLite makeCaveNoise2(uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed + 607));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    fnl.SetFractalType(FastNoiseLite::FractalType_FBm);
+    fnl.SetFractalOctaves(2);
+    fnl.SetFrequency(0.045f);
+    return fnl;
+}
+
+} // namespace
 
 float TerrainGenerator::hash2(int x, int z, uint32_t seed) {
     uint32_t h = static_cast<uint32_t>(x) * 374761393U +
@@ -20,58 +94,156 @@ float TerrainGenerator::hash2(int x, int z, uint32_t seed) {
 }
 
 float TerrainGenerator::valueNoise(float x, float z, uint32_t seed) {
-    const int xi = static_cast<int>(std::floor(x));
-    const int zi = static_cast<int>(std::floor(z));
-    const float xf = x - static_cast<float>(xi);
-    const float zf = z - static_cast<float>(zi);
-
-    const float u = xf * xf * (3.0f - 2.0f * xf);
-    const float v = zf * zf * (3.0f - 2.0f * zf);
-
-    const float a = hash2(xi, zi, seed);
-    const float b = hash2(xi + 1, zi, seed);
-    const float c = hash2(xi, zi + 1, seed);
-    const float d = hash2(xi + 1, zi + 1, seed);
-
-    const float top = a + (b - a) * u;
-    const float bottom = c + (d - c) * u;
-    return top + (bottom - top) * v;
+    FastNoiseLite fnl(static_cast<int>(seed));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    fnl.SetFrequency(0.02f);
+    return (fnl.GetNoise(x, z) + 1.0f) * 0.5f;
 }
 
 float TerrainGenerator::fbm(float x, float z, uint32_t seed) {
-    float total = 0.0f;
-    float amplitude = 1.0f;
-    float frequency = 1.0f;
-    float maxValue = 0.0f;
-
-    for (int octave = 0; octave < 4; ++octave) {
-        total += valueNoise(x * frequency, z * frequency, seed + static_cast<uint32_t>(octave) * 1013U) * amplitude;
-        maxValue += amplitude;
-        amplitude *= 0.5f;
-        frequency *= 2.0f;
-    }
-    return total / maxValue;
+    FastNoiseLite fnl(static_cast<int>(seed));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    fnl.SetFractalType(FastNoiseLite::FractalType_FBm);
+    fnl.SetFractalOctaves(4);
+    fnl.SetFrequency(0.02f);
+    return (fnl.GetNoise(x, z) + 1.0f) * 0.5f;
 }
 
-void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const {
+float TerrainGenerator::hash3(int x, int y, int z, uint32_t seed) {
+    uint32_t h = static_cast<uint32_t>(x) * 374761393U +
+                 static_cast<uint32_t>(y) * 668265263U +
+                 static_cast<uint32_t>(z) * 1274126177U +
+                 seed * 362437U;
+    h = (h ^ (h >> 13)) * 1274126177U;
+    h ^= h >> 16;
+    return static_cast<float>(h & 0xFFFFFFu) / static_cast<float>(0xFFFFFFu);
+}
+
+float TerrainGenerator::noise3D(float x, float y, float z, uint32_t seed) {
+    FastNoiseLite fnl(static_cast<int>(seed));
+    fnl.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    fnl.SetFrequency(0.05f);
+    return (fnl.GetNoise(x, y, z) + 1.0f) * 0.5f;
+}
+
+float TerrainGenerator::sampleContinentalness(float wx, float wz, uint32_t seed) {
+    FastNoiseLite fnl = makeContinentalnessNoise(seed);
+    return (fnl.GetNoise(wx, wz) + 1.0f) * 0.5f;
+}
+
+float TerrainGenerator::sampleRiver(float wx, float wz, uint32_t seed) {
+    FastNoiseLite fnl = makeRiverNoise(seed);
+    const float r1 = (fnl.GetNoise(wx, wz) + 1.0f) * 0.5f;
+    const float r2 = (fnl.GetNoise(wx + 89.0f, wz + 89.0f) + 1.0f) * 0.5f;
+    return std::abs(r1 - r2);
+}
+
+float TerrainGenerator::sampleTerrainHeight(float wx, float wz, uint32_t seed, WorldType type) {
+    if (type == WorldType::Flat) {
+        return 4.0f;
+    }
+
+    FastNoiseLite fnlCont = makeContinentalnessNoise(seed);
+    FastNoiseLite fnlErosion = makeErosionNoise(seed);
+    FastNoiseLite fnlPeaks = makePeaksNoise(seed);
+    FastNoiseLite fnlDetail = makeDetailNoise(seed);
+
+    if (type == WorldType::Island) {
+        const float n = (fnlDetail.GetNoise(wx, wz) + 1.0f) * 0.5f;
+        float rawH = 32.0f + n * 18.0f;
+        const float dist = std::sqrt(wx * wx + wz * wz) / 240.0f;
+        const float mask = std::clamp((1.0f - dist) * 1.5f, 0.0f, 1.0f);
+        return std::clamp(14.0f + (rawH - 14.0f) * mask, 1.0f, static_cast<float>(Chunk::H - 4));
+    }
+
+    if (type == WorldType::Mountainous) {
+        const float n = (fnlCont.GetNoise(wx, wz) + 1.0f) * 0.5f;
+        const float ridge = (fnlPeaks.GetNoise(wx, wz) + 1.0f) * 0.5f;
+        return std::clamp(28.0f + n * 22.0f + ridge * ridge * 26.0f, 1.0f, static_cast<float>(Chunk::H - 4));
+    }
+
+    if (type == WorldType::Cavernous) {
+        const float n = (fnlDetail.GetNoise(wx, wz) + 1.0f) * 0.5f;
+        return std::clamp(26.0f + n * 18.0f, 1.0f, static_cast<float>(Chunk::H - 4));
+    }
+
+    // --- WorldType::Default: Multi-Biome Continuous World Generation (Deep & High) ---
+    const float cont = (fnlCont.GetNoise(wx, wz) + 1.0f) * 0.5f;
+    const float erosion = (fnlErosion.GetNoise(wx, wz) + 1.0f) * 0.5f;
+    const float detail = (fnlDetail.GetNoise(wx, wz) + 1.0f) * 0.5f;
+
+    float rawH = 26.0f;
+
+    if (cont < 0.30f) {
+        // 1. Lake & Deep Ocean Basins (Deep depressions down to Y=10 below sea level 26)
+        const float depth = (0.30f - cont) / 0.30f;
+        rawH = 10.0f + (1.0f - depth) * 15.0f + (detail - 0.5f) * 4.0f;
+    } else if (cont < 0.38f) {
+        // 2. Coastal Shoreline & Sandy Beaches (Y=25-28)
+        const float t = (cont - 0.30f) / 0.08f;
+        rawH = 25.0f + t * 3.0f + (detail - 0.5f) * 2.0f;
+    } else if (cont < 0.62f) {
+        // 3. Lowland Plains & Forests (Rolling meadows and hills, Y=28-37)
+        const float t = (cont - 0.38f) / 0.24f;
+        rawH = 28.0f + t * 9.0f + (detail - 0.5f) * 6.0f * (1.0f - erosion * 0.4f);
+    } else if (cont < 0.76f) {
+        // 4. Highlands & Elevated Plateaus (Y=37-51)
+        const float t = (cont - 0.62f) / 0.14f;
+        rawH = 37.0f + t * 14.0f + (detail - 0.5f) * 6.0f;
+    } else {
+        // 5. High Mountains & Alpine Peaks (Towering peaks up to Y=76)
+        const float t = (cont - 0.76f) / 0.24f;
+        float ridge = (fnlPeaks.GetNoise(wx, wz) + 1.0f) * 0.5f;
+        ridge = ridge * ridge;
+        rawH = 51.0f + t * 11.0f + ridge * 14.0f + (detail - 0.5f) * 4.0f;
+    }
+
+    // 6. Meandering Rivers (carved smoothly through landforms)
+    if (cont >= 0.30f) {
+        const float riverVal = sampleRiver(wx, wz, seed);
+        const float riverWidth = 0.024f;
+        if (riverVal < riverWidth) {
+            float riverFactor = 1.0f - (riverVal / riverWidth);
+            riverFactor = riverFactor * riverFactor * (3.0f - 2.0f * riverFactor);
+            const float riverBedH = 21.0f + (detail - 0.5f) * 3.0f;
+            rawH = glm::mix(rawH, riverBedH, riverFactor * 0.90f);
+        }
+    }
+
+    return std::clamp(rawH, 1.0f, static_cast<float>(Chunk::H - 4));
+}
+
+void TerrainGenerator::plantTreeInChunk(Chunk& chunk, int originX, int originZ, int x, int groundY, int z, float cont) const {
     const float styleRoll = hash2(x, z, m_seed + 1337);
     const float varRoll = hash2(x, z, m_seed + 9821);
 
-    auto putLeaf = [&](int lx, int ly, int lz) {
-        if (ly >= 0 && ly < Chunk::H && lx >= 0 && lx < world.widthBlocks() && lz >= 0 && lz < world.depthBlocks()) {
-            if (world.getBlock(lx, ly, lz) == BlockId::Air) {
-                world.setBlock(lx, ly, lz, BlockId::Leaves);
+    auto putLeaf = [&](int bx, int by, int bz) {
+        if (by >= 0 && by < Chunk::H) {
+            const int lx = bx - originX;
+            const int lz = bz - originZ;
+            if (lx >= 0 && lx < Chunk::W && lz >= 0 && lz < Chunk::D) {
+                if (chunk.get(lx, by, lz) == BlockId::Air) {
+                    chunk.set(lx, by, lz, BlockId::Leaves);
+                }
             }
         }
     };
 
-    auto putLog = [&](int lx, int ly, int lz) {
-        if (ly >= 0 && ly < Chunk::H && lx >= 0 && lx < world.widthBlocks() && lz >= 0 && lz < world.depthBlocks()) {
-            world.setBlock(lx, ly, lz, BlockId::Wood);
+    auto putLog = [&](int bx, int by, int bz) {
+        if (by >= 0 && by < Chunk::H) {
+            const int lx = bx - originX;
+            const int lz = bz - originZ;
+            if (lx >= 0 && lx < Chunk::W && lz >= 0 && lz < Chunk::D) {
+                chunk.set(lx, by, lz, BlockId::Wood);
+            }
         }
     };
 
-    if (styleRoll < 0.20f) {
+    // Highlands and Mountain zones favor tall conical spruce / pine trees
+    const bool isHighAltitude = (cont >= 0.65f);
+    const bool usePine = isHighAltitude ? (styleRoll < 0.75f) : (styleRoll < 0.20f);
+
+    if (usePine) {
         // --- 1. Conical Pine / Spruce Tree (Tiered silhouette) ---
         const int trunk = 6 + static_cast<int>(varRoll * 3.0f); // Height 6-8
         for (int i = 1; i <= trunk; ++i) {
@@ -79,7 +251,6 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
         }
         const int topY = groundY + trunk;
 
-        // Tiered pine foliage
         // Tier 1 (bottom wide ring)
         for (int dx = -2; dx <= 2; ++dx) {
             for (int dz = -2; dz <= 2; ++dz) {
@@ -96,7 +267,7 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
         // Tier 3 (mid wide ring)
         for (int dx = -2; dx <= 2; ++dx) {
             for (int dz = -2; dz <= 2; ++dz) {
-                if (std::abs(dx) + std::abs(dz) > 2) continue; // Diamond/cross
+                if (std::abs(dx) + std::abs(dz) > 2) continue;
                 putLeaf(x + dx, topY - 2, z + dz);
             }
         }
@@ -109,7 +280,7 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
         // Top cross around trunk top
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dz = -1; dz <= 1; ++dz) {
-                if (dx == 0 && dz == 0) continue; // Trunk is here
+                if (dx == 0 && dz == 0) continue;
                 putLeaf(x + dx, topY, z + dz);
             }
         }
@@ -119,18 +290,16 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
         putLeaf(x - 1, topY + 1, z);
         putLeaf(x, topY + 1, z + 1);
         putLeaf(x, topY + 1, z - 1);
-        // Spire tip
         putLeaf(x, topY + 2, z);
 
-    } else if (styleRoll < 0.45f) {
+    } else if (styleRoll < 0.48f) {
         // --- 2. Tall Forest Oak (Tall trunk, large round canopy) ---
-        const int trunk = 6 + static_cast<int>(varRoll * 3.0f); // Height 6-8
+        const int trunk = 6 + static_cast<int>(varRoll * 3.0f);
         for (int i = 1; i <= trunk; ++i) {
             putLog(x, groundY + i, z);
         }
         const int topY = groundY + trunk;
 
-        // Big spherical canopy
         for (int dy = -3; dy <= 2; ++dy) {
             int radius = 2;
             if (dy == -3 || dy == 1) radius = 2;
@@ -138,9 +307,8 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
 
             for (int dx = -radius; dx <= radius; ++dx) {
                 for (int dz = -radius; dz <= radius; ++dz) {
-                    if (dy <= 0 && dx == 0 && dz == 0) continue; // Keep trunk inside
+                    if (dy <= 0 && dx == 0 && dz == 0) continue;
                     if (radius == 2 && std::abs(dx) == 2 && std::abs(dz) == 2) {
-                        // Soften corners
                         if (hash2(x + dx, z + dz, m_seed + static_cast<uint32_t>(dy) * 31) > 0.4f) continue;
                     }
                     if (dy == 2 && std::abs(dx) == 1 && std::abs(dz) == 1) continue;
@@ -148,13 +316,12 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
                 }
             }
         }
-        // Ensure direct top cap
         putLeaf(x, topY + 1, z);
         putLeaf(x, topY + 2, z);
 
-    } else if (styleRoll < 0.65f) {
+    } else if (styleRoll < 0.70f) {
         // --- 3. Short Bushy / Apple Tree (Dense low canopy) ---
-        const int trunk = 3 + static_cast<int>(varRoll * 2.0f); // Height 3-4
+        const int trunk = 3 + static_cast<int>(varRoll * 2.0f);
         for (int i = 1; i <= trunk; ++i) {
             putLog(x, groundY + i, z);
         }
@@ -175,19 +342,17 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
 
     } else {
         // --- 4. Classic Oak Tree (Varied height 4-6, balanced rounded canopy) ---
-        const int trunk = 4 + static_cast<int>(varRoll * 3.0f); // Height 4-6
+        const int trunk = 4 + static_cast<int>(varRoll * 3.0f);
         for (int i = 1; i <= trunk; ++i) {
             putLog(x, groundY + i, z);
         }
         const int topY = groundY + trunk;
 
-        // Base layers (dy = -2 and -1): 5x5 with cut corners
         for (int dy = -2; dy <= -1; ++dy) {
             for (int dx = -2; dx <= 2; ++dx) {
                 for (int dz = -2; dz <= 2; ++dz) {
                     if (dx == 0 && dz == 0) continue;
                     if (std::abs(dx) == 2 && std::abs(dz) == 2) {
-                        // Natural irregular corner trimming
                         if (hash2(x + dx, z + dz, m_seed + static_cast<uint32_t>(dy) * 17) > 0.5f) continue;
                     }
                     putLeaf(x + dx, topY + dy, z + dz);
@@ -195,7 +360,6 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
             }
         }
 
-        // Mid layer (dy = 0, level with top of trunk): 3x3 + side puffs
         for (int dx = -2; dx <= 2; ++dx) {
             for (int dz = -2; dz <= 2; ++dz) {
                 if (dx == 0 && dz == 0) continue;
@@ -204,7 +368,6 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
             }
         }
 
-        // Upper layer (dy = 1, directly over trunk): 3x3 with trimmed corners, center leaf present!
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dz = -1; dz <= 1; ++dz) {
                 if (std::abs(dx) == 1 && std::abs(dz) == 1) {
@@ -214,7 +377,6 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
             }
         }
 
-        // Top crown (dy = 2): cross shape
         putLeaf(x, topY + 2, z);
         if (varRoll > 0.4f) {
             putLeaf(x + 1, topY + 2, z);
@@ -225,208 +387,113 @@ void TerrainGenerator::plantTree(World& world, int x, int groundY, int z) const 
     }
 }
 
-float TerrainGenerator::hash3(int x, int y, int z, uint32_t seed) {
-    uint32_t h = static_cast<uint32_t>(x) * 374761393U +
-                 static_cast<uint32_t>(y) * 668265263U +
-                 static_cast<uint32_t>(z) * 1274126177U +
-                 seed * 362437U;
-    h = (h ^ (h >> 13)) * 1274126177U;
-    h ^= h >> 16;
-    return static_cast<float>(h & 0xFFFFFFu) / static_cast<float>(0xFFFFFFu);
-}
+void TerrainGenerator::generateChunk(World& world, Chunk& chunk, WorldType type) const {
+    (void)world;
+    const int ox = chunk.originX();
+    const int oz = chunk.originZ();
 
-float TerrainGenerator::noise3D(float x, float y, float z, uint32_t seed) {
-    const int xi = static_cast<int>(std::floor(x));
-    const int yi = static_cast<int>(std::floor(y));
-    const int zi = static_cast<int>(std::floor(z));
-    const float xf = x - static_cast<float>(xi);
-    const float yf = y - static_cast<float>(yi);
-    const float zf = z - static_cast<float>(zi);
+    const int seaLevel = (type == WorldType::Flat) ? 0 : 26;
+    const float caveThreshold = (type == WorldType::Cavernous) ? 0.025f : 0.012f;
 
-    const float u = xf * xf * (3.0f - 2.0f * xf);
-    const float v = yf * yf * (3.0f - 2.0f * yf);
-    const float w = zf * zf * (3.0f - 2.0f * zf);
+    FastNoiseLite cave1 = makeCaveNoise1(m_seed);
+    FastNoiseLite cave2 = makeCaveNoise2(m_seed);
 
-    const float c000 = hash3(xi, yi, zi, seed);
-    const float c100 = hash3(xi + 1, yi, zi, seed);
-    const float c010 = hash3(xi, yi + 1, zi, seed);
-    const float c110 = hash3(xi + 1, yi + 1, zi, seed);
-    const float c001 = hash3(xi, yi, zi + 1, seed);
-    const float c101 = hash3(xi + 1, yi, zi + 1, seed);
-    const float c011 = hash3(xi, yi + 1, zi + 1, seed);
-    const float c111 = hash3(xi + 1, yi + 1, zi + 1, seed);
+    // 1. Carve terrain & voxel columns for this chunk
+    for (int lz = 0; lz < Chunk::D; ++lz) {
+        const int wz = oz + lz;
+        for (int lx = 0; lx < Chunk::W; ++lx) {
+            const int wx = ox + lx;
 
-    const float c00 = c000 + (c100 - c000) * u;
-    const float c10 = c010 + (c110 - c010) * u;
-    const float c01 = c001 + (c101 - c001) * u;
-    const float c11 = c011 + (c111 - c011) * u;
-
-    const float c0 = c00 + (c10 - c00) * v;
-    const float c1 = c01 + (c11 - c01) * v;
-
-    return c0 + (c1 - c0) * w;
-}
-
-void TerrainGenerator::generate(World& world, const ProgressCallback& onProgress) const {
-    const int width = world.widthBlocks();
-    const int depth = world.depthBlocks();
-
-    if (onProgress) onProgress(0.05f, "Carving terrain & surface topography...");
-
-    // World type characteristics
-    int seaLevel = 26;
-    float heightScale = 18.0f;
-    float baseHeight = 24.0f;
-    float caveThreshold = 0.012f;
-
-    if (m_type == WorldType::Flat) {
-        seaLevel = 0;
-        baseHeight = 4.0f;
-        heightScale = 0.0f;
-    } else if (m_type == WorldType::Mountainous) {
-        seaLevel = 22;
-        baseHeight = 28.0f;
-        heightScale = 36.0f;
-    } else if (m_type == WorldType::Cavernous) {
-        seaLevel = 24;
-        baseHeight = 26.0f;
-        heightScale = 16.0f;
-        caveThreshold = 0.025f;
-    } else if (m_type == WorldType::Island) {
-        seaLevel = 28;
-        baseHeight = 32.0f;
-        heightScale = 14.0f;
-    } else {
-        // Default seeded characteristics
-        const float typeRoll = hash2(0, 0, m_seed + 7777);
-        seaLevel = (typeRoll < 0.25f) ? 24 : ((typeRoll < 0.50f) ? 27 : 26);
-        heightScale = (typeRoll < 0.25f) ? 14.0f : ((typeRoll < 0.50f) ? 22.0f : 18.0f);
-        baseHeight = (typeRoll < 0.25f) ? 26.0f : ((typeRoll < 0.50f) ? 22.0f : 24.0f);
-    }
-
-    const float centerX = static_cast<float>(width) * 0.5f;
-    const float centerZ = static_cast<float>(depth) * 0.5f;
-    const float maxRadius = static_cast<float>(width) * 0.46f;
-
-    for (int z = 0; z < depth; ++z) {
-        if (onProgress && (z % 64 == 0)) {
-            float p = 0.05f + 0.45f * (static_cast<float>(z) / static_cast<float>(depth));
-            onProgress(p, "Carving terrain & subterranean layers...");
-        }
-
-        for (int x = 0; x < width; ++x) {
-            int height = 4;
-
-            if (m_type == WorldType::Flat) {
-                height = 4;
-            } else {
-                const float n = fbm(static_cast<float>(x) * 0.032f, static_cast<float>(z) * 0.032f, m_seed);
-                float rawH = baseHeight + n * heightScale;
-
-                if (m_type == WorldType::Island) {
-                    const float dx = static_cast<float>(x) - centerX;
-                    const float dz = static_cast<float>(z) - centerZ;
-                    const float dist = std::sqrt(dx * dx + dz * dz) / maxRadius;
-                    const float mask = std::clamp((1.0f - dist) * 1.5f, 0.0f, 1.0f);
-                    rawH = 16.0f + (rawH - 16.0f) * mask;
-                }
-
-                height = static_cast<int>(rawH);
-                height = std::clamp(height, 1, Chunk::H - 3);
-            }
+            const float fHeight = sampleTerrainHeight(static_cast<float>(wx), static_cast<float>(wz), m_seed, type);
+            const int height = std::clamp(static_cast<int>(std::floor(fHeight)), 1, Chunk::H - 3);
+            const float cont = sampleContinentalness(static_cast<float>(wx), static_cast<float>(wz), m_seed);
 
             const int maxY = std::max(height, seaLevel);
 
             for (int y = 0; y <= maxY; ++y) {
                 if (y == 0) {
-                    world.setBlock(x, y, z, BlockId::Bedrock);
+                    chunk.set(lx, y, lz, BlockId::Bedrock);
                     continue;
                 }
 
                 if (y > height) {
-                    // Water layer filling up to sea level
-                    world.setBlock(x, y, z, BlockId::Water);
+                    chunk.set(lx, y, lz, BlockId::Water);
                     continue;
                 }
 
-                // Sub-surface and surface block determination
                 BlockId block;
-                const bool isBeach = (height <= seaLevel + 1 && m_type != WorldType::Flat);
+                const bool isBeach = (height <= seaLevel + 1 && type != WorldType::Flat);
+                const bool isMountainPeak = (height >= 56 && cont >= 0.76f && type != WorldType::Flat);
 
                 if (y == height) {
-                    block = isBeach ? BlockId::Sand : BlockId::Grass;
+                    if (isBeach) {
+                        block = BlockId::Sand;
+                    } else if (isMountainPeak) {
+                        block = BlockId::Stone; // Rocky mountain summits
+                    } else {
+                        block = BlockId::Grass;
+                    }
                 } else if (y >= height - 3) {
-                    block = isBeach ? BlockId::Sand : BlockId::Dirt;
+                    if (isBeach) {
+                        block = BlockId::Sand;
+                    } else if (isMountainPeak) {
+                        block = BlockId::Cobblestone;
+                    } else {
+                        block = BlockId::Dirt;
+                    }
                 } else {
-                    // Underground stone & mineral ores
-                    const float coalRoll = hash3(x, y, z, m_seed + 101);
-                    const float ironRoll = hash3(x, y, z, m_seed + 102);
-                    const float goldRoll = hash3(x, y, z, m_seed + 103);
-                    const float diaRoll = hash3(x, y, z, m_seed + 104);
-
-                    if (y < 12 && diaRoll > 0.988f) {
+                    const float oreRoll = hash3(wx, y, wz, m_seed + 101);
+                    if (y < 12 && oreRoll > 0.988f) {
                         block = BlockId::DiamondOre;
-                    } else if (y < 22 && goldRoll > 0.980f) {
+                    } else if (y < 22 && oreRoll > 0.978f) {
                         block = BlockId::GoldOre;
-                    } else if (y < 38 && ironRoll > 0.965f) {
+                    } else if (y < 38 && oreRoll > 0.940f) {
                         block = BlockId::IronOre;
-                    } else if (coalRoll > 0.950f) {
+                    } else if (oreRoll > 0.880f) {
                         block = BlockId::CoalOre;
                     } else {
                         block = BlockId::Stone;
                     }
                 }
 
-                // 3D Cave generation (worm tunnels & caverns)
-                if (m_type != WorldType::Flat && y >= 4 && y < height - 3) {
-                    const float nx = static_cast<float>(x) * 0.065f;
-                    const float ny = static_cast<float>(y) * 0.085f;
-                    const float nz = static_cast<float>(z) * 0.065f;
-                    const float c1 = noise3D(nx, ny, nz, m_seed + 501);
-                    const float c2 = noise3D(nx, ny, nz, m_seed + 607);
+                // 3D Caves (Noodle caverns & cheese caves)
+                if (type != WorldType::Flat && y >= 4 && y < height - 3) {
+                    const float c1 = (cave1.GetNoise(static_cast<float>(wx), static_cast<float>(y) * 1.25f, static_cast<float>(wz)) + 1.0f) * 0.5f;
+                    const float c2 = (cave2.GetNoise(static_cast<float>(wx), static_cast<float>(y) * 1.25f, static_cast<float>(wz)) + 1.0f) * 0.5f;
                     const float dist = (c1 - 0.5f) * (c1 - 0.5f) + (c2 - 0.5f) * (c2 - 0.5f);
 
                     if (dist < caveThreshold || (c1 > 0.74f && c2 > 0.70f)) {
                         if (y <= seaLevel) {
-                            block = BlockId::Water; // Flooded cave pocket
+                            block = BlockId::Water;
                         } else {
-                            block = BlockId::Air;   // Open cave tunnel
+                            block = BlockId::Air;
                         }
                     }
                 }
 
-                world.setBlock(x, y, z, block);
+                chunk.set(lx, y, lz, block);
             }
         }
     }
 
-    if (onProgress) onProgress(0.60f, "Planting ancient forests & flora...");
+    // 2. Scatter trees deterministically (check tree roots in [ox - 2, ox + Chunk::W + 1] x [oz - 2, oz + Chunk::D + 1])
+    if (type != WorldType::Flat) {
+        for (int tz = oz - 2; tz <= oz + Chunk::D + 1; ++tz) {
+            for (int tx = ox - 2; tx <= ox + Chunk::W + 1; ++tx) {
+                const float fHeight = sampleTerrainHeight(static_cast<float>(tx), static_cast<float>(tz), m_seed, type);
+                const int surfY = std::clamp(static_cast<int>(std::floor(fHeight)), 1, Chunk::H - 3);
 
-    // Scatter trees on grass columns above water level
-    for (int z = 3; z < depth - 3; ++z) {
-        for (int x = 3; x < width - 3; ++x) {
-            const int surface = world.surfaceHeight(x, z);
-            if (surface >= seaLevel && world.getBlock(x, surface, z) == BlockId::Grass) {
-                if (hash2(x, z, m_seed + 555) > 0.992f) {
-                    plantTree(world, x, surface, z);
-                }
-            }
-        }
-    }
+                if (surfY >= seaLevel) {
+                    const float cont = sampleContinentalness(static_cast<float>(tx), static_cast<float>(tz), m_seed);
+                    const bool isBeach = (surfY <= seaLevel + 1);
+                    const bool isMountainPeak = (surfY >= 56 && cont >= 0.76f);
 
-    if (onProgress) onProgress(0.80f, "Cultivating wild tall grass...");
+                    if (!isBeach && !isMountainPeak) {
+                        const float treeNoise = fbm(static_cast<float>(tx) * 0.08f, static_cast<float>(tz) * 0.08f, m_seed + 333);
+                        const float treeChance = (cont >= 0.45f && cont < 0.65f && treeNoise > 0.55f) ? 0.965f : 0.991f;
 
-    // Scatter wild tall grass across surface grass terrain in natural clusters
-    if (m_type != WorldType::Flat) {
-        for (int z = 2; z < depth - 2; ++z) {
-            for (int x = 2; x < width - 2; ++x) {
-                const int surface = world.surfaceHeight(x, z);
-                if (surface >= seaLevel && world.getBlock(x, surface, z) == BlockId::Grass) {
-                    if (surface + 1 < Chunk::H && world.getBlock(x, surface + 1, z) == BlockId::Air) {
-                        const float grassNoise = fbm(static_cast<float>(x) * 0.10f, static_cast<float>(z) * 0.10f, m_seed + 777);
-                        const float scatterRoll = hash2(x, z, m_seed + 888);
-                        if (grassNoise > 0.42f && scatterRoll < 0.40f) {
-                            world.setBlock(x, surface + 1, z, BlockId::TallGrass);
+                        if (hash2(tx, tz, m_seed + 555) > treeChance) {
+                            plantTreeInChunk(chunk, ox, oz, tx, surfY, tz, cont);
                         }
                     }
                 }
@@ -434,14 +501,68 @@ void TerrainGenerator::generate(World& world, const ProgressCallback& onProgress
         }
     }
 
-    if (onProgress) onProgress(0.88f, "Founding Pigman Villages & Settlements...");
+    // 3. Scatter wild tall grass
+    if (type != WorldType::Flat) {
+        for (int lz = 0; lz < Chunk::D; ++lz) {
+            const int wz = oz + lz;
+            for (int lx = 0; lx < Chunk::W; ++lx) {
+                const int wx = ox + lx;
+                int surf = 0;
+                for (int y = Chunk::H - 1; y >= 0; --y) {
+                    if (chunk.get(lx, y, lz) != BlockId::Air) {
+                        surf = y;
+                        break;
+                    }
+                }
 
-    // Generate multi-template surface-conforming Pigman Villages
+                if (surf >= seaLevel && chunk.get(lx, surf, lz) == BlockId::Grass) {
+                    if (surf + 1 < Chunk::H && chunk.get(lx, surf + 1, lz) == BlockId::Air) {
+                        const float grassNoise = fbm(static_cast<float>(wx) * 0.10f, static_cast<float>(wz) * 0.10f, m_seed + 777);
+                        const float scatterRoll = hash2(wx, wz, m_seed + 888);
+                        if (grassNoise > 0.40f && scatterRoll < 0.45f) {
+                            chunk.set(lx, surf + 1, lz, BlockId::TallGrass);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void TerrainGenerator::generateInitialSpawn(World& world, int radiusInChunks, const ProgressCallback& onProgress) const {
+    if (onProgress) onProgress(0.10f, "Generating spawn area chunks...");
+
+    const int minC = -radiusInChunks;
+    const int maxC = radiusInChunks;
+    const int total = (maxC - minC + 1) * (maxC - minC + 1);
+    int count = 0;
+
+    for (int cz = minC; cz <= maxC; ++cz) {
+        for (int cx = minC; cx <= maxC; ++cx) {
+            world.generateSingleChunk(cx, cz, m_type);
+            count++;
+            if (onProgress && (count % 4 == 0 || count == total)) {
+                float p = 0.10f + 0.60f * (static_cast<float>(count) / static_cast<float>(total));
+                onProgress(p, "Generating terrain chunk (" + std::to_string(count) + "/" + std::to_string(total) + ")...");
+            }
+        }
+    }
+
+    world.rebuildLoadedList();
+
+    if (onProgress) onProgress(0.75f, "Founding Pigman Villages & Settlements...");
     if (m_type != WorldType::Cavernous) {
         VillageGenerator::generateVillages(world, m_seed, world.villages());
     }
 
-    if (onProgress) onProgress(0.96f, "Finalizing world terrain...");
+    world.rebuildLoadedList();
+
+    if (onProgress) onProgress(0.85f, "Computing world lighting...");
+    world.computeWorldLighting(onProgress);
+}
+
+void TerrainGenerator::generate(World& world, const ProgressCallback& onProgress) const {
+    generateInitialSpawn(world, 2, onProgress);
 }
 
 } // namespace vox

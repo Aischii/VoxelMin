@@ -101,6 +101,49 @@ void addItemBox(std::vector<Vertex>& vertices,
     }
 }
 
+void addItemSprite(std::vector<Vertex>& vertices,
+                   const glm::vec3& center,
+                   float size,
+                   const glm::mat4& transform,
+                   TextureTile tile,
+                   float light,
+                   float torchLight) {
+    const glm::vec2 tMin = tileMinUV(tile);
+    const glm::vec2 tSize = tileSizeUV();
+    const float hs = size * 0.5f;
+    const float thick = 0.015f;
+
+    // Front Face (+Z)
+    const glm::vec3 f0 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs, -hs,  thick), 1.0f));
+    const glm::vec3 f1 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs, -hs,  thick), 1.0f));
+    const glm::vec3 f2 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs,  hs,  thick), 1.0f));
+    const glm::vec3 f3 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs,  hs,  thick), 1.0f));
+    const glm::vec3 normF = glm::normalize(glm::mat3(transform) * glm::vec3(0, 0, 1));
+
+    vertices.push_back({ f0, normF, {0.0f, 0.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ f1, normF, {1.0f, 0.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ f2, normF, {1.0f, 1.0f}, tMin, tSize, 1.0f, light, torchLight });
+
+    vertices.push_back({ f0, normF, {0.0f, 0.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ f2, normF, {1.0f, 1.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ f3, normF, {0.0f, 1.0f}, tMin, tSize, 1.0f, light, torchLight });
+
+    // Back Face (-Z)
+    const glm::vec3 b0 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs, -hs, -thick), 1.0f));
+    const glm::vec3 b1 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs, -hs, -thick), 1.0f));
+    const glm::vec3 b2 = glm::vec3(transform * glm::vec4(center + glm::vec3( hs,  hs, -thick), 1.0f));
+    const glm::vec3 b3 = glm::vec3(transform * glm::vec4(center + glm::vec3(-hs,  hs, -thick), 1.0f));
+    const glm::vec3 normB = glm::normalize(glm::mat3(transform) * glm::vec3(0, 0, -1));
+
+    vertices.push_back({ b1, normB, {1.0f, 0.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ b0, normB, {0.0f, 0.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ b3, normB, {0.0f, 1.0f}, tMin, tSize, 1.0f, light, torchLight });
+
+    vertices.push_back({ b1, normB, {1.0f, 0.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ b3, normB, {0.0f, 1.0f}, tMin, tSize, 1.0f, light, torchLight });
+    vertices.push_back({ b2, normB, {1.0f, 1.0f}, tMin, tSize, 1.0f, light, torchLight });
+}
+
 } // namespace
 
 ItemEntity::ItemEntity(BlockId id, const glm::vec3& position, int count, const glm::vec3& initialVelocity)
@@ -239,14 +282,39 @@ void ItemEntity::appendGeometry(std::vector<Vertex>& vertices, const World& worl
     glm::mat4 model = glm::translate(glm::mat4(1.0f), renderPos);
     model = glm::rotate(model, yawRadians, glm::vec3(0.0f, 1.0f, 0.0f));
 
-    // Sample ambient lighting from world
-    const int bx = static_cast<int>(std::floor(m_position.x));
-    const int by = static_cast<int>(std::floor(m_position.y + 0.15f));
-    const int bz = static_cast<int>(std::floor(m_position.z));
-    const float light = std::max(0.08f, static_cast<float>(world.getSunLight(bx, by, bz)) / 15.0f);
-    const float torchLight = static_cast<float>(world.getBlockLight(bx, by, bz)) / 15.0f;
+    // Trilinear smooth ambient light sampling at item center
+    const float fx = m_position.x - 0.5f;
+    const float fy = m_position.y + 0.15f;
+    const float fz = m_position.z - 0.5f;
+    const int x0 = static_cast<int>(std::floor(fx));
+    const int y0 = static_cast<int>(std::floor(fy));
+    const int z0 = static_cast<int>(std::floor(fz));
+    const float tx = fx - static_cast<float>(x0);
+    const float ty = fy - static_cast<float>(y0);
+    const float tz = fz - static_cast<float>(z0);
 
-    addItemBox(vertices, glm::vec3(0.0f), size, model, def.top, def.side, def.bottom, light, torchLight);
+    float sunSum = 0.0f;
+    float torchSum = 0.0f;
+    for (int dz = 0; dz <= 1; ++dz) {
+        for (int dy = 0; dy <= 1; ++dy) {
+            for (int dx = 0; dx <= 1; ++dx) {
+                const float w = (dx ? tx : (1.0f - tx)) *
+                                (dy ? ty : (1.0f - ty)) *
+                                (dz ? tz : (1.0f - tz));
+                sunSum += static_cast<float>(world.getSunLight(x0 + dx, y0 + dy, z0 + dz)) * w;
+                torchSum += static_cast<float>(world.getBlockLight(x0 + dx, y0 + dy, z0 + dz)) * w;
+            }
+        }
+    }
+
+    const float light = sunSum / 15.0f;
+    const float torchLight = torchSum / 15.0f;
+
+    if (isSolid(m_blockId)) {
+        addItemBox(vertices, glm::vec3(0.0f), size, model, def.top, def.side, def.bottom, light, torchLight);
+    } else {
+        addItemSprite(vertices, glm::vec3(0.0f), 0.32f, model, def.side, light, torchLight);
+    }
 }
 
 } // namespace vox

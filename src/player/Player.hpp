@@ -49,6 +49,8 @@ public:
     void setSprinting(bool sprinting) { m_sprinting = sprinting; }
 
     bool isInWater() const { return m_inWater; }
+    bool onGround() const { return m_onGround; }
+    const glm::vec3& velocity() const { return m_velocity; }
 
     void setMouseSensitivity(float sensitivity) { m_mouseSensitivity = sensitivity; }
     float mouseSensitivity() const { return m_mouseSensitivity; }
@@ -56,6 +58,9 @@ public:
     Perspective perspective() const { return m_perspective; }
     void setPerspective(Perspective p) { m_perspective = p; }
     void cyclePerspective();
+
+    bool isBobbingEnabled() const { return m_bobbingEnabled; }
+    void setBobbingEnabled(bool enabled) { m_bobbingEnabled = enabled; }
 
     void triggerSwing() { m_swingTimer = 0.25f; }
     float swingProgress() const { return std::clamp(1.0f - (m_swingTimer / 0.25f), 0.0f, 1.0f); }
@@ -125,6 +130,7 @@ private:
     bool m_isDead = false;
 
     // View bobbing & dynamics
+    bool m_bobbingEnabled = true;
     float m_bobTimer = 0.0f;
     float m_bobIntensity = 0.0f;
     float m_stepDistance = 0.0f;

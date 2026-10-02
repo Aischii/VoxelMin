@@ -28,6 +28,8 @@ capture.png
 # Agent skills & local assistant metadata
 .agents/
 .opencode/
+tools/
+mcp_config.json
 AGENTS.md
 AGENT.md
 [Aa][Gg][Ee][Nn][Tt]*.md

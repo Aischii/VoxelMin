@@ -15,6 +15,7 @@ namespace {
 constexpr uint32_t SAVE_MAGIC = 0x53584F56; // 'VOXS'
 constexpr uint32_t SAVE_VERSION_1 = 1;
 constexpr uint32_t SAVE_VERSION_2 = 2;
+constexpr uint32_t SAVE_VERSION_3 = 3;
 
 } // namespace
 
@@ -59,14 +60,14 @@ bool WorldSave::peekWorld(const std::string& path, std::string& outName, uint32_
     file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
 
-    if (magic != SAVE_MAGIC || (version != SAVE_VERSION_1 && version != SAVE_VERSION_2)) {
+    if (magic != SAVE_MAGIC || (version != SAVE_VERSION_1 && version != SAVE_VERSION_2 && version != SAVE_VERSION_3)) {
         log::error("Unrecognised save header (magic 0x%08X, version %u) in %s -- "
                    "file may be corrupt or from a newer build; ignoring it.",
                    magic, version, path.c_str());
         return false;
     }
 
-    if (version == SAVE_VERSION_2) {
+    if (version >= SAVE_VERSION_2) {
         uint32_t nameLen = 0;
         file.read(reinterpret_cast<char*>(&nameLen), sizeof(nameLen));
         if (nameLen > 128) nameLen = 128;
@@ -146,7 +147,7 @@ bool WorldSave::saveExists(const std::string& path) {
 
 bool WorldSave::saveGame(const std::string& path, const std::string& worldName, uint32_t seed,
                          const World& world, const Player& player,
-                         int selectedSlot, const BlockId* hotbar, const BlockId* inventory) {
+                         int selectedSlot, const ItemSlot* hotbar, const ItemSlot* inventory) {
     std::error_code ec;
     std::filesystem::path fsPath(path);
     if (fsPath.has_parent_path()) {
@@ -160,7 +161,7 @@ bool WorldSave::saveGame(const std::string& path, const std::string& worldName, 
     }
 
     const uint32_t magic = SAVE_MAGIC;
-    const uint32_t version = SAVE_VERSION_2;
+    const uint32_t version = SAVE_VERSION_3;
     const int32_t chunksX = world.chunksX();
     const int32_t chunksZ = world.chunksZ();
     const int32_t chunkW = Chunk::W;
@@ -170,7 +171,7 @@ bool WorldSave::saveGame(const std::string& path, const std::string& worldName, 
     file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
 
-    // World name (Version 2)
+    // World name
     const uint32_t nameLen = static_cast<uint32_t>(worldName.size());
     file.write(reinterpret_cast<const char*>(&nameLen), sizeof(nameLen));
     if (nameLen > 0) {
@@ -197,25 +198,35 @@ bool WorldSave::saveGame(const std::string& path, const std::string& worldName, 
     file.write(reinterpret_cast<const char*>(&flying), sizeof(flying));
     file.write(reinterpret_cast<const char*>(&selSlot), sizeof(selSlot));
 
-    for (int i = 0; i < 8; ++i) {
-        const uint8_t b = static_cast<uint8_t>(hotbar[i]);
+    // 9 Hotbar slots (BlockId, count, durability)
+    for (int i = 0; i < 9; ++i) {
+        const uint8_t b = static_cast<uint8_t>(hotbar[i].id);
+        const uint16_t c = static_cast<uint16_t>(hotbar[i].count);
+        const uint16_t d = static_cast<uint16_t>(hotbar[i].durability);
         file.write(reinterpret_cast<const char*>(&b), sizeof(b));
+        file.write(reinterpret_cast<const char*>(&c), sizeof(c));
+        file.write(reinterpret_cast<const char*>(&d), sizeof(d));
     }
-    for (int i = 0; i < 24; ++i) {
-        const uint8_t b = static_cast<uint8_t>(inventory[i]);
+    // 27 Inventory slots (BlockId, count, durability)
+    for (int i = 0; i < 27; ++i) {
+        const uint8_t b = static_cast<uint8_t>(inventory[i].id);
+        const uint16_t c = static_cast<uint16_t>(inventory[i].count);
+        const uint16_t d = static_cast<uint16_t>(inventory[i].durability);
         file.write(reinterpret_cast<const char*>(&b), sizeof(b));
+        file.write(reinterpret_cast<const char*>(&c), sizeof(c));
+        file.write(reinterpret_cast<const char*>(&d), sizeof(d));
     }
 
-    // Chunk Voxel Data
-    const auto& chunks = world.chunks();
-    const uint32_t totalChunks = static_cast<uint32_t>(chunks.size());
+    // Chunk Voxel Data: save all generated world chunks
+    const_cast<World&>(world).syncAllChunksToCache();
+    const auto& allChunks = world.savedChunkCache();
+    const uint32_t totalChunks = static_cast<uint32_t>(allChunks.size());
     file.write(reinterpret_cast<const char*>(&totalChunks), sizeof(totalChunks));
 
-    for (const auto& chunk : chunks) {
-        if (!chunk) continue;
-        const int32_t cx = chunk->chunkX();
-        const int32_t cz = chunk->chunkZ();
-        const std::vector<RLERun> runs = chunk->rleCompress();
+    for (const auto& pair : allChunks) {
+        const int32_t cx = pair.first.x;
+        const int32_t cz = pair.first.z;
+        const auto& runs = pair.second;
         const uint32_t runCount = static_cast<uint32_t>(runs.size());
 
         file.write(reinterpret_cast<const char*>(&cx), sizeof(cx));
@@ -229,13 +240,13 @@ bool WorldSave::saveGame(const std::string& path, const std::string& worldName, 
         }
     }
 
-    log::info("World '%s' saved successfully to %s", worldName.c_str(), path.c_str());
+    log::info("World '%s' (%u chunks) saved successfully to %s", worldName.c_str(), totalChunks, path.c_str());
     return true;
 }
 
 bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uint32_t& outSeed,
                          World& world, Player& player,
-                         int& selectedSlot, BlockId* hotbar, BlockId* inventory) {
+                         int& selectedSlot, ItemSlot* hotbar, ItemSlot* inventory) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         log::error("Failed to open save file for reading: %s", path.c_str());
@@ -247,12 +258,12 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
     file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
 
-    if (magic != SAVE_MAGIC || (version != SAVE_VERSION_1 && version != SAVE_VERSION_2)) {
+    if (magic != SAVE_MAGIC || (version != SAVE_VERSION_1 && version != SAVE_VERSION_2 && version != SAVE_VERSION_3)) {
         log::error("Invalid save file header or unsupported version in: %s", path.c_str());
         return false;
     }
 
-    if (version == SAVE_VERSION_2) {
+    if (version >= SAVE_VERSION_2) {
         uint32_t nameLen = 0;
         file.read(reinterpret_cast<char*>(&nameLen), sizeof(nameLen));
         if (nameLen > 128) nameLen = 128;
@@ -300,23 +311,55 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
     }
     world.init(chunksX, chunksZ, seed);
 
-    // Helper to sanitize block IDs from save files (forward compatibility for unknown/future blocks)
     auto sanitizeBlock = [](uint8_t raw) -> BlockId {
         if (raw >= static_cast<uint8_t>(BlockId::Count)) {
-            return BlockId::Stone; // Graceful fallback
+            return BlockId::Stone;
         }
         return static_cast<BlockId>(raw);
     };
 
-    for (int i = 0; i < 8; ++i) {
-        uint8_t b = 0;
-        file.read(reinterpret_cast<char*>(&b), sizeof(b));
-        hotbar[i] = sanitizeBlock(b);
-    }
-    for (int i = 0; i < 24; ++i) {
-        uint8_t b = 0;
-        file.read(reinterpret_cast<char*>(&b), sizeof(b));
-        inventory[i] = sanitizeBlock(b);
+    for (int i = 0; i < 9; ++i) hotbar[i].clear();
+    for (int i = 0; i < 27; ++i) inventory[i].clear();
+
+    if (version == SAVE_VERSION_3) {
+        for (int i = 0; i < 9; ++i) {
+            uint8_t b = 0;
+            uint16_t c = 0;
+            uint16_t d = 0;
+            file.read(reinterpret_cast<char*>(&b), sizeof(b));
+            file.read(reinterpret_cast<char*>(&c), sizeof(c));
+            file.read(reinterpret_cast<char*>(&d), sizeof(d));
+            const BlockId id = sanitizeBlock(b);
+            if (id != BlockId::Air && c > 0) {
+                hotbar[i] = ItemSlot(id, c, d);
+            }
+        }
+        for (int i = 0; i < 27; ++i) {
+            uint8_t b = 0;
+            uint16_t c = 0;
+            uint16_t d = 0;
+            file.read(reinterpret_cast<char*>(&b), sizeof(b));
+            file.read(reinterpret_cast<char*>(&c), sizeof(c));
+            file.read(reinterpret_cast<char*>(&d), sizeof(d));
+            const BlockId id = sanitizeBlock(b);
+            if (id != BlockId::Air && c > 0) {
+                inventory[i] = ItemSlot(id, c, d);
+            }
+        }
+    } else {
+        // v1/v2 legacy (8 hotbar + 24 inventory)
+        for (int i = 0; i < 8; ++i) {
+            uint8_t b = 0;
+            file.read(reinterpret_cast<char*>(&b), sizeof(b));
+            const BlockId id = sanitizeBlock(b);
+            if (id != BlockId::Air) hotbar[i] = ItemSlot(id, 1);
+        }
+        for (int i = 0; i < 24; ++i) {
+            uint8_t b = 0;
+            file.read(reinterpret_cast<char*>(&b), sizeof(b));
+            const BlockId id = sanitizeBlock(b);
+            if (id != BlockId::Air) inventory[i] = ItemSlot(id, 1);
+        }
     }
 
     uint32_t totalChunks = 0;
@@ -342,20 +385,21 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
             runs.push_back({ count, sanitizeBlock(blockId) });
         }
 
-        if (Chunk* chunk = world.chunkAt(cx, cz)) {
+        world.cacheChunkData(cx, cz, runs);
+        Chunk* chunk = world.getOrCreateChunk(cx, cz);
+        if (chunk) {
             chunk->decompressRle(runs);
+            chunk->terrainGenerated = true;
             chunk->dirty = true;
         }
     }
 
+    world.rebuildLoadedList();
     world.computeWorldLighting();
 
     // Set player position and orientation after world chunks are allocated
-    const float maxW = static_cast<float>(world.widthBlocks());
-    const float maxD = static_cast<float>(world.depthBlocks());
-    const float maxH = static_cast<float>(world.heightBlocks());
-    if (pos.x <= 0.0f || pos.x >= maxW || pos.z <= 0.0f || pos.z >= maxD || pos.y <= 0.0f || pos.y >= maxH) {
-        player.spawnAt(world, maxW * 0.5f, maxD * 0.5f);
+    if (pos.y <= 0.0f || pos.y >= static_cast<float>(Chunk::H)) {
+        player.spawnAt(world, 0.0f, 0.0f);
     } else {
         player.setPosition(pos);
     }
@@ -364,12 +408,14 @@ bool WorldSave::loadGame(const std::string& path, std::string& outWorldName, uin
     // mode, so a saved flying state must not be restored on load.
     (void)flying;
     player.setFlying(false);
-    selectedSlot = std::clamp(static_cast<int>(selSlot), 0, 7);
+    selectedSlot = std::clamp(static_cast<int>(selSlot), 0, 8);
 
     log::info("World '%s' (seed %u, %dx%d chunks) loaded successfully from %s",
               outWorldName.c_str(), outSeed, chunksX, chunksZ, path.c_str());
     return true;
 }
+
+
 
 bool WorldSave::deleteWorld(const std::string& path) {
     std::error_code ec;

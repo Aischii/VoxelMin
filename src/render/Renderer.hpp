@@ -5,6 +5,7 @@
 #include "render/Shader.hpp"
 #include "render/Texture.hpp"
 #include "world/Block.hpp"
+#include "world/CraftingRecipes.hpp"
 #include "world/ItemSlot.hpp"
 
 #include <cstdint>
@@ -47,57 +48,83 @@ public:
                     const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
     void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera, float sunlight = 1.0f);
     void drawSelection(const Camera& camera, const glm::ivec3& block, BlockId blockId = BlockId::Grass);
-    void drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage);
+    void drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage,
+                        const World& world, float sunlight = 1.0f);
 
     void updateParticles(float dt, const World& world, const glm::vec3& playerPos) {
         m_particles.update(dt, world, playerPos);
     }
-    void spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, BlockId blockId, int count = 4) {
-        m_particles.spawnDigParticles(blockPos, normal, static_cast<uint8_t>(blockId), count);
+    void spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, BlockId blockId,
+                           const World& world, float sunlight = 1.0f, int count = 4) {
+        m_particles.spawnDigParticles(blockPos, normal, static_cast<uint8_t>(blockId), world, sunlight, count);
     }
-    void spawnBlockBreakParticles(const glm::vec3& blockPos, BlockId blockId, int count = 24) {
-        m_particles.spawnBlockBreakParticles(blockPos, static_cast<uint8_t>(blockId), count);
+    void spawnBlockBreakParticles(const glm::vec3& blockPos, BlockId blockId,
+                                  const World& world, float sunlight = 1.0f, int count = 24) {
+        m_particles.spawnBlockBreakParticles(blockPos, static_cast<uint8_t>(blockId), world, sunlight, count);
+    }
+    void spawnFallingLeaf(const glm::vec3& pos, const glm::vec3& color = glm::vec3(0.24f, 0.65f, 0.18f)) {
+        m_particles.spawnFallingLeaf(pos, color);
+    }
+    void spawnHitParticles(const glm::vec3& pos, const glm::vec3& hitDir, bool isCrit = false, int count = 12) {
+        m_particles.spawnHitParticles(pos, hitDir, isCrit, count);
+    }
+    void spawnBloodSplatter(const glm::vec3& pos, const glm::vec3& hitDir, int count = 16) {
+        m_particles.spawnBloodSplatter(pos, hitDir, count);
     }
     void clearParticles() { m_particles.clear(); }
     size_t particleCount() const { return m_particles.particleCount(); }
 
-    // HUD shown while playing (crosshair + hotbar).
-    void drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount);
+    // HUD shown while playing (crosshair, 9-slot hotbar, health hearts, hunger drumsticks, oxygen bubbles, XP bar).
+    void drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount,
+                 float health, float maxHealth,
+                 float hunger, float maxHunger,
+                 float oxygen, float maxOxygen,
+                 bool inWater, float hurtTimer, float animTime,
+                 bool isCreative = false);
 
-    // RPG Horror Vitals HUD (placed in top-left corner)
-    void drawRpgVitalsHud(float health, float maxHealth,
-                          float hunger, float maxHunger,
-                          float oxygen, float maxOxygen,
-                          bool inWater, float hurtTimer, float animTime,
-                          bool isCreative = false);
-
-    // Screen edge horror effects (low-health heartbeat vignette & damage blood flash)
+    // Screen edge damage flash & vignette
     void drawHurtVignette(float hurtTimer, float healthRatio, float animTime);
 
-    // Dark gothic Death Screen ("YOU DIED")
+    // RPG Region & Dimension Title Banner ("LEVEL 0" / "The Yellow Hell")
+    void drawTitleBanner(const std::string& title, const std::string& subtitle, float alpha, float animTime);
+
+    // Death Screen ("YOU DIED")
     void drawDeathScreen(float animTime, const glm::vec2& mousePos,
                          bool& outHoverRespawn, bool& outHoverQuit);
 
-    // F3 debug overlay: dark panel with one text line per entry, drawn in the
-    // top-left corner. Rendering only -- the caller owns the content.
+    // F3 debug overlay
     void drawDebugOverlay(const std::vector<std::string>& lines);
 
-    // Per-frame render counters. resetFrame() is called from beginFrame();
-    // accumulate() is fed the frame delta by Application once the frame is done.
+    // Per-frame render counters
     const FrameStats& stats() const { return m_stats; }
     FrameStats& stats() { return m_stats; }
 
-    // Console Edition Crafting & Inventory UI Overlay (Attachment 3).
-    void drawConsoleInventory(int activeCategory, int selectedRecipeIndex,
-                              bool hasCraftingTable,
-                              int selectedHotbarSlot,
-                              const ItemSlot* hotbar, int hotbarCount,
-                              const ItemSlot* inventory, int invCount,
-                              const ItemSlot& heldItem, const glm::vec2& mousePos);
+    // Modern Minecraft Survival Inventory (Attachment 1: 4 Armor + Avatar + Offhand + 2x2 Crafting + 27 Main + 9 Hotbar)
+    void drawSurvivalInventory(int selectedHotbarSlot,
+                               const ItemSlot* hotbar, int hotbarCount,
+                               const ItemSlot* inventory, int invCount,
+                               const ItemSlot* armor, int armorCount,
+                               const ItemSlot& offhand,
+                               const ItemSlot* craftingSlots,
+                               const ItemSlot& craftingResult,
+                               const ItemSlot& heldItem,
+                               const glm::vec2& mousePos,
+                               bool recipeBookOpen = false);
 
-    // Creative Mode Item Catalog with Category Tabs and Unlimited Item Supply.
+    // Modern Minecraft Crafting Table Workbench (Attachment 3: 3x3 Crafting Grid + Arrow + Result + 27 Main + 9 Hotbar)
+    void drawCraftingTableWorkbench(int selectedHotbarSlot,
+                                    const ItemSlot* hotbar, int hotbarCount,
+                                    const ItemSlot* inventory, int invCount,
+                                    const ItemSlot* craftingSlots,
+                                    const ItemSlot& craftingResult,
+                                    const ItemSlot& heldItem,
+                                    const glm::vec2& mousePos,
+                                    bool recipeBookOpen = false);
+
+    // Modern Minecraft Creative Item Catalog (Attachment 2: Category Tabs, Search Bar, 9x5 Grid with Scrollbar, 9 Hotbar)
     void drawCreativeInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
-                               const ItemSlot& heldItem, const glm::vec2& mousePos, int activeTab = 0);
+                               const ItemSlot& heldItem, const glm::vec2& mousePos,
+                               int activeTab = 0, const std::string& searchQuery = "", int scrollRow = 0);
 
     void drawDurabilityBar(float x, float y, float w, float h, int durability, int maxDurability);
     void drawBlockIcon(float x, float y, float w, float h, BlockId id);
@@ -106,6 +133,7 @@ public:
 
 
     void drawUnderwaterOverlay(float time);
+    void drawBackroomsHorrorOverlay(float time);
 
     // --- 2D primitives (screen pixels, origin bottom-left) ------------------
     void beginUI();

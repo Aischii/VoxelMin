@@ -11,6 +11,7 @@
 #include "world/World.hpp"
 
 #include <GL/glew.h>
+#include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
@@ -65,7 +66,10 @@ bool Renderer::init() {
     }
 
     m_atlas.createAtlas();
-    if (!m_font.build()) return false;
+    const std::string fontPath = resolveAsset("assets/fonts/born2bsporty-fs.otf");
+    if (!m_font.build(fontPath)) {
+        if (!m_font.build()) return false;
+    }
     if (!m_particles.init()) return false;
     initSky();
 
@@ -508,6 +512,8 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
     m_chunkShader.setFloat("uFogStart", fogStart);
     m_chunkShader.setFloat("uFogEnd", fogEnd);
     m_chunkShader.setFloat("uSunlight", sunlight);
+    m_chunkShader.setFloat("uIsBackrooms", world.currentDimension() == DimensionId::Backrooms ? 1.0f : 0.0f);
+    m_chunkShader.setFloat("uTime", static_cast<float>(glfwGetTime()));
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -515,7 +521,7 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
     // Frustum-cull once per chunk and share the result between both passes.
     // Testing the same AABB twice would both waste work and double-count the
     // "culled" figure the F3 overlay reports.
-    const std::vector<std::unique_ptr<Chunk>>& chunks = world.chunks();
+    const std::vector<Chunk*>& chunks = world.loadedChunks();
     std::vector<uint8_t> visible(chunks.size(), 0);
     for (size_t i = 0; i < chunks.size(); ++i) {
         const Chunk& chunk = *chunks[i];
@@ -728,7 +734,8 @@ void Renderer::drawSelection(const Camera& camera, const glm::ivec3& block, Bloc
     ++m_stats.drawCalls;
 }
 
-void Renderer::drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage) {
+void Renderer::drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage,
+                              const World& world, float sunlight) {
     if (stage < 0 || stage > 9) return;
 
     const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
@@ -754,6 +761,9 @@ void Renderer::drawBlockBreak(const Camera& camera, const glm::ivec3& block, Blo
 
     const glm::vec2 tileMin(u0, v0);
     const glm::vec2 tileSize(u1 - u0, v1 - v0);
+
+    (void)world;
+    (void)sunlight;
 
     Vertex v[36];
     int idx = 0;
@@ -787,8 +797,9 @@ void Renderer::drawBlockBreak(const Camera& camera, const glm::ivec3& block, Blo
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
+    // Authentic multiplicative crack blend mode
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR);
 
     m_chunkShader.use();
     m_chunkShader.setMat4("uVP", viewProjection);
@@ -893,13 +904,11 @@ void Renderer::drawText(float x, float y, const std::string& text, float scale,
     m_textShader.setInt("uFont", 0);
     m_font.bind(0);
 
-    const float cellW = Font::CellWidth * scale;
-    const float glyphW = Font::GlyphWidth * scale;
-    const float glyphH = Font::GlyphHeight * scale;
+    const float totalW = m_font.textWidth(text, scale);
+    const float totalH = m_font.textHeight(scale);
 
-    // Rotation pivot: centre of the whole string (y is the text's top edge).
-    const glm::vec2 pivot(x + static_cast<float>(text.size()) * cellW * 0.5f,
-                          y - glyphH * 0.5f);
+    // Rotation pivot: centre of the whole string
+    const glm::vec2 pivot(x + totalW * 0.5f, y - totalH * 0.5f);
     const float cs = std::cos(rotationRadians);
     const float sn = std::sin(rotationRadians);
     const auto transform = [&](glm::vec2 p) {
@@ -911,22 +920,34 @@ void Renderer::drawText(float x, float y, const std::string& text, float scale,
     std::vector<TextVertex> vertices;
     vertices.reserve(text.size() * 6);
 
-    for (size_t i = 0; i < text.size(); ++i) {
-        const Font::Glyph* glyph = m_font.glyph(text[i]);
-        if (!glyph || text[i] == ' ') continue;
+    float curX = x;
+    for (char c : text) {
+        const Font::Glyph* glyph = m_font.glyph(c);
+        if (!glyph) {
+            curX += Font::CellWidth * scale;
+            continue;
+        }
 
-        const float gx = x + static_cast<float>(i) * cellW;
-        const glm::vec2 tl = transform({gx, y});
-        const glm::vec2 tr = transform({gx + glyphW, y});
-        const glm::vec2 br = transform({gx + glyphW, y - glyphH});
-        const glm::vec2 bl = transform({gx, y - glyphH});
+        if (c != ' ') {
+            const float gx0 = curX + glyph->x0 * scale;
+            const float gx1 = curX + glyph->x1 * scale;
+            const float gy0 = y + glyph->y0 * scale;
+            const float gy1 = y + glyph->y1 * scale;
 
-        vertices.push_back({tl, {glyph->u0, glyph->v0}});
-        vertices.push_back({tr, {glyph->u1, glyph->v0}});
-        vertices.push_back({br, {glyph->u1, glyph->v1}});
-        vertices.push_back({tl, {glyph->u0, glyph->v0}});
-        vertices.push_back({br, {glyph->u1, glyph->v1}});
-        vertices.push_back({bl, {glyph->u0, glyph->v1}});
+            const glm::vec2 tl = transform({gx0, gy0});
+            const glm::vec2 tr = transform({gx1, gy0});
+            const glm::vec2 br = transform({gx1, gy1});
+            const glm::vec2 bl = transform({gx0, gy1});
+
+            vertices.push_back({tl, {glyph->u0, glyph->v0}});
+            vertices.push_back({tr, {glyph->u1, glyph->v0}});
+            vertices.push_back({br, {glyph->u1, glyph->v1}});
+            vertices.push_back({tl, {glyph->u0, glyph->v0}});
+            vertices.push_back({br, {glyph->u1, glyph->v1}});
+            vertices.push_back({bl, {glyph->u0, glyph->v1}});
+        }
+
+        curX += glyph->xadvance * scale;
     }
 
     if (vertices.empty()) return;
@@ -1005,6 +1026,30 @@ void Renderer::drawUnderwaterOverlay(float time) {
     glEnable(GL_CULL_FACE);
 }
 
+void Renderer::drawBackroomsHorrorOverlay(float time) {
+    beginUI();
+    const float fbW = static_cast<float>(m_fbWidth);
+    const float fbH = static_cast<float>(m_fbHeight);
+
+    // 1. Dark liminal edge vignette
+    const float thick = std::min(fbW, fbH) * 0.22f;
+    const glm::vec4 vigSolid(0.04f, 0.035f, 0.015f, 0.45f);
+    const glm::vec4 vigTrans(0.04f, 0.035f, 0.015f, 0.0f);
+
+    drawGradientRect(0.0f, 0.0f, fbW, thick, vigSolid, vigTrans);
+    drawGradientRect(0.0f, fbH - thick, fbW, thick, vigTrans, vigSolid);
+
+    // 2. VHS tape tracking distortion glitch line
+    const float glitchCycle = std::fmod(time * 0.4f, 6.0f);
+    if (glitchCycle < 0.35f) {
+        const float gy = std::fmod(time * 180.0f, fbH);
+        const float gh = 3.0f + std::fmod(time * 37.0f, 6.0f);
+        drawRect(0.0f, gy, fbW, gh, glm::vec4(0.85f, 0.82f, 0.60f, 0.08f));
+    }
+
+    endUI();
+}
+
 void Renderer::drawBlockIcon(float x, float y, float w, float h, BlockId id) {
     if (isAir(id)) return;
     const BlockDef& def = blockDef(id);
@@ -1020,12 +1065,17 @@ void Renderer::drawDurabilityBar(float x, float y, float w, float h, int durabil
     drawRect(x, y, w * pct, h, barCol);
 }
 
-void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount) {
+void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount,
+                       float health, float maxHealth,
+                       float hunger, float maxHunger,
+                       float oxygen, float maxOxygen,
+                       bool inWater, float hurtTimer, float animTime,
+                       bool isCreative) {
     const float s = m_uiScale;
 
     beginUI();
 
-    // Crosshair (compact, high-contrast across all GUI scales).
+    // 1. Crosshair (compact, high-contrast across all GUI scales)
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
     const float arm = std::max(3.0f, 2.5f * std::max(1.0f, s * 0.5f));
@@ -1035,155 +1085,146 @@ void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount) 
     const glm::vec4 darkOutline(0.02f, 0.02f, 0.02f, 0.75f);
     const glm::vec4 innerColor(0.96f, 0.96f, 0.96f, 0.95f);
 
-    // Dark outline wrapper
     drawRect(cx - arm - outline, cy - (thick * 0.5f) - outline, (arm * 2.0f) + (outline * 2.0f), thick + (outline * 2.0f), darkOutline);
     drawRect(cx - (thick * 0.5f) - outline, cy - arm - outline, thick + (outline * 2.0f), (arm * 2.0f) + (outline * 2.0f), darkOutline);
-
-    // Inner bright core
     drawRect(cx - arm, cy - thick * 0.5f, arm * 2.0f, thick, innerColor);
     drawRect(cx - thick * 0.5f, cy - arm, thick, arm * 2.0f, innerColor);
 
-    // Hotbar.
-    const float slot = 16.0f * s;
-    const float gap = 1.5f * s;
-    const float margin = 6.0f * s;
-    const float border = 1.0f * s;
-    const float totalWidth = slotCount * slot + (slotCount - 1) * gap;
-    const float startX = (static_cast<float>(m_fbWidth) - totalWidth) * 0.5f;
+    // 2. 9-Slot Hotbar (Centered at bottom)
+    const float slot = 20.0f * s;
+    const float innerSlot = 16.0f * s;
+    const float pad = (slot - innerSlot) * 0.5f;
+    const float hotbarMarginY = 6.0f * s;
+    const int count = std::min(slotCount, 9);
+    const float totalHotbarW = count * slot;
+    const float hotbarStartX = cx - totalHotbarW * 0.5f;
 
-    for (int i = 0; i < slotCount; ++i) {
-        const float x = startX + i * (slot + gap);
-        if (i == selectedSlot) {
-            drawRect(x - gap, margin - gap, slot + 2.0f * gap, slot + 2.0f * gap, glm::vec4(1.0f));
-        }
-        drawRect(x, margin, slot, slot, glm::vec4(0.10f, 0.10f, 0.10f, 1.0f));
+    // Hotbar container background frame
+    drawRect(hotbarStartX - 1.0f * s, hotbarMarginY - 1.0f * s, totalHotbarW + 2.0f * s, slot + 2.0f * s, glm::vec4(0.0f, 0.0f, 0.0f, 0.60f));
+    drawRect(hotbarStartX, hotbarMarginY, totalHotbarW, slot, glm::vec4(0.78f, 0.78f, 0.78f, 0.95f));
+
+    for (int i = 0; i < count; ++i) {
+        const float x = hotbarStartX + i * slot;
+        const float y = hotbarMarginY;
+
+        // Sunken slot bevel
+        drawRect(x + 1.0f * s, y + 1.0f * s, slot - 2.0f * s, slot - 2.0f * s, glm::vec4(0.55f, 0.55f, 0.55f, 1.0f));
+        drawRect(x + 1.0f * s, y + slot - 2.0f * s, slot - 2.0f * s, 1.0f * s, glm::vec4(0.22f, 0.22f, 0.22f, 1.0f));
+        drawRect(x + 1.0f * s, y + 1.0f * s, 1.0f * s, slot - 2.0f * s, glm::vec4(0.22f, 0.22f, 0.22f, 1.0f));
+        drawRect(x + slot - 2.0f * s, y + 1.0f * s, 1.0f * s, slot - 2.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 0.8f));
+        drawRect(x + 1.0f * s, y + 1.0f * s, slot - 2.0f * s, 1.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 0.8f));
 
         if (!hotbar[i].empty()) {
-            drawBlockIcon(x + border, margin + border, slot - 2.0f * border, slot - 2.0f * border, hotbar[i].id);
+            drawBlockIcon(x + pad, y + pad, innerSlot, innerSlot, hotbar[i].id);
 
             // Stack count
             if (hotbar[i].count > 1) {
                 const std::string cntStr = std::to_string(hotbar[i].count);
-                const float cntScale = std::max(1.0f, s * 0.60f);
+                const float cntScale = std::max(1.0f, s * 0.65f);
                 const float cw = textWidth(cntStr, cntScale);
-                drawText(x + slot - cw - 1.0f * s + 1.0f, margin + textHeight(cntScale) + 1.0f * s - 1.0f,
+                drawText(x + slot - cw - 2.0f * s + 1.0f, y + textHeight(cntScale) + 2.0f * s - 1.0f,
                          cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
-                drawText(x + slot - cw - 1.0f * s, margin + textHeight(cntScale) + 1.0f * s,
+                drawText(x + slot - cw - 2.0f * s, y + textHeight(cntScale) + 2.0f * s,
                          cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
             }
 
             // Durability bar for tools
             if (isTool(hotbar[i].id) && hotbar[i].durability > 0) {
                 const float barH = std::max(1.5f, 1.5f * s);
-                drawDurabilityBar(x + border, margin + border, slot - 2.0f * border, barH,
+                drawDurabilityBar(x + 2.0f * s, y + 2.0f * s, slot - 4.0f * s, barH,
                                   hotbar[i].durability, maxToolDurability(hotbar[i].id));
             }
         }
-    }
 
-    endUI();
-}
-
-void Renderer::drawRpgVitalsHud(float health, float maxHealth,
-                                float hunger, float /*maxHunger*/,
-                                float oxygen, float /*maxOxygen*/,
-                                bool /*inWater*/, float /*hurtTimer*/, float animTime,
-                                bool isCreative) {
-    if (isCreative) return; // Creative mode hides vitals HUD
-
-    const float s = m_uiScale;
-    beginUI();
-
-    const float cardW = 154.0f * s;
-    const float cardH = 38.0f * s;
-    const float cardX = 16.0f * s;
-    const float cardY = static_cast<float>(m_fbHeight) - (14.0f * s) - cardH;
-
-    // 1. Left Avatar Card with Level & Vertical XP bar
-    const float portraitSize = 20.0f * s;
-    const float portraitX = cardX + 4.0f * s;
-    const float portraitY = cardY + 14.0f * s;
-
-    // Vertical lime-green level bar on left
-    drawRect(cardX, cardY + 2.0f * s, 2.5f * s, cardH - 4.0f * s, glm::vec4(0.55f, 0.85f, 0.20f, 0.95f));
-
-    // Avatar Box Frame
-    drawRect(portraitX - 1.0f * s, portraitY - 1.0f * s, portraitSize + 2.0f * s, portraitSize + 2.0f * s, glm::vec4(0.12f, 0.12f, 0.14f, 1.0f));
-    drawTexturedRect(portraitX, portraitY, portraitSize, portraitSize, TextureTile::PlayerFace);
-
-    // Black Level Badge Box below portrait
-    const float levelBoxY = cardY + 2.0f * s;
-    const float levelBoxH = 11.0f * s;
-    drawRect(portraitX - 1.0f * s, levelBoxY, portraitSize + 2.0f * s, levelBoxH, glm::vec4(0.08f, 0.08f, 0.10f, 0.96f));
-    drawRect(portraitX - 1.0f * s, levelBoxY, portraitSize + 2.0f * s, 1.0f * s, glm::vec4(0.35f, 0.35f, 0.38f, 0.85f));
-    drawRect(portraitX - 1.0f * s, levelBoxY + levelBoxH - 1.0f * s, portraitSize + 2.0f * s, 1.0f * s, glm::vec4(0.35f, 0.35f, 0.38f, 0.85f));
-
-    // Gold level number "1"
-    const std::string lvlText = "1";
-    const float lvlScale = std::max(1.0f, s * 0.70f);
-    const float lw = textWidth(lvlText, lvlScale);
-    drawText(portraitX + (portraitSize - lw) * 0.5f, levelBoxY + 8.0f * s, lvlText, lvlScale, glm::vec4(0.95f, 0.90f, 0.35f, 1.0f));
-
-    // 2. Player Name & Red Health Bar (Right of portrait)
-    const float infoX = portraitX + portraitSize + 8.0f * s;
-    const float nameY = cardY + cardH - 8.0f * s;
-    const float nameScale = std::max(1.0f, s * 0.85f);
-    const std::string playerName = "Deadzoke";
-
-    // Name text with dark shadow
-    drawText(infoX + 1.0f, nameY - 1.0f, playerName, nameScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
-    drawText(infoX, nameY, playerName, nameScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-
-    // Thick Red Health Bar
-    const float barW = cardW - (infoX - cardX) - 4.0f * s;
-    const float barH = 5.0f * s;
-    const float hpY = nameY - 7.0f * s;
-    const float hpRatio = std::clamp(health / maxHealth, 0.0f, 1.0f);
-
-    // Health background track
-    drawRect(infoX - 1.0f * s, hpY - 1.0f * s, barW + 2.0f * s, barH + 2.0f * s, glm::vec4(0.18f, 0.04f, 0.05f, 0.95f));
-    drawRect(infoX, hpY, barW, barH, glm::vec4(0.35f, 0.05f, 0.08f, 0.85f));
-
-    if (hpRatio > 0.001f) {
-        glm::vec4 hpCol(0.92f, 0.10f, 0.12f, 1.0f);
-        if (hpRatio <= 0.30f) {
-            const float pulse = 0.5f + 0.5f * std::sin(animTime * 10.0f);
-            hpCol = glm::mix(glm::vec4(0.85f, 0.08f, 0.10f, 1.0f), glm::vec4(1.0f, 0.40f, 0.42f, 1.0f), pulse);
+        // Active slot selection outline
+        if (i == selectedSlot) {
+            drawRect(x - 2.0f * s, y - 2.0f * s, slot + 4.0f * s, 2.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            drawRect(x - 2.0f * s, y + slot, slot + 4.0f * s, 2.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            drawRect(x - 2.0f * s, y - 2.0f * s, 2.0f * s, slot + 4.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            drawRect(x + slot, y - 2.0f * s, 2.0f * s, slot + 4.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
         }
-        drawRect(infoX, hpY, barW * hpRatio, barH, hpCol);
     }
 
-    // 3. Stats Rows: Hunger, Oxygen/Thirst, Armor
-    const float statY = hpY - 8.0f * s;
-    const float subStatY = statY - 7.5f * s;
-    const float statScale = std::max(1.0f, s * 0.65f);
-    const float iconSize = 7.0f * s;
+    // 3. Survival Vitals (Health Hearts & Hunger Drumsticks above hotbar)
+    if (!isCreative) {
+        const float iconSize = 9.0f * s;
+        const float iconSpacing = 8.0f * s;
+        const float vitalsY = hotbarMarginY + slot + 6.0f * s;
 
-    // Stat 1: Food / Hunger (Brown text + drumstick icon)
-    const std::string hungerStr = std::to_string(static_cast<int>(std::ceil(hunger * 0.20f)));
-    drawText(infoX, statY, hungerStr, statScale, glm::vec4(0.82f, 0.55f, 0.35f, 1.0f));
-    const float hw = textWidth(hungerStr, statScale);
-    drawTexturedRect(infoX + hw + 2.0f * s, statY - 5.0f * s, iconSize, iconSize, TextureTile::CookedPorkchop);
-    // Sub-stat: +20 in gold
-    drawText(infoX, subStatY, "+20", statScale, glm::vec4(0.95f, 0.85f, 0.25f, 1.0f));
+        // XP Bar (Directly between hotbar and hearts)
+        const float xpBarW = totalHotbarW;
+        const float xpBarH = 3.0f * s;
+        const float xpBarY = hotbarMarginY + slot + 2.0f * s;
+        drawRect(hotbarStartX, xpBarY, xpBarW, xpBarH, glm::vec4(0.0f, 0.0f, 0.0f, 0.8f));
+        drawRect(hotbarStartX + 1.0f * s, xpBarY + 0.5f * s, xpBarW - 2.0f * s, xpBarH - 1.0f * s, glm::vec4(0.1f, 0.25f, 0.05f, 1.0f));
+        drawRect(hotbarStartX + 1.0f * s, xpBarY + 0.5f * s, (xpBarW - 2.0f * s) * 0.45f, xpBarH - 1.0f * s, glm::vec4(0.50f, 1.0f, 0.15f, 1.0f));
 
-    // Stat 2: Oxygen / Thirst (Blue text + water droplet icon)
-    const float stat2X = infoX + 38.0f * s;
-    const std::string oxyStr = std::to_string(static_cast<int>(std::ceil(oxygen * 1.33f)));
-    drawText(stat2X, statY, oxyStr, statScale, glm::vec4(0.25f, 0.60f, 0.95f, 1.0f));
-    const float ow = textWidth(oxyStr, statScale);
-    drawTexturedRect(stat2X + ow + 2.0f * s, statY - 5.0f * s, iconSize, iconSize, TextureTile::Water);
-    // Sub-stat: +20 in cyan/light blue
-    drawText(stat2X, subStatY, "+20", statScale, glm::vec4(0.40f, 0.75f, 1.0f, 1.0f));
+        // Green Level Number
+        const std::string lvlStr = "1";
+        const float lvlScale = std::max(1.0f, s * 0.70f);
+        const float lw = textWidth(lvlStr, lvlScale);
+        const float lh = textHeight(lvlScale);
+        drawText(cx - lw * 0.5f + 1.0f, xpBarY + lh + 1.0f * s - 1.0f, lvlStr, lvlScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.9f));
+        drawText(cx - lw * 0.5f, xpBarY + lh + 1.0f * s, lvlStr, lvlScale, glm::vec4(0.50f, 1.0f, 0.15f, 1.0f));
 
-    // Stat 3: Armor / Defense (Silver text + shield icon)
-    const float stat3X = stat2X + 38.0f * s;
-    const std::string armorStr = "20";
-    drawText(stat3X, statY, armorStr, statScale, glm::vec4(0.85f, 0.88f, 0.92f, 1.0f));
-    const float aw = textWidth(armorStr, statScale);
-    drawTexturedRect(stat3X + aw + 2.0f * s, statY - 5.0f * s, iconSize, iconSize, TextureTile::IronIngot);
-    // Sub-stat: +20 in steel blue
-    drawText(stat3X, subStatY, "+20", statScale, glm::vec4(0.55f, 0.65f, 0.85f, 1.0f));
+        // 10 Health Hearts on Left (0..20 HP, 2 HP per heart)
+        const float heartsStartX = hotbarStartX;
+        const float hp = std::clamp(health, 0.0f, maxHealth);
+        const int hpPoints = static_cast<int>(std::ceil(hp * (20.0f / maxHealth)));
+
+        for (int h = 0; h < 10; ++h) {
+            float hx = heartsStartX + h * iconSpacing;
+            float hy = vitalsY;
+
+            // Low health jitter / damage shake
+            if (hpPoints <= 4) {
+                const float shake = std::sin(animTime * 20.0f + h) * 1.5f * s;
+                hy += shake;
+            } else if (hurtTimer > 0.0f) {
+                hy += (std::rand() % 3 - 1) * 1.0f * s;
+            }
+
+            drawTexturedRect(hx, hy, iconSize, iconSize, TextureTile::HeartEmpty);
+
+            const int heartVal = (h + 1) * 2;
+            if (hpPoints >= heartVal) {
+                drawTexturedRect(hx, hy, iconSize, iconSize, TextureTile::HeartFull);
+            } else if (hpPoints == heartVal - 1) {
+                drawTexturedRect(hx, hy, iconSize, iconSize, TextureTile::HeartHalf);
+            }
+        }
+
+        // 10 Food Drumsticks on Right (0..20 Hunger, 2 Hunger per drumstick)
+        const float foodStartX = hotbarStartX + totalHotbarW - iconSize;
+        const float hng = std::clamp(hunger, 0.0f, maxHunger);
+        const int hngPoints = static_cast<int>(std::ceil(hng * (20.0f / maxHunger)));
+
+        for (int f = 0; f < 10; ++f) {
+            const float fx = foodStartX - f * iconSpacing;
+            const float fy = vitalsY;
+
+            drawTexturedRect(fx, fy, iconSize, iconSize, TextureTile::FoodEmpty);
+
+            const int foodVal = (f + 1) * 2;
+            if (hngPoints >= foodVal) {
+                drawTexturedRect(fx, fy, iconSize, iconSize, TextureTile::FoodFull);
+            } else if (hngPoints == foodVal - 1) {
+                drawTexturedRect(fx, fy, iconSize, iconSize, TextureTile::FoodHalf);
+            }
+        }
+
+        // 10 Air Bubbles above Food when in water
+        if (inWater || oxygen < maxOxygen) {
+            const float oxyRatio = std::clamp(oxygen / maxOxygen, 0.0f, 1.0f);
+            const int bubbles = static_cast<int>(std::ceil(oxyRatio * 10.0f));
+            const float bubbleY = vitalsY + iconSize + 2.0f * s;
+
+            for (int b = 0; b < bubbles; ++b) {
+                const float bx = foodStartX - b * iconSpacing;
+                drawTexturedRect(bx, bubbleY, iconSize, iconSize, TextureTile::AirBubble);
+            }
+        }
+    }
 
     endUI();
 }
@@ -1212,14 +1253,61 @@ void Renderer::drawHurtVignette(float hurtTimer, float healthRatio, float animTi
     const glm::vec4 colSolid(0.60f, 0.02f, 0.04f, totalAlpha);
     const glm::vec4 colTrans(0.60f, 0.02f, 0.04f, 0.0f);
 
-    // Bottom edge
     drawGradientRect(0.0f, 0.0f, fbW, thick, colSolid, colTrans);
-    // Top edge
     drawGradientRect(0.0f, fbH - thick, fbW, thick, colTrans, colSolid);
-
-    // Left and Right edge corner overlays
     drawRect(0.0f, 0.0f, thick * 0.4f, fbH, colSolid * 0.4f);
     drawRect(fbW - thick * 0.4f, 0.0f, thick * 0.4f, fbH, colSolid * 0.4f);
+
+    endUI();
+}
+
+void Renderer::drawTitleBanner(const std::string& title, const std::string& subtitle, float alpha, float /*animTime*/) {
+    if (alpha <= 0.01f || title.empty()) return;
+
+    const float s = m_uiScale;
+    beginUI();
+
+    const float fbW = static_cast<float>(m_fbWidth);
+    const float fbH = static_cast<float>(m_fbHeight);
+    const float centerY = fbH * 0.72f;
+
+    // 1. Decorative horizontal separator lines
+    const float lineW = std::min(fbW * 0.6f, 320.0f * s);
+    const float lineX = (fbW - lineW) * 0.5f;
+
+    // Top gold line
+    drawRect(lineX, centerY + (24.0f * s), lineW, 1.5f * s, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
+    // Bottom gold line
+    drawRect(lineX, centerY - (16.0f * s), lineW, 1.5f * s, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
+
+    // Center diamond accent
+    const float dSize = 4.0f * s;
+    drawRect((fbW - dSize) * 0.5f, centerY + (24.0f * s) - (dSize * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
+    drawRect((fbW - dSize) * 0.5f, centerY - (16.0f * s) - (dSize * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
+
+    // 2. Large Title Text
+    const float titleScale = std::max(2.0f, s * 1.5f);
+    const float titleW = textWidth(title, titleScale);
+    const float titleX = (fbW - titleW) * 0.5f;
+    const float titleY = centerY + (2.0f * s);
+
+    // Shadow
+    drawText(titleX + 2.0f * s, titleY - 2.0f * s, title, titleScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.95f));
+    // Foreground Title
+    drawText(titleX, titleY, title, titleScale, glm::vec4(1.0f, 0.92f, 0.35f, alpha));
+
+    // 3. Subtitle Text
+    if (!subtitle.empty()) {
+        const float subScale = std::max(1.0f, s * 0.75f);
+        const float subW = textWidth(subtitle, subScale);
+        const float subX = (fbW - subW) * 0.5f;
+        const float subY = centerY - (10.0f * s);
+
+        // Subtitle Shadow
+        drawText(subX + 1.0f * s, subY - 1.0f * s, subtitle, subScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.90f));
+        // Subtitle Foreground (Crimson/Parchment)
+        drawText(subX, subY, subtitle, subScale, glm::vec4(0.95f, 0.85f, 0.75f, alpha * 0.95f));
+    }
 
     endUI();
 }
@@ -1242,7 +1330,6 @@ void Renderer::drawDeathScreen(float /*animTime*/, const glm::vec2& mousePos,
     const float titleX = (fbW - titleW) * 0.5f;
     const float titleY = fbH * 0.68f;
 
-    // Glowing drop shadow
     drawText(titleX + 2.0f, titleY - 2.0f, title, titleScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.95f));
     drawText(titleX, titleY, title, titleScale, glm::vec4(0.95f, 0.08f, 0.10f, 1.0f));
 
@@ -1302,15 +1389,10 @@ void Renderer::drawDeathScreen(float /*animTime*/, const glm::vec2& mousePos,
 void Renderer::drawDebugOverlay(const std::vector<std::string>& lines) {
     if (lines.empty()) return;
 
-    // The overlay must not count itself, otherwise the draw-call figure it
-    // displays would include the ~lines.size()+1 quads it is made of. Snapshot
-    // the counters and restore them afterwards.
     const int savedDrawCalls = m_stats.drawCalls;
     const int savedUiCalls = m_stats.uiDrawCalls;
     const uint32_t savedTriangles = m_stats.triangles;
 
-    // Deliberately uses its own scale rather than m_uiScale: the debug readout
-    // has to stay legible even at GUI Scale 1.
     const float scale = std::clamp(m_uiScale * 0.75f, 1.0f, 2.0f);
     const float lineHeight = textHeight(scale) + 2.0f;
     const float pad = 4.0f;
@@ -1330,7 +1412,6 @@ void Renderer::drawDebugOverlay(const std::vector<std::string>& lines) {
 
     float textY = y + panelH - pad - textHeight(scale);
     for (const std::string& line : lines) {
-        // Dark backing for legibility against bright terrain.
         drawText(x + pad + 1.0f, textY - 1.0f, line, scale, glm::vec4(0.0f, 0.0f, 0.0f, 0.75f));
         drawText(x + pad, textY, line, scale, glm::vec4(1.0f, 1.0f, 1.0f, 0.95f));
         textY -= lineHeight;
@@ -1342,575 +1423,463 @@ void Renderer::drawDebugOverlay(const std::vector<std::string>& lines) {
     m_stats.triangles = savedTriangles;
 }
 
-void Renderer::drawConsoleInventory(int activeCategory, int selectedRecipeIndex,
-                                  bool hasCraftingTable,
-                                  int selectedHotbarSlot,
-                                  const ItemSlot* hotbar, int hotbarCount,
-                                  const ItemSlot* inventory, int invCount,
-                                  const ItemSlot& heldItem, const glm::vec2& mousePos) {
+// ---------------------------------------------------------------------------
+// Modern Minecraft Container Drawing Helpers
+// ---------------------------------------------------------------------------
+namespace {
+
+void drawMinecraftContainer(Renderer* ren, float x, float y, float w, float h, float s) {
+    // Outer black border
+    ren->drawRect(x - 2.0f * s, y - 2.0f * s, w + 4.0f * s, h + 4.0f * s, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    // White/highlight top & left edge
+    ren->drawRect(x - 1.0f * s, y, w + 2.0f * s, h + 1.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    // Dark gray bottom & right edge
+    ren->drawRect(x, y - 1.0f * s, w + 1.0f * s, 1.0f * s, glm::vec4(0.33f, 0.33f, 0.33f, 1.0f));
+    ren->drawRect(x + w, y, 1.0f * s, h, glm::vec4(0.33f, 0.33f, 0.33f, 1.0f));
+    // Container base light gray fill
+    ren->drawRect(x, y, w, h, glm::vec4(0.776f, 0.776f, 0.776f, 1.0f));
+}
+
+void drawMinecraftSlot(Renderer* ren, float x, float y, float slotSize, const ItemSlot& item,
+                       const glm::vec2& mousePos, float s, std::string& outTooltip,
+                       TextureTile silhouette = TextureTile::Count, bool isSelected = false) {
+    const float border = 1.0f * s;
+    const bool hovered = (mousePos.x >= x && mousePos.x <= x + slotSize &&
+                          mousePos.y >= y && mousePos.y <= y + slotSize);
+
+    // Sunken recess
+    ren->drawRect(x, y, slotSize, slotSize, glm::vec4(0.22f, 0.22f, 0.22f, 1.0f));
+    ren->drawRect(x + border, y, slotSize - border, slotSize - border, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    ren->drawRect(x + border, y + border, slotSize - 2.0f * border, slotSize - 2.0f * border, glm::vec4(0.55f, 0.55f, 0.55f, 1.0f));
+
+    if (isSelected) {
+        ren->drawRect(x - 1.0f * s, y - 1.0f * s, slotSize + 2.0f * s, slotSize + 2.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 0.9f));
+    }
+
+    if (item.empty()) {
+        if (silhouette != TextureTile::Count) {
+            ren->drawTexturedRect(x + 1.5f * s, y + 1.5f * s, slotSize - 3.0f * s, slotSize - 3.0f * s, silhouette);
+        }
+    } else {
+        const float iconPad = 1.5f * s;
+        ren->drawBlockIcon(x + iconPad, y + iconPad, slotSize - 2.0f * iconPad, slotSize - 2.0f * iconPad, item.id);
+
+        if (item.count > 1) {
+            const std::string cntStr = std::to_string(item.count);
+            const float cntScale = std::max(1.0f, s * 0.55f);
+            const float cw = ren->textWidth(cntStr, cntScale);
+            ren->drawText(x + slotSize - cw - 1.0f * s + 1.0f, y + ren->textHeight(cntScale) + 1.0f * s - 1.0f,
+                          cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
+            ren->drawText(x + slotSize - cw - 1.0f * s, y + ren->textHeight(cntScale) + 1.0f * s,
+                          cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
+
+        if (isTool(item.id) && item.durability > 0) {
+            const float barH = std::max(1.5f, 1.2f * s);
+            ren->drawDurabilityBar(x + border, y + border, slotSize - 2.0f * border, barH,
+                                  item.durability, maxToolDurability(item.id));
+        }
+    }
+
+    if (hovered) {
+        ren->drawRect(x + border, y + border, slotSize - 2.0f * border, slotSize - 2.0f * border,
+                      glm::vec4(1.0f, 1.0f, 1.0f, 0.30f));
+        if (!item.empty()) {
+            outTooltip = blockDef(item.id).name;
+            if (isTool(item.id)) {
+                outTooltip += " [" + std::to_string(item.durability) + "/" +
+                              std::to_string(maxToolDurability(item.id)) + "]";
+            }
+        }
+    }
+}
+
+void drawInventoryGrid(Renderer* ren, float startX, float startY, float slotSize, float gap,
+                       const ItemSlot* inventory, int invCount, const ItemSlot* hotbar, int hotbarCount,
+                       int selectedHotbarSlot, const glm::vec2& mousePos, float s, std::string& outTooltip) {
+    // 3 Rows x 9 Columns Main Inventory (27 slots)
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 9; ++col) {
+            const int idx = row * 9 + col;
+            const float sx = startX + col * (slotSize + gap);
+            const float sy = startY - (row + 1) * slotSize - row * gap;
+            const ItemSlot& item = (idx < invCount) ? inventory[idx] : ItemSlot();
+            drawMinecraftSlot(ren, sx, sy, slotSize, item, mousePos, s, outTooltip);
+        }
+    }
+
+    // 1 Row x 9 Columns Hotbar (9 slots)
+    const float hotbarY = startY - 3 * (slotSize + gap) - 4.0f * s - slotSize;
+    for (int col = 0; col < 9 && col < hotbarCount; ++col) {
+        const float sx = startX + col * (slotSize + gap);
+        drawMinecraftSlot(ren, sx, hotbarY, slotSize, hotbar[col], mousePos, s, outTooltip,
+                          TextureTile::Count, (col == selectedHotbarSlot));
+    }
+}
+
+void renderTooltipAndCursor(Renderer* ren, const std::string& tooltip, const ItemSlot& heldItem,
+                            const glm::vec2& mousePos, float s, int fbWidth) {
+    if (!tooltip.empty()) {
+        const float tipScale = std::max(1.0f, s * 0.70f);
+        const float tipW = ren->textWidth(tooltip, tipScale);
+        const float tipH = ren->textHeight(tipScale);
+        const float tipX = std::min(mousePos.x + 10.0f * s, static_cast<float>(fbWidth) - tipW - 10.0f * s);
+        const float tipY = std::max(mousePos.y + tipH + 4.0f * s, tipH + 10.0f * s);
+
+        ren->drawRect(tipX - 4.0f * s, tipY - tipH - 4.0f * s, tipW + 8.0f * s, tipH + 8.0f * s, glm::vec4(0.06f, 0.02f, 0.10f, 0.96f));
+        ren->drawRect(tipX - 3.0f * s, tipY - tipH - 3.0f * s, tipW + 6.0f * s, tipH + 6.0f * s, glm::vec4(0.20f, 0.05f, 0.50f, 0.85f));
+        ren->drawRect(tipX - 2.0f * s, tipY - tipH - 2.0f * s, tipW + 4.0f * s, tipH + 4.0f * s, glm::vec4(0.06f, 0.02f, 0.10f, 0.96f));
+        ren->drawText(tipX, tipY, tooltip, tipScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    }
+
+    if (!heldItem.empty()) {
+        const float itemSize = 16.0f * s;
+        ren->drawRect(mousePos.x - itemSize * 0.5f + 1.5f * s, mousePos.y - itemSize * 0.5f - 1.5f * s,
+                      itemSize, itemSize, glm::vec4(0.0f, 0.0f, 0.0f, 0.4f));
+        ren->drawBlockIcon(mousePos.x - itemSize * 0.5f, mousePos.y - itemSize * 0.5f,
+                           itemSize, itemSize, heldItem.id);
+        if (heldItem.count > 1) {
+            const std::string cntStr = std::to_string(heldItem.count);
+            const float cntScale = std::max(1.0f, s * 0.60f);
+            ren->drawText(mousePos.x + itemSize * 0.3f, mousePos.y - itemSize * 0.3f,
+                          cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
+    }
+}
+
+} // namespace
+
+void Renderer::drawSurvivalInventory(int selectedHotbarSlot,
+                                     const ItemSlot* hotbar, int hotbarCount,
+                                     const ItemSlot* inventory, int invCount,
+                                     const ItemSlot* armor, int armorCount,
+                                     const ItemSlot& offhand,
+                                     const ItemSlot* craftingSlots,
+                                     const ItemSlot& craftingResult,
+                                     const ItemSlot& heldItem,
+                                     const glm::vec2& mousePos,
+                                     bool recipeBookOpen) {
     const float s = m_uiScale;
-    const float slot = 16.0f * s;
-    const float gap = 2.0f * s;
-    const float border = 1.2f * s;
-
-    const auto& categories = getConsoleRecipeCategories();
-    if (activeCategory < 0 || activeCategory >= static_cast<int>(categories.size())) activeCategory = 0;
-    const auto& cat = categories[activeCategory];
-    const auto& recipes = cat.recipes;
-    if (selectedRecipeIndex < 0 || selectedRecipeIndex >= static_cast<int>(recipes.size())) selectedRecipeIndex = 0;
-    const auto& selectedRecipe = recipes[selectedRecipeIndex];
-
-    const float containerW = 340.0f * s;
-    const float containerH = 208.0f * s;
-
+    const float containerW = 176.0f * s;
+    const float containerH = 166.0f * s;
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
-
     const float left = cx - containerW * 0.5f;
     const float bottom = cy - containerH * 0.5f;
 
+    const float slotSize = 18.0f * s;
+    const float gap = 0.0f; // Authentic contiguous slots with 1px border
+
     beginUI();
 
-    // 1. Fullscreen dark backdrop dimming
-    drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight),
-             glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
+    // Dim background
+    drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight), glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
 
-    // 2. Main Console Window Container (Classic Console Light Stone Frame)
-    drawRect(left - 2.0f * s, bottom - 2.0f * s, containerW + 4.0f * s, containerH + 4.0f * s,
-             glm::vec4(0.15f, 0.15f, 0.18f, 1.0f));
-    drawRect(left - 1.0f * s, bottom - 1.0f * s, containerW + 2.0f * s, containerH + 2.0f * s,
-             glm::vec4(0.85f, 0.85f, 0.88f, 1.0f));
-    drawGradientRect(left, bottom, containerW, containerH,
-                     glm::vec4(0.72f, 0.72f, 0.76f, 0.98f),
-                     glm::vec4(0.78f, 0.78f, 0.82f, 0.98f));
+    // Main Minecraft container window
+    drawMinecraftContainer(this, left, bottom, containerW, containerH, s);
 
-    // 3. Category Tabs along top header
-    const int numTabs = static_cast<int>(categories.size());
-    const float tabPad = 8.0f * s;
-    const float tabW = (containerW - 2.0f * tabPad - (numTabs - 1) * 3.0f * s) / numTabs;
-    const float tabH = 18.0f * s;
-    const float tabTop = bottom + containerH;
+    std::string tooltip;
 
-    for (int t = 0; t < numTabs; ++t) {
-        const float tx = left + tabPad + t * (tabW + 3.0f * s);
-        const float ty = tabTop - tabH;
-        const bool active = (t == activeCategory);
-        const bool hovered = (mousePos.x >= tx && mousePos.x <= tx + tabW &&
-                              mousePos.y >= ty && mousePos.y <= tabTop);
-
-        // Tab outline and background
-        drawRect(tx, ty, tabW, tabH, glm::vec4(0.15f, 0.15f, 0.18f, 1.0f));
-        if (active) {
-            drawRect(tx + 1.0f * s, ty + 1.0f * s, tabW - 2.0f * s, tabH, glm::vec4(0.86f, 0.86f, 0.90f, 1.0f));
-            drawRect(tx + 2.0f * s, ty + 1.0f * s, tabW - 4.0f * s, 2.0f * s, glm::vec4(0.95f, 0.75f, 0.20f, 1.0f));
-        } else if (hovered) {
-            drawRect(tx + 1.0f * s, ty + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.76f, 0.76f, 0.80f, 1.0f));
-        } else {
-            drawRect(tx + 1.0f * s, ty + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.62f, 0.62f, 0.66f, 1.0f));
-        }
-
-        // Tab Icon + Title
-        const float iconS = 12.0f * s;
-        drawTexturedRect(tx + 3.0f * s, ty + (tabH - iconS) * 0.5f, iconS, iconS, categories[t].tabIcon);
-        const float tScale = std::max(1.0f, s * 0.58f);
-        const std::string tName = categories[t].name;
-        const glm::vec4 tCol = active ? glm::vec4(0.10f, 0.10f, 0.12f, 1.0f) : glm::vec4(0.25f, 0.25f, 0.28f, 1.0f);
-        drawText(tx + iconS + 5.0f * s, ty + tabH - 4.0f * s, tName, tScale, tCol);
-    }
-
-    // 4. Horizontal Category Recipe Selection Row
-    const float recipeRowY = tabTop - tabH - 24.0f * s;
-    const float recipeRowX = left + 12.0f * s;
-    const float rSlot = 18.0f * s;
-    const float rGap = 3.0f * s;
-
-    std::string hoveredTooltip;
-
-    for (size_t r = 0; r < recipes.size(); ++r) {
-        const float rx = recipeRowX + r * (rSlot + rGap);
-        const float ry = recipeRowY;
-        const bool selected = (static_cast<int>(r) == selectedRecipeIndex);
-        const bool hovered = (mousePos.x >= rx && mousePos.x <= rx + rSlot &&
-                              mousePos.y >= ry && mousePos.y <= ry + rSlot);
-
-        // Sunken recipe slot
-        drawRect(rx, ry, rSlot, rSlot, glm::vec4(0.25f, 0.25f, 0.28f, 1.0f));
-        drawRect(rx + border, ry, rSlot - border, rSlot - border, glm::vec4(0.88f, 0.88f, 0.90f, 1.0f));
-        drawRect(rx + border, ry + border, rSlot - 2.0f * border, rSlot - 2.0f * border, glm::vec4(0.55f, 0.55f, 0.58f, 1.0f));
-
-        if (selected) {
-            drawRect(rx - 2.0f * s, ry - 2.0f * s, rSlot + 4.0f * s, rSlot + 4.0f * s, glm::vec4(0.98f, 0.82f, 0.22f, 1.0f));
-            drawRect(rx - 1.0f * s, ry - 1.0f * s, rSlot + 2.0f * s, rSlot + 2.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 0.40f));
-        } else if (hovered) {
-            drawRect(rx - 1.5f * s, ry - 1.5f * s, rSlot + 3.0f * s, rSlot + 3.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 0.85f));
-        }
-
-        // Draw recipe output icon
-        drawBlockIcon(rx + 2.0f * s, ry + 2.0f * s, rSlot - 4.0f * s, rSlot - 4.0f * s, recipes[r].outputId);
-
-        if (recipes[r].tableOnly && !hasCraftingTable) {
-            // Red indicator for 3x3 table requirement
-            drawRect(rx + rSlot - 5.0f * s, ry + rSlot - 5.0f * s, 4.0f * s, 4.0f * s, glm::vec4(0.85f, 0.20f, 0.20f, 0.95f));
-        }
-
-        if (hovered) {
-            hoveredTooltip = recipes[r].name;
-            if (recipes[r].tableOnly && !hasCraftingTable) hoveredTooltip += " (Requires Crafting Table)";
-        }
-    }
-
-    // Divider between recipe bar and bottom content
-    const float midDividerY = recipeRowY - 6.0f * s;
-    drawRect(left + 10.0f * s, midDividerY, containerW - 20.0f * s, 1.2f * s, glm::vec4(0.45f, 0.45f, 0.48f, 0.85f));
-    drawRect(left + 10.0f * s, midDividerY - 1.0f * s, containerW - 20.0f * s, 1.0f * s, glm::vec4(0.88f, 0.88f, 0.90f, 0.70f));
-
-    // Helper lambda to draw interactive inventory/hotbar slots
-    auto drawSlot = [&](float x, float y, const ItemSlot& item, bool isHotbar, int hotbarIdx) {
-        const bool hovered = (mousePos.x >= x && mousePos.x <= x + slot &&
-                              mousePos.y >= y && mousePos.y <= y + slot);
-        const bool active = (isHotbar && hotbarIdx == selectedHotbarSlot);
-
-        // Sunken bevel
-        drawRect(x, y, slot, slot, glm::vec4(0.25f, 0.25f, 0.28f, 1.0f));
-        drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.88f, 0.88f, 0.90f, 1.0f));
-        drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.55f, 0.55f, 0.58f, 1.0f));
-
-        if (hovered) {
-            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(1.0f, 0.84f, 0.22f, 1.0f));
-            drawRect(x, y, slot, slot, glm::vec4(1.0f, 1.0f, 1.0f, 0.25f));
-            if (!item.empty()) {
-                hoveredTooltip = blockDef(item.id).name;
-                if (isHotbar) hoveredTooltip += " (Slot " + std::to_string(hotbarIdx + 1) + ")";
-                if (isTool(item.id)) {
-                    hoveredTooltip += " [" + std::to_string(item.durability) + "/" +
-                                   std::to_string(maxToolDurability(item.id)) + "]";
-                }
-            }
-        } else if (active) {
-            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(0.95f, 0.95f, 0.95f, 1.0f));
-        }
-
-        if (!item.empty()) {
-            const float iconPad = 1.5f * s;
-            drawBlockIcon(x + iconPad, y + iconPad, slot - 2.0f * iconPad, slot - 2.0f * iconPad, item.id);
-
-            // Stack count
-            if (item.count > 1) {
-                const std::string cntStr = std::to_string(item.count);
-                const float cntScale = std::max(1.0f, s * 0.55f);
-                const float cw = textWidth(cntStr, cntScale);
-                drawText(x + slot - cw - 1.0f * s + 1.0f, y + textHeight(cntScale) + 1.0f * s - 1.0f,
-                         cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
-                drawText(x + slot - cw - 1.0f * s, y + textHeight(cntScale) + 1.0f * s,
-                         cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-            }
-
-            // Durability bar
-            if (isTool(item.id) && item.durability > 0) {
-                const float barH = std::max(1.5f, 1.2f * s);
-                drawDurabilityBar(x + border, y + border, slot - 2.0f * border, barH,
-                                  item.durability, maxToolDurability(item.id));
-            }
-        }
+    // 1. Top-Left: 4 Armor Slots (Helmet, Chestplate, Leggings, Boots)
+    const float armorX = left + 8.0f * s;
+    const float armorTop = bottom + containerH - 8.0f * s;
+    const TextureTile armorSilhouettes[4] = {
+        TextureTile::HelmetIcon, TextureTile::ChestplateIcon,
+        TextureTile::LeggingsIcon, TextureTile::BootsIcon
     };
 
-    // 5. Left Panel: Selected Recipe Info & 3x3 Grid Preview
-    const float leftPanelX = left + 14.0f * s;
-    const float leftPanelTop = midDividerY - 6.0f * s;
+    for (int a = 0; a < 4; ++a) {
+        const float ay = armorTop - (a + 1) * slotSize;
+        const ItemSlot& item = (a < armorCount) ? armor[a] : ItemSlot();
+        drawMinecraftSlot(this, armorX, ay, slotSize, item, mousePos, s, tooltip, armorSilhouettes[a]);
+    }
 
-    // Recipe Title
-    const float rTitleScale = std::max(1.0f, s * 0.78f);
-    drawText(leftPanelX, leftPanelTop, selectedRecipe.name, rTitleScale, glm::vec4(0.12f, 0.12f, 0.15f, 1.0f));
+    // 2. Center: Player 2D/3D Avatar Preview Box
+    const float playerBoxX = armorX + slotSize + 2.0f * s;
+    const float playerBoxY = armorTop - 4 * slotSize;
+    const float playerBoxW = 51.0f * s;
+    const float playerBoxH = 72.0f * s;
 
-    // 3x3 Preview Grid
-    const float grid3x3Left = leftPanelX;
-    const float grid3x3Top = leftPanelTop - 14.0f * s;
-    const float pSlot = 14.0f * s;
-    const float pGap = 1.5f * s;
+    // Sunken dark box
+    drawRect(playerBoxX, playerBoxY, playerBoxW, playerBoxH, glm::vec4(0.22f, 0.22f, 0.22f, 1.0f));
+    drawRect(playerBoxX + 1.0f * s, playerBoxY, playerBoxW - 1.0f * s, playerBoxH - 1.0f * s, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+    drawRect(playerBoxX + 1.0f * s, playerBoxY + 1.0f * s, playerBoxW - 2.0f * s, playerBoxH - 2.0f * s, glm::vec4(0.05f, 0.05f, 0.06f, 1.0f));
+
+    // Render 2D Player Face & Torso Preview in box
+    const float faceSize = 24.0f * s;
+    drawTexturedRect(playerBoxX + (playerBoxW - faceSize) * 0.5f, playerBoxY + playerBoxH - faceSize - 8.0f * s,
+                     faceSize, faceSize, TextureTile::PlayerFace);
+    const float torsoW = 24.0f * s;
+    const float torsoH = 28.0f * s;
+    drawTexturedRect(playerBoxX + (playerBoxW - torsoW) * 0.5f, playerBoxY + 10.0f * s,
+                     torsoW, torsoH, TextureTile::PlayerTorso);
+
+    // 3. Offhand slot (Right of player box)
+    const float offhandX = playerBoxX + playerBoxW + 2.0f * s;
+    const float offhandY = playerBoxY;
+    drawMinecraftSlot(this, offhandX, offhandY, slotSize, offhand, mousePos, s, tooltip, TextureTile::OffhandIcon);
+
+    // 4. Top-Right: "Crafting" label + 2x2 Crafting Grid + Recipe Book button + Arrow + Result Slot
+    const float craftingGridX = left + 98.0f * s;
+    const float craftingGridTop = armorTop - 10.0f * s;
+
+    const float titleScale = std::max(1.0f, s * 0.65f);
+    drawText(craftingGridX, armorTop - 2.0f * s, "Crafting", titleScale, glm::vec4(0.25f, 0.25f, 0.25f, 1.0f));
+
+    // Green Recipe Book Button
+    const float bookBtnX = craftingGridX + 2 * slotSize + 4.0f * s;
+    const float bookBtnY = armorTop - 8.0f * s;
+    const float bookBtnSize = 14.0f * s;
+    const bool bookHovered = (mousePos.x >= bookBtnX && mousePos.x <= bookBtnX + bookBtnSize &&
+                              mousePos.y >= bookBtnY && mousePos.y <= bookBtnY + bookBtnSize);
+    drawRect(bookBtnX, bookBtnY, bookBtnSize, bookBtnSize,
+             recipeBookOpen ? glm::vec4(0.2f, 0.7f, 0.25f, 1.0f) :
+             (bookHovered ? glm::vec4(0.35f, 0.85f, 0.35f, 1.0f) : glm::vec4(0.18f, 0.55f, 0.20f, 1.0f)));
+    drawTexturedRect(bookBtnX + 1.0f * s, bookBtnY + 1.0f * s, bookBtnSize - 2.0f * s, bookBtnSize - 2.0f * s, TextureTile::RecipeBook);
+    if (bookHovered) tooltip = "Recipe Book (Toggle)";
+
+    // 2x2 Crafting Slots (indices 0..3)
+    for (int r = 0; r < 2; ++r) {
+        for (int c = 0; c < 2; ++c) {
+            const int idx = r * 2 + c;
+            const float sx = craftingGridX + c * slotSize;
+            const float sy = craftingGridTop - (r + 1) * slotSize;
+            const ItemSlot& item = (craftingSlots != nullptr) ? craftingSlots[idx] : ItemSlot();
+            drawMinecraftSlot(this, sx, sy, slotSize, item, mousePos, s, tooltip);
+        }
+    }
+
+    // Crafting Arrow -->
+    const float arrowX = craftingGridX + 2 * slotSize + 6.0f * s;
+    const float arrowY = craftingGridTop - 1.5f * slotSize;
+    drawTexturedRect(arrowX, arrowY, 16.0f * s, 16.0f * s, TextureTile::CraftingArrow);
+
+    // 1 Result Slot
+    const float resultX = arrowX + 22.0f * s;
+    const float resultY = craftingGridTop - 1.7f * slotSize;
+    const float resSlotSize = 22.0f * s;
+    drawMinecraftSlot(this, resultX, resultY, resSlotSize, craftingResult, mousePos, s, tooltip);
+
+    // 5. Bottom: "Inventory" Label + 3x9 Main Grid + 1x9 Hotbar Grid
+    const float invStartX = left + 8.0f * s;
+    const float invStartY = bottom + 74.0f * s;
+    drawText(invStartX, invStartY + 10.0f * s, "Inventory", titleScale, glm::vec4(0.25f, 0.25f, 0.25f, 1.0f));
+
+    drawInventoryGrid(this, invStartX, invStartY, slotSize, gap,
+                      inventory, invCount, hotbar, hotbarCount, selectedHotbarSlot, mousePos, s, tooltip);
+
+    // Render hover tooltip and dragged item on top
+    renderTooltipAndCursor(this, tooltip, heldItem, mousePos, s, m_fbWidth);
+
+    endUI();
+}
+
+void Renderer::drawCraftingTableWorkbench(int selectedHotbarSlot,
+                                         const ItemSlot* hotbar, int hotbarCount,
+                                         const ItemSlot* inventory, int invCount,
+                                         const ItemSlot* craftingSlots,
+                                         const ItemSlot& craftingResult,
+                                         const ItemSlot& heldItem,
+                                         const glm::vec2& mousePos,
+                                         bool recipeBookOpen) {
+    const float s = m_uiScale;
+    const float containerW = 176.0f * s;
+    const float containerH = 166.0f * s;
+    const float cx = static_cast<float>(m_fbWidth) * 0.5f;
+    const float cy = static_cast<float>(m_fbHeight) * 0.5f;
+    const float left = cx - containerW * 0.5f;
+    const float bottom = cy - containerH * 0.5f;
+
+    const float slotSize = 18.0f * s;
+    const float gap = 0.0f;
+
+    beginUI();
+
+    // Dim background
+    drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight), glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
+
+    // Main container window
+    drawMinecraftContainer(this, left, bottom, containerW, containerH, s);
+
+    std::string tooltip;
+
+    // 1. Header & Crafting label
+    const float titleScale = std::max(1.0f, s * 0.65f);
+    const float topY = bottom + containerH - 8.0f * s;
+    drawText(left + 28.0f * s, topY - 2.0f * s, "Crafting", titleScale, glm::vec4(0.25f, 0.25f, 0.25f, 1.0f));
+
+    // Green Recipe Book Button
+    const float bookBtnX = left + 8.0f * s;
+    const float bookBtnY = topY - 14.0f * s;
+    const float bookBtnSize = 14.0f * s;
+    const bool bookHovered = (mousePos.x >= bookBtnX && mousePos.x <= bookBtnX + bookBtnSize &&
+                              mousePos.y >= bookBtnY && mousePos.y <= bookBtnY + bookBtnSize);
+    drawRect(bookBtnX, bookBtnY, bookBtnSize, bookBtnSize,
+             recipeBookOpen ? glm::vec4(0.2f, 0.7f, 0.25f, 1.0f) :
+             (bookHovered ? glm::vec4(0.35f, 0.85f, 0.35f, 1.0f) : glm::vec4(0.18f, 0.55f, 0.20f, 1.0f)));
+    drawTexturedRect(bookBtnX + 1.0f * s, bookBtnY + 1.0f * s, bookBtnSize - 2.0f * s, bookBtnSize - 2.0f * s, TextureTile::RecipeBook);
+    if (bookHovered) tooltip = "Recipe Book (Toggle)";
+
+    // 2. 3x3 Crafting Grid (indices 0..8)
+    const float grid3x3StartX = left + 30.0f * s;
+    const float grid3x3Top = topY - 10.0f * s;
 
     for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
             const int idx = r * 3 + c;
-            const float px = grid3x3Left + c * (pSlot + pGap);
-            const float py = grid3x3Top - (r + 1) * pSlot - r * pGap;
-            const BlockId ingId = selectedRecipe.gridPreview[idx];
-
-            drawRect(px, py, pSlot, pSlot, glm::vec4(0.25f, 0.25f, 0.28f, 1.0f));
-            drawRect(px + border, py, pSlot - border, pSlot - border, glm::vec4(0.88f, 0.88f, 0.90f, 1.0f));
-            drawRect(px + border, py + border, pSlot - 2.0f * border, pSlot - 2.0f * border, glm::vec4(0.60f, 0.60f, 0.64f, 1.0f));
-
-            if (ingId != BlockId::Air) {
-                drawBlockIcon(px + 1.0f * s, py + 1.0f * s, pSlot - 2.0f * s, pSlot - 2.0f * s, ingId);
-            }
+            const float sx = grid3x3StartX + c * slotSize;
+            const float sy = grid3x3Top - (r + 1) * slotSize;
+            const ItemSlot& item = (craftingSlots != nullptr) ? craftingSlots[idx] : ItemSlot();
+            drawMinecraftSlot(this, sx, sy, slotSize, item, mousePos, s, tooltip);
         }
     }
 
-    // Arrow pointing to Result
-    const float arrowX = grid3x3Left + 3.0f * (pSlot + pGap) + 8.0f * s;
-    const float arrowY = grid3x3Top - 1.5f * pSlot - 4.0f * s;
-    drawText(arrowX, arrowY + 8.0f * s, "=>", std::max(1.0f, s * 0.90f), glm::vec4(0.20f, 0.20f, 0.22f, 0.95f));
+    // 3. Arrow pointing to Result Slot
+    const float arrowX = grid3x3StartX + 3 * slotSize + 8.0f * s;
+    const float arrowY = grid3x3Top - 2.0f * slotSize;
+    drawTexturedRect(arrowX, arrowY, 18.0f * s, 18.0f * s, TextureTile::CraftingArrow);
 
-    // Result Slot & Craft button
-    const float resX = arrowX + 22.0f * s;
-    const float resY = grid3x3Top - 2.0f * pSlot - 2.0f * s;
-    const float resSlot = 22.0f * s;
+    // 4. Result Slot
+    const float resX = arrowX + 26.0f * s;
+    const float resY = grid3x3Top - 2.2f * slotSize;
+    const float resSize = 24.0f * s;
+    drawMinecraftSlot(this, resX, resY, resSize, craftingResult, mousePos, s, tooltip);
 
-    const bool hoverResult = (mousePos.x >= resX && mousePos.x <= resX + resSlot &&
-                              mousePos.y >= resY && mousePos.y <= resY + resSlot);
+    // 5. Bottom: "Inventory" Label + 3x9 Main Grid + 1x9 Hotbar Grid
+    const float invStartX = left + 8.0f * s;
+    const float invStartY = bottom + 74.0f * s;
+    drawText(invStartX, invStartY + 10.0f * s, "Inventory", titleScale, glm::vec4(0.25f, 0.25f, 0.25f, 1.0f));
 
-    drawRect(resX - 1.5f * s, resY - 1.5f * s, resSlot + 3.0f * s, resSlot + 3.0f * s,
-             hoverResult ? glm::vec4(1.0f, 0.85f, 0.20f, 1.0f) : glm::vec4(0.95f, 0.75f, 0.20f, 0.85f));
-    drawRect(resX, resY, resSlot, resSlot, glm::vec4(0.20f, 0.20f, 0.22f, 1.0f));
-    drawRect(resX + border, resY + border, resSlot - 2.0f * border, resSlot - 2.0f * border, glm::vec4(0.68f, 0.68f, 0.72f, 1.0f));
+    drawInventoryGrid(this, invStartX, invStartY, slotSize, gap,
+                      inventory, invCount, hotbar, hotbarCount, selectedHotbarSlot, mousePos, s, tooltip);
 
-    drawBlockIcon(resX + 2.0f * s, resY + 2.0f * s, resSlot - 4.0f * s, resSlot - 4.0f * s, selectedRecipe.outputId);
-
-    if (selectedRecipe.outputCount > 1) {
-        const std::string cntStr = std::to_string(selectedRecipe.outputCount);
-        const float cntScale = std::max(1.0f, s * 0.65f);
-        const float cw = textWidth(cntStr, cntScale);
-        drawText(resX + resSlot - cw - 1.0f * s, resY + textHeight(cntScale) + 1.0f * s, cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-    }
-
-    if (hoverResult) {
-        hoveredTooltip = selectedRecipe.name;
-    }
-
-    // Status / Craft action line
-    const float statusY = grid3x3Top - 3.0f * (pSlot + pGap) - 10.0f * s;
-    const float statusScale = std::max(1.0f, s * 0.62f);
-    if (selectedRecipe.tableOnly && !hasCraftingTable) {
-        drawText(leftPanelX, statusY, "Requires Crafting Table", statusScale, glm::vec4(0.85f, 0.40f, 0.10f, 1.0f));
-    } else {
-        // Check if player has ingredients
-        bool canCraft = true;
-        for (int i = 0; i < selectedRecipe.ingredientCount; ++i) {
-            const BlockId neededId = selectedRecipe.ingredients[i].id;
-            const int neededCount = selectedRecipe.ingredients[i].count;
-            int haveCount = 0;
-            for (int h = 0; h < hotbarCount; ++h) {
-                if (hotbar[h].id == neededId) haveCount += hotbar[h].count;
-            }
-            for (int inv = 0; inv < invCount; ++inv) {
-                if (inventory[inv].id == neededId) haveCount += inventory[inv].count;
-            }
-            if (haveCount < neededCount) { canCraft = false; break; }
-        }
-
-        if (canCraft) {
-            drawText(leftPanelX, statusY, "[CRAFT] Left Click / Space", statusScale, glm::vec4(0.10f, 0.55f, 0.15f, 1.0f));
-        } else {
-            drawText(leftPanelX, statusY, "Missing Ingredients", statusScale, glm::vec4(0.75f, 0.20f, 0.20f, 1.0f));
-        }
-    }
-
-    // Vertical divider between left and right panels
-    const float vDivX = left + 148.0f * s;
-    drawRect(vDivX, bottom + 20.0f * s, 1.2f * s, leftPanelTop - bottom - 16.0f * s, glm::vec4(0.45f, 0.45f, 0.48f, 0.85f));
-    drawRect(vDivX + 1.0f * s, bottom + 20.0f * s, 1.0f * s, leftPanelTop - bottom - 16.0f * s, glm::vec4(0.88f, 0.88f, 0.90f, 0.70f));
-
-    // 6. Right Panel: Player Inventory & Hotbar
-    const float rightPanelX = vDivX + 10.0f * s;
-    const float invTop = leftPanelTop;
-
-    drawText(rightPanelX, invTop, "Inventory", rTitleScale, glm::vec4(0.12f, 0.12f, 0.15f, 1.0f));
-
-    // 3x8 Main Inventory
-    const int cols = 8;
-    const int mainRows = 3;
-    const float mainInvTop = invTop - 14.0f * s;
-
-    for (int row = 0; row < mainRows; ++row) {
-        for (int col = 0; col < cols; ++col) {
-            const int idx = row * cols + col;
-            if (idx >= invCount) break;
-            const float x = rightPanelX + col * (slot + gap);
-            const float y = mainInvTop - (row + 1) * slot - row * gap;
-            drawSlot(x, y, inventory[idx], false, -1);
-        }
-    }
-
-    // Hotbar divider line
-    const float hbDivY = mainInvTop - mainRows * (slot + gap) - 2.0f * s;
-    drawRect(rightPanelX, hbDivY, cols * (slot + gap) - gap, 1.0f * s, glm::vec4(0.45f, 0.45f, 0.48f, 0.75f));
-
-    // 1x8 Hotbar Slots
-    const float hbY = hbDivY - 4.0f * s - slot;
-    for (int col = 0; col < cols && col < hotbarCount; ++col) {
-        const float x = rightPanelX + col * (slot + gap);
-        drawSlot(x, hbY, hotbar[col], true, col);
-    }
-
-    // 7. Floating Hover Tooltip
-    if (!hoveredTooltip.empty()) {
-        const float tipScale = std::max(1.0f, s * 0.72f);
-        const float tipW = textWidth(hoveredTooltip, tipScale);
-        const float tipH = textHeight(tipScale);
-        const float tipX = std::min(mousePos.x + 10.0f * s, static_cast<float>(m_fbWidth) - tipW - 10.0f * s);
-        const float tipY = std::max(mousePos.y + tipH + 4.0f * s, tipH + 10.0f * s);
-
-        drawRect(tipX - 4.0f * s, tipY - tipH - 4.0f * s, tipW + 8.0f * s, tipH + 8.0f * s, glm::vec4(0.08f, 0.04f, 0.12f, 0.96f));
-        drawRect(tipX - 3.0f * s, tipY - tipH - 3.0f * s, tipW + 6.0f * s, tipH + 6.0f * s, glm::vec4(0.35f, 0.10f, 0.65f, 0.85f));
-        drawRect(tipX - 2.0f * s, tipY - tipH - 2.0f * s, tipW + 4.0f * s, tipH + 4.0f * s, glm::vec4(0.08f, 0.04f, 0.12f, 0.96f));
-        drawText(tipX, tipY, hoveredTooltip, tipScale, glm::vec4(1.0f, 0.90f, 0.40f, 1.0f));
-    }
-
-    // 8. Held Item on Mouse Cursor
-    if (!heldItem.empty()) {
-        const float itemSize = 16.0f * s;
-        drawRect(mousePos.x - itemSize * 0.5f + 1.5f * s, mousePos.y - itemSize * 0.5f - 1.5f * s,
-                 itemSize, itemSize, glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
-        drawBlockIcon(mousePos.x - itemSize * 0.5f, mousePos.y - itemSize * 0.5f,
-                      itemSize, itemSize, heldItem.id);
-        if (heldItem.count > 1) {
-            const std::string cntStr = std::to_string(heldItem.count);
-            const float cntScale = std::max(1.0f, s * 0.60f);
-            drawText(mousePos.x + itemSize * 0.3f, mousePos.y - itemSize * 0.3f,
-                     cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        }
-    }
-
-    // 9. Console Controller / Keyboard Legend Footer
-    const std::string footerText = "[Tab] Category   [< / >] Select Recipe   [Space/Click] Craft   [E/Esc] Close";
-    const float hintScale = std::max(1.0f, s * 0.65f);
-    const float hintW = textWidth(footerText, hintScale);
-    drawText((static_cast<float>(m_fbWidth) - hintW) * 0.5f, bottom + 5.0f * s,
-             footerText, hintScale, glm::vec4(0.20f, 0.20f, 0.25f, 0.90f));
+    // Tooltip and Cursor item
+    renderTooltipAndCursor(this, tooltip, heldItem, mousePos, s, m_fbWidth);
 
     endUI();
 }
 
 void Renderer::drawCreativeInventory(int selectedHotbarSlot, const ItemSlot* hotbar, int hotbarCount,
-                                     const ItemSlot& heldItem, const glm::vec2& mousePos, int activeTab) {
+                                     const ItemSlot& heldItem, const glm::vec2& mousePos,
+                                     int activeTab, const std::string& searchQuery, int scrollRow) {
     const float s = m_uiScale;
-    const float slot = 18.0f * s;
-    const float gap = 2.5f * s;
-    const float border = 1.5f * s;
-
-    const int cols = 8;
-    const int catalogRows = 6;
-
-    const float gridW = cols * slot + (cols - 1) * gap;
-    const float catalogH = catalogRows * slot + (catalogRows - 1) * gap;
-    const float hotbarH = slot;
-
-    const float pad = 12.0f * s;
-    const float headerH = 22.0f * s;
-    const float tabsH = 16.0f * s;
-    const float labelH = 12.0f * s;
-    const float sectionGap = 8.0f * s;
-    const float footerH = 14.0f * s;
-
-    const float containerW = gridW + 2.0f * pad + 24.0f * s;
-    const float containerH = pad + headerH + tabsH + sectionGap + catalogH + sectionGap + labelH + hotbarH + footerH + pad;
-
+    const float containerW = 195.0f * s;
+    const float containerH = 136.0f * s;
     const float cx = static_cast<float>(m_fbWidth) * 0.5f;
     const float cy = static_cast<float>(m_fbHeight) * 0.5f;
-
     const float left = cx - containerW * 0.5f;
     const float bottom = cy - containerH * 0.5f;
 
+    const float slotSize = 18.0f * s;
+    const float gap = 0.0f;
+
     beginUI();
 
-    // 1. Fullscreen dark backdrop dimming
-    drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight),
-             glm::vec4(0.0f, 0.0f, 0.0f, 0.65f));
+    // Dark backdrop
+    drawRect(0.0f, 0.0f, static_cast<float>(m_fbWidth), static_cast<float>(m_fbHeight), glm::vec4(0.0f, 0.0f, 0.0f, 0.55f));
 
-    // 2. Main Modal Container Frame (Gothic Slate & Gold Trim)
-    drawRect(left - 2.0f * s, bottom - 2.0f * s, containerW + 4.0f * s, containerH + 4.0f * s,
-             glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
-    drawRect(left - 1.0f * s, bottom, containerW + 2.0f * s, containerH + 1.0f * s,
-             glm::vec4(0.35f, 0.45f, 0.55f, 1.0f));
-    drawRect(left, bottom - 1.0f * s, containerW + 1.0f * s, containerH,
-             glm::vec4(0.12f, 0.12f, 0.15f, 1.0f));
-    drawGradientRect(left, bottom, containerW, containerH,
-                     glm::vec4(0.14f, 0.16f, 0.20f, 0.98f),
-                     glm::vec4(0.20f, 0.22f, 0.28f, 0.98f));
+    // 1. Top Category Tabs
+    const char* tabNames[5] = { "Building", "Tools", "Food", "Search", "All" };
+    const TextureTile tabIcons[5] = {
+        TextureTile::GrassTop, TextureTile::DiamondPickaxe,
+        TextureTile::CookedPorkchop, TextureTile::SearchIcon, TextureTile::Apple
+    };
+    const float tabW = 26.0f * s;
+    const float tabH = 20.0f * s;
 
-    // 3. Header: Creative Item Catalog & Badge
-    const float headerTop = bottom + containerH - pad;
-    const float titleScale = std::max(1.0f, s * 0.85f);
-    drawText(left + pad, headerTop - 1.0f * s, "CREATIVE ITEM CATALOG", titleScale, glm::vec4(0.35f, 0.92f, 1.0f, 1.0f));
-    
-    // Creative mode badge
-    const std::string badge = "[CREATIVE]";
-    const float badgeScale = std::max(1.0f, s * 0.70f);
-    const float badgeW = textWidth(badge, badgeScale);
-    drawRect(left + containerW - pad - badgeW - 8.0f * s, headerTop - 2.0f * s, badgeW + 8.0f * s, 12.0f * s, glm::vec4(0.12f, 0.40f, 0.35f, 0.90f));
-    drawText(left + containerW - pad - badgeW - 4.0f * s, headerTop, badge, badgeScale, glm::vec4(0.40f, 1.0f, 0.80f, 1.0f));
-
-    drawRect(left + pad, headerTop - 15.0f * s, containerW - 2.0f * pad, 1.5f * s, glm::vec4(0.35f, 0.85f, 0.95f, 0.85f));
-
-    // 4. Category Tabs
-    const char* tabNames[4] = { "All Items", "Blocks", "Tools", "Items & Food" };
-    const float tabY = headerTop - headerH;
-    const float tabW = (gridW - 3.0f * 4.0f * s) / 4.0f;
-    const float tabH = 13.0f * s;
-    const float gridLeft = left + pad + 12.0f * s;
-
-    for (int t = 0; t < 4; ++t) {
-        const float tx = gridLeft + t * (tabW + 4.0f * s);
+    for (int t = 0; t < 5; ++t) {
+        const float tx = left + 8.0f * s + t * (tabW + 2.0f * s);
+        const float ty = bottom + containerH;
         const bool active = (t == activeTab);
         const bool hovered = (mousePos.x >= tx && mousePos.x <= tx + tabW &&
-                              mousePos.y >= tabY - tabH && mousePos.y <= tabY);
+                              mousePos.y >= ty && mousePos.y <= ty + tabH);
 
-        if (active) {
-            drawRect(tx, tabY - tabH, tabW, tabH, glm::vec4(0.25f, 0.40f, 0.55f, 1.0f));
-            drawRect(tx + 1.0f * s, tabY - tabH + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.18f, 0.28f, 0.40f, 1.0f));
-        } else if (hovered) {
-            drawRect(tx, tabY - tabH, tabW, tabH, glm::vec4(0.30f, 0.32f, 0.38f, 1.0f));
-            drawRect(tx + 1.0f * s, tabY - tabH + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.16f, 0.17f, 0.22f, 1.0f));
-        } else {
-            drawRect(tx, tabY - tabH, tabW, tabH, glm::vec4(0.12f, 0.13f, 0.16f, 1.0f));
-            drawRect(tx + 1.0f * s, tabY - tabH + 1.0f * s, tabW - 2.0f * s, tabH - 2.0f * s, glm::vec4(0.10f, 0.11f, 0.14f, 1.0f));
-        }
-
-        const float tScale = std::max(1.0f, s * 0.65f);
-        const float tw = textWidth(tabNames[t], tScale);
-        const glm::vec4 tCol = active ? glm::vec4(0.40f, 0.95f, 1.0f, 1.0f) :
-                               (hovered ? glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) : glm::vec4(0.70f, 0.72f, 0.78f, 0.85f));
-        drawText(tx + (tabW - tw) * 0.5f, tabY - 2.0f * s, tabNames[t], tScale, tCol);
+        // Tab shape
+        drawRect(tx - 1.0f * s, ty, tabW + 2.0f * s, tabH + 1.0f * s, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+        drawRect(tx, ty, tabW, tabH, active ? glm::vec4(0.776f, 0.776f, 0.776f, 1.0f) :
+                 (hovered ? glm::vec4(0.68f, 0.68f, 0.68f, 1.0f) : glm::vec4(0.55f, 0.55f, 0.55f, 1.0f)));
+        drawTexturedRect(tx + (tabW - 14.0f * s) * 0.5f, ty + (tabH - 14.0f * s) * 0.5f, 14.0f * s, 14.0f * s, tabIcons[t]);
     }
 
-    std::string hoveredName;
-    const auto& catalog = getCreativeCatalog(activeTab);
-    const float catalogTop = tabY - tabH - sectionGap;
+    // 2. Main Minecraft Container Window
+    drawMinecraftContainer(this, left, bottom, containerW, containerH, s);
 
-    // Helper to draw slots
-    auto drawSlot = [&](float x, float y, BlockId item, int count, int durability, int maxDur,
-                        bool isHotbar, int hotbarIdx, bool isTrash) {
-        const bool hovered = (mousePos.x >= x && mousePos.x <= x + slot &&
-                              mousePos.y >= y && mousePos.y <= y + slot);
-        const bool active = (isHotbar && hotbarIdx == selectedHotbarSlot);
+    std::string tooltip;
 
-        // Sunken bevel
-        if (isTrash) {
-            drawRect(x, y, slot, slot, glm::vec4(0.20f, 0.08f, 0.08f, 1.0f));
-            drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.45f, 0.20f, 0.20f, 1.0f));
-            drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.25f, 0.10f, 0.10f, 1.0f));
-        } else {
-            drawRect(x, y, slot, slot, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
-            drawRect(x + border, y, slot - border, slot - border, glm::vec4(0.32f, 0.32f, 0.38f, 1.0f));
-            drawRect(x + border, y + border, slot - 2.0f * border, slot - 2.0f * border, glm::vec4(0.13f, 0.13f, 0.16f, 1.0f));
-        }
+    // 3. Search Bar / Header Title
+    const float searchX = left + 80.0f * s;
+    const float searchY = bottom + containerH - 16.0f * s;
+    const float searchW = 90.0f * s;
+    const float searchH = 12.0f * s;
 
-        if (hovered) {
-            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s,
-                     isTrash ? glm::vec4(1.0f, 0.30f, 0.30f, 1.0f) : glm::vec4(0.40f, 0.90f, 1.0f, 1.0f));
-            drawRect(x, y, slot, slot, glm::vec4(1.0f, 1.0f, 1.0f, 0.25f));
-            if (isTrash) {
-                hoveredName = "Destroy Item / Clear";
-            } else if (item != BlockId::Air) {
-                hoveredName = blockDef(item).name;
-                if (isHotbar) hoveredName += " (Slot " + std::to_string(hotbarIdx + 1) + ")";
-                if (isTool(item)) {
-                    hoveredName += " [" + std::to_string(durability) + "/" + std::to_string(maxDur) + "]";
-                }
-            }
-        } else if (active) {
-            drawRect(x - 1.5f * s, y - 1.5f * s, slot + 3.0f * s, slot + 3.0f * s, glm::vec4(0.95f, 0.95f, 0.95f, 1.0f));
-        }
+    const float titleScale = std::max(1.0f, s * 0.62f);
+    drawText(left + 8.0f * s, bottom + containerH - 6.0f * s, tabNames[activeTab], titleScale, glm::vec4(0.25f, 0.25f, 0.25f, 1.0f));
 
-        if (isTrash) {
-            const float tScale = std::max(1.0f, s * 0.70f);
-            const float tw = textWidth("X", tScale);
-            drawText(x + (slot - tw) * 0.5f, y + slot * 0.5f + 4.0f * s, "X", tScale, glm::vec4(0.95f, 0.35f, 0.35f, 1.0f));
-        } else if (item != BlockId::Air) {
-            const float iconPad = 2.0f * s;
-            drawBlockIcon(x + iconPad, y + iconPad, slot - 2.0f * iconPad, slot - 2.0f * iconPad, item);
+    // Sunken search input field
+    drawRect(searchX, searchY, searchW, searchH, glm::vec4(0.22f, 0.22f, 0.22f, 1.0f));
+    drawRect(searchX + 1.0f * s, searchY + 1.0f * s, searchW - 2.0f * s, searchH - 2.0f * s, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    drawTexturedRect(searchX + 2.0f * s, searchY + 1.0f * s, 10.0f * s, 10.0f * s, TextureTile::SearchIcon);
 
-            // Stack count
-            if (count > 1) {
-                const std::string cntStr = std::to_string(count);
-                const float cntScale = std::max(1.0f, s * 0.60f);
-                const float cw = textWidth(cntStr, cntScale);
-                drawText(x + slot - cw - 1.0f * s + 1.0f, y + textHeight(cntScale) + 1.0f * s - 1.0f,
-                         cntStr, cntScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
-                drawText(x + slot - cw - 1.0f * s, y + textHeight(cntScale) + 1.0f * s,
-                         cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-            }
+    const std::string displaySearch = searchQuery.empty() ? "Search..." : searchQuery;
+    drawText(searchX + 14.0f * s, searchY + 8.5f * s, displaySearch, std::max(1.0f, s * 0.55f),
+             searchQuery.empty() ? glm::vec4(0.5f, 0.5f, 0.5f, 1.0f) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
-            // Durability bar
-            if (isTool(item) && durability > 0) {
-                const float barH = std::max(1.5f, 1.5f * s);
-                drawDurabilityBar(x + border, y + border, slot - 2.0f * border, barH,
-                                  durability, maxDur);
-            }
-        }
-    };
+    // 4. 9x5 Catalog Item Grid (45 slots per view)
+    const std::vector<BlockId> catalog = filterCreativeCatalog(activeTab, searchQuery);
+    const float gridStartX = left + 8.0f * s;
+    const float gridStartY = searchY - 4.0f * s;
 
-    // 5. Draw Catalog Grid (6 rows x 8 cols)
-    for (int row = 0; row < catalogRows; ++row) {
-        for (int col = 0; col < cols; ++col) {
-            const int idx = row * cols + col;
-            const float x = gridLeft + col * (slot + gap);
-            const float y = catalogTop - (row + 1) * slot - row * gap;
-            if (idx < static_cast<int>(catalog.size())) {
+    const int totalItems = static_cast<int>(catalog.size());
+    const int startIdx = scrollRow * 9;
+
+    for (int row = 0; row < 5; ++row) {
+        for (int col = 0; col < 9; ++col) {
+            const int idx = startIdx + row * 9 + col;
+            const float sx = gridStartX + col * (slotSize + gap);
+            const float sy = gridStartY - (row + 1) * slotSize - row * gap;
+            ItemSlot item;
+            if (idx < totalItems) {
                 const BlockId bId = catalog[idx];
-                const int dur = isTool(bId) ? maxToolDurability(bId) : 0;
-                drawSlot(x, y, bId, 1, dur, dur, false, -1, false);
-            } else {
-                drawSlot(x, y, BlockId::Air, 0, 0, 0, false, -1, false);
+                item = ItemSlot(bId, 1, isTool(bId) ? maxToolDurability(bId) : 0);
             }
+            drawMinecraftSlot(this, sx, sy, slotSize, item, mousePos, s, tooltip);
         }
     }
 
-    // 6. Section Divider & Hotbar Header
-    const float dividerY = catalogTop - catalogH - sectionGap * 0.5f;
-    drawRect(gridLeft, dividerY, gridW + slot + gap, 1.0f * s, glm::vec4(0.08f, 0.08f, 0.10f, 1.0f));
-    drawRect(gridLeft, dividerY - 1.0f * s, gridW + slot + gap, 1.0f * s, glm::vec4(0.35f, 0.45f, 0.55f, 0.70f));
+    // 5. Scrollbar Track on Right
+    const float scrollTrackX = gridStartX + 9 * slotSize + 2.0f * s;
+    const float scrollTrackY = gridStartY - 5 * slotSize;
+    const float scrollTrackW = 12.0f * s;
+    const float scrollTrackH = 5 * slotSize;
 
-    const float subLabelTop = dividerY - 3.0f * s;
-    const float craftLabelScale = std::max(1.0f, s * 0.72f);
-    drawText(gridLeft, subLabelTop, "Hotbar & Quick Access", craftLabelScale, glm::vec4(0.85f, 0.88f, 0.95f, 1.0f));
+    drawRect(scrollTrackX, scrollTrackY, scrollTrackW, scrollTrackH, glm::vec4(0.22f, 0.22f, 0.22f, 1.0f));
+    drawRect(scrollTrackX + 1.0f * s, scrollTrackY + 1.0f * s, scrollTrackW - 2.0f * s, scrollTrackH - 2.0f * s, glm::vec4(0.55f, 0.55f, 0.55f, 1.0f));
 
-    // 7. Hotbar Slots Grid (1x8) + Trash Slot
-    const float hotbarY = subLabelTop - labelH - slot;
-    for (int i = 0; i < hotbarCount && i < cols; ++i) {
-        const float x = gridLeft + i * (slot + gap);
-        drawSlot(x, hotbarY, hotbar[i].id, hotbar[i].count, hotbar[i].durability,
-                 maxToolDurability(hotbar[i].id), true, i, false);
+    // Scrollbar Thumb Knob
+    const float thumbH = 15.0f * s;
+    const int maxScrollRows = std::max(0, (totalItems + 8) / 9 - 5);
+    const float scrollPct = maxScrollRows > 0 ? (static_cast<float>(scrollRow) / maxScrollRows) : 0.0f;
+    const float thumbY = scrollTrackY + (scrollTrackH - thumbH) * (1.0f - scrollPct);
+    drawRect(scrollTrackX + 1.0f * s, thumbY, scrollTrackW - 2.0f * s, thumbH, glm::vec4(0.776f, 0.776f, 0.776f, 1.0f));
+    drawRect(scrollTrackX + 2.0f * s, thumbY + 1.0f * s, scrollTrackW - 4.0f * s, thumbH - 2.0f * s, glm::vec4(0.88f, 0.88f, 0.88f, 1.0f));
+
+    // 6. Bottom 1x9 Hotbar Slots
+    const float hotbarY = bottom + 8.0f * s;
+    for (int col = 0; col < 9 && col < hotbarCount; ++col) {
+        const float sx = gridStartX + col * (slotSize + gap);
+        drawMinecraftSlot(this, sx, hotbarY, slotSize, hotbar[col], mousePos, s, tooltip,
+                          TextureTile::Count, (col == selectedHotbarSlot));
     }
 
-    // Trash / Destroy Item Slot next to Hotbar
-    const float trashX = gridLeft + 8 * (slot + gap);
-    drawSlot(trashX, hotbarY, BlockId::Air, 0, 0, 0, false, -1, true);
-
-    // 8. Floating Hover Tooltip
-    if (!hoveredName.empty()) {
-        const float tipScale = std::max(1.0f, s * 0.75f);
-        const float tipW = textWidth(hoveredName, tipScale);
-        const float tipH = textHeight(tipScale);
-        const float tipX = std::min(mousePos.x + 10.0f * s, static_cast<float>(m_fbWidth) - tipW - 10.0f * s);
-        const float tipY = std::max(mousePos.y + tipH + 4.0f * s, tipH + 10.0f * s);
-
-        drawRect(tipX - 4.0f * s, tipY - tipH - 4.0f * s, tipW + 8.0f * s, tipH + 8.0f * s, glm::vec4(0.06f, 0.08f, 0.12f, 0.96f));
-        drawRect(tipX - 3.0f * s, tipY - tipH - 3.0f * s, tipW + 6.0f * s, tipH + 6.0f * s, glm::vec4(0.20f, 0.50f, 0.70f, 0.85f));
-        drawRect(tipX - 2.0f * s, tipY - tipH - 2.0f * s, tipW + 4.0f * s, tipH + 4.0f * s, glm::vec4(0.06f, 0.08f, 0.12f, 0.96f));
-        drawText(tipX, tipY, hoveredName, tipScale, glm::vec4(0.40f, 0.95f, 1.0f, 1.0f));
+    // Trash Can / Clear item Slot
+    const float trashX = gridStartX + 9 * slotSize + 2.0f * s;
+    const ItemSlot trashItem;
+    drawMinecraftSlot(this, trashX, hotbarY, slotSize, trashItem, mousePos, s, tooltip, TextureTile::Destroy0);
+    if (mousePos.x >= trashX && mousePos.x <= trashX + slotSize && mousePos.y >= hotbarY && mousePos.y <= hotbarY + slotSize) {
+        tooltip = "Destroy Item / Clear";
     }
 
-    // 9. Held Item on Mouse Cursor
-    if (!heldItem.empty()) {
-        const float itemSize = 16.0f * s;
-        drawRect(mousePos.x - itemSize * 0.5f + 1.5f * s, mousePos.y - itemSize * 0.5f - 1.5f * s,
-                 itemSize, itemSize, glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
-        drawBlockIcon(mousePos.x - itemSize * 0.5f, mousePos.y - itemSize * 0.5f,
-                      itemSize, itemSize, heldItem.id);
-        if (heldItem.count > 1) {
-            const std::string cntStr = std::to_string(heldItem.count);
-            const float cntScale = std::max(1.0f, s * 0.60f);
-            drawText(mousePos.x + itemSize * 0.3f, mousePos.y - itemSize * 0.3f,
-                     cntStr, cntScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
-        }
-    }
-
-    // 10. Footer Prompt
-    const std::string footerText = "Left Click: Pick Stack (64)   Right Click: Pick 1   1-8: Quick Hotbar   Trash: Destroy   E/Esc: Close";
-    const float hintScale = std::max(1.0f, s * 0.70f);
-    const float hintW = textWidth(footerText, hintScale);
-    drawText((static_cast<float>(m_fbWidth) - hintW) * 0.5f, bottom + 6.0f * s,
-             footerText, hintScale, glm::vec4(0.75f, 0.85f, 0.95f, 0.85f));
+    renderTooltipAndCursor(this, tooltip, heldItem, mousePos, s, m_fbWidth);
 
     endUI();
 }
