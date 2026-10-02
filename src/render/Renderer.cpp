@@ -1271,41 +1271,56 @@ void Renderer::drawTitleBanner(const std::string& title, const std::string& subt
     const float fbH = static_cast<float>(m_fbHeight);
     const float centerY = fbH * 0.72f;
 
-    // 1. Decorative horizontal separator lines
-    const float lineW = std::min(fbW * 0.6f, 320.0f * s);
-    const float lineX = (fbW - lineW) * 0.5f;
-
-    // Top gold line
-    drawRect(lineX, centerY + (24.0f * s), lineW, 1.5f * s, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
-    // Bottom gold line
-    drawRect(lineX, centerY - (16.0f * s), lineW, 1.5f * s, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
-
-    // Center diamond accent
-    const float dSize = 4.0f * s;
-    drawRect((fbW - dSize) * 0.5f, centerY + (24.0f * s) - (dSize * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
-    drawRect((fbW - dSize) * 0.5f, centerY - (16.0f * s) - (dSize * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
-
-    // 2. Large Title Text
+    // Font metrics and scaling
     const float titleScale = std::max(2.0f, s * 1.5f);
     const float titleW = textWidth(title, titleScale);
+    const float titleH = textHeight(titleScale);
+
+    const float subScale = std::max(1.0f, s * 0.75f);
+    const float subW = subtitle.empty() ? 0.0f : textWidth(subtitle, subScale);
+    const float subH = subtitle.empty() ? 0.0f : textHeight(subScale);
+
+    const float gap = subtitle.empty() ? 0.0f : (6.0f * s);
+    const float totalContentH = titleH + gap + subH;
+    const float contentTop = centerY + totalContentH * 0.5f;
+    const float contentBottom = centerY - totalContentH * 0.5f;
+
+    const float padY = 8.0f * s;
+    const float topLineY = contentTop + padY;
+    const float bottomLineY = contentBottom - padY;
+
+    // 1. Decorative horizontal separator lines
+    const float maxTextW = std::max(titleW, subW);
+    const float lineW = std::min(fbW * 0.75f, std::max(260.0f * s, maxTextW + 60.0f * s));
+    const float lineX = (fbW - lineW) * 0.5f;
+    const float lineThick = std::max(1.0f, 1.5f * s);
+
+    // Top gold line & diamond
+    drawRect(lineX, topLineY, lineW, lineThick, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
+    const float dSize = 4.0f * s;
+    drawRect((fbW - dSize) * 0.5f, topLineY - (dSize * 0.5f) + (lineThick * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
+
+    // Bottom gold line & diamond
+    drawRect(lineX, bottomLineY, lineW, lineThick, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
+    drawRect((fbW - dSize) * 0.5f, bottomLineY - (dSize * 0.5f) + (lineThick * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
+
+    // 2. Large Title Text (centered horizontally and positioned at contentTop)
     const float titleX = (fbW - titleW) * 0.5f;
-    const float titleY = centerY + (2.0f * s);
+    const float titleY = contentTop;
 
     // Shadow
     drawText(titleX + 2.0f * s, titleY - 2.0f * s, title, titleScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.95f));
     // Foreground Title
     drawText(titleX, titleY, title, titleScale, glm::vec4(1.0f, 0.92f, 0.35f, alpha));
 
-    // 3. Subtitle Text
+    // 3. Subtitle Text (centered horizontally and positioned below Title)
     if (!subtitle.empty()) {
-        const float subScale = std::max(1.0f, s * 0.75f);
-        const float subW = textWidth(subtitle, subScale);
         const float subX = (fbW - subW) * 0.5f;
-        const float subY = centerY - (10.0f * s);
+        const float subY = titleY - titleH - gap;
 
         // Subtitle Shadow
         drawText(subX + 1.0f * s, subY - 1.0f * s, subtitle, subScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.90f));
-        // Subtitle Foreground (Crimson/Parchment)
+        // Subtitle Foreground (Parchment/Amber)
         drawText(subX, subY, subtitle, subScale, glm::vec4(0.95f, 0.85f, 0.75f, alpha * 0.95f));
     }
 
