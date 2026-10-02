@@ -1185,7 +1185,7 @@ void makeSearchIcon(std::vector<uint8_t>& pixels, int tile) {
     setPixelRgba(pixels, tile, 6, 6, 60, 60, 65, 255);
 }
 
-void makeBackroomsWallpaper(std::vector<uint8_t>& pixels, int tile) {
+void makeBackroomsWallpaper(std::vector<uint8_t>& pixels, int tile, bool hasBaseboard = false) {
     // Mono-yellow wallpaper with subtle vertical chevron / herringbone pattern
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
@@ -1206,8 +1206,8 @@ void makeBackroomsWallpaper(std::vector<uint8_t>& pixels, int tile) {
                 b += 0.02f;
             }
 
-            // Dark brown wooden baseboard trim at bottom 2 rows
-            if (y <= 1) {
+            // Dark brown wooden baseboard trim at bottom 2 rows ONLY for bottom base block
+            if (hasBaseboard && y <= 1) {
                 r = 0.38f + (rnd(x, y, 101) - 0.5f) * 0.04f;
                 g = 0.26f + (rnd(x, y, 103) - 0.5f) * 0.03f;
                 b = 0.16f + (rnd(x, y, 107) - 0.5f) * 0.03f;
@@ -1537,7 +1537,8 @@ void Texture::createAtlas() {
     makeSearchIcon(pixels, static_cast<int>(TextureTile::SearchIcon));
 
     // Backrooms Level 0 Tiles
-    makeBackroomsWallpaper(pixels, static_cast<int>(TextureTile::BackroomsWallpaper));
+    makeBackroomsWallpaper(pixels, static_cast<int>(TextureTile::BackroomsWallpaper), false);
+    makeBackroomsWallpaper(pixels, static_cast<int>(TextureTile::BackroomsWallpaperBase), true);
     makeBackroomsCarpet(pixels, static_cast<int>(TextureTile::BackroomsCarpet));
     makeBackroomsCeiling(pixels, static_cast<int>(TextureTile::BackroomsCeiling));
     makeFluorescentLight(pixels, static_cast<int>(TextureTile::FluorescentLight));

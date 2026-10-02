@@ -498,7 +498,8 @@ void Renderer::drawSky(const Camera& camera, float timeOfDay,
 }
 
 void Renderer::drawWorld(const World& world, const Camera& camera,
-                         const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
+                         const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight,
+                         float heldLightIntensity, const glm::vec3& heldLightPos) {
     const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
     const glm::mat4 viewProjection = camera.projectionMatrix(aspect) * camera.viewMatrix();
 
@@ -514,6 +515,8 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
     m_chunkShader.setFloat("uSunlight", sunlight);
     m_chunkShader.setFloat("uIsBackrooms", world.currentDimension() == DimensionId::Backrooms ? 1.0f : 0.0f);
     m_chunkShader.setFloat("uTime", static_cast<float>(glfwGetTime()));
+    m_chunkShader.setVec3("uHeldLightPos", heldLightPos);
+    m_chunkShader.setFloat("uHeldLightIntensity", heldLightIntensity);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -576,7 +579,8 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
 }
 
 void Renderer::drawEntities(const EntityManager& entityManager, const World& world, const Camera& camera,
-                            const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
+                            const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight,
+                            float heldLightIntensity, const glm::vec3& heldLightPos) {
     if (entityManager.mobs().empty() && entityManager.items().empty()) return;
 
     const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
@@ -598,6 +602,10 @@ void Renderer::drawEntities(const EntityManager& entityManager, const World& wor
     m_chunkShader.setFloat("uFogStart", fogStart);
     m_chunkShader.setFloat("uFogEnd", fogEnd);
     m_chunkShader.setFloat("uSunlight", sunlight);
+    m_chunkShader.setFloat("uIsBackrooms", world.currentDimension() == DimensionId::Backrooms ? 1.0f : 0.0f);
+    m_chunkShader.setFloat("uTime", static_cast<float>(glfwGetTime()));
+    m_chunkShader.setVec3("uHeldLightPos", heldLightPos);
+    m_chunkShader.setFloat("uHeldLightIntensity", heldLightIntensity);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -620,7 +628,8 @@ void Renderer::drawEntities(const EntityManager& entityManager, const World& wor
 }
 
 void Renderer::drawPlayer(const Player& player, const World& world, const Camera& camera,
-                          const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
+                          const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight,
+                          float heldLightIntensity, const glm::vec3& heldLightPos) {
     if (player.perspective() == Perspective::FirstPerson) return;
 
     const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
@@ -647,6 +656,10 @@ void Renderer::drawPlayer(const Player& player, const World& world, const Camera
     m_chunkShader.setFloat("uFogStart", fogStart);
     m_chunkShader.setFloat("uFogEnd", fogEnd);
     m_chunkShader.setFloat("uSunlight", sunlight);
+    m_chunkShader.setFloat("uIsBackrooms", world.currentDimension() == DimensionId::Backrooms ? 1.0f : 0.0f);
+    m_chunkShader.setFloat("uTime", static_cast<float>(glfwGetTime()));
+    m_chunkShader.setVec3("uHeldLightPos", heldLightPos);
+    m_chunkShader.setFloat("uHeldLightIntensity", heldLightIntensity);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -668,7 +681,8 @@ void Renderer::drawPlayer(const Player& player, const World& world, const Camera
     m_stats.triangles += static_cast<uint32_t>(playerVertices.size() / 3);
 }
 
-void Renderer::drawFirstPersonArm(const Player& player, const World& world, const Camera& /*camera*/, float sunlight) {
+void Renderer::drawFirstPersonArm(const Player& player, const World& world, const Camera& /*camera*/, float sunlight,
+                                 float heldLightIntensity, const glm::vec3& heldLightPos) {
     if (player.perspective() != Perspective::FirstPerson) return;
 
     static std::vector<Vertex> armVertices;
@@ -688,6 +702,10 @@ void Renderer::drawFirstPersonArm(const Player& player, const World& world, cons
     m_chunkShader.setFloat("uFogStart", 999.0f);
     m_chunkShader.setFloat("uFogEnd", 1000.0f);
     m_chunkShader.setFloat("uSunlight", sunlight);
+    m_chunkShader.setFloat("uIsBackrooms", world.currentDimension() == DimensionId::Backrooms ? 1.0f : 0.0f);
+    m_chunkShader.setFloat("uTime", static_cast<float>(glfwGetTime()));
+    m_chunkShader.setVec3("uHeldLightPos", heldLightPos);
+    m_chunkShader.setFloat("uHeldLightIntensity", heldLightIntensity);
     m_chunkShader.setInt("uAtlas", 0);
 
     m_atlas.bind(0);
@@ -1410,6 +1428,129 @@ void Renderer::drawDeathScreen(float /*animTime*/, const glm::vec2& mousePos,
     const float qh = textHeight(btnTextScale);
     drawText(btnX + (btnW - qw) * 0.5f, quitY + (btnH + qh) * 0.5f, quitText, btnTextScale,
              outHoverQuit ? glm::vec4(1.0f, 0.95f, 0.95f, 1.0f) : glm::vec4(0.85f, 0.75f, 0.75f, 0.9f));
+
+    endUI();
+}
+
+void Renderer::drawChat(const std::vector<ChatMessage>& messages,
+                        bool chatOpen,
+                        const std::string& currentInput,
+                        int cursorIndex,
+                        const std::vector<std::string>& suggestions,
+                        int selectedSuggestion,
+                        float uiTime) {
+    const float s = m_uiScale;
+    const float fontScale = std::max(1.0f, s * 0.70f);
+    const float fontH = textHeight(fontScale);
+    const float marginX = 8.0f * s;
+    const float chatBottom = 34.0f * s; // Positioned above the hotbar
+    const float maxChatWidth = std::min(480.0f * s, static_cast<float>(m_fbWidth) - 2.0f * marginX);
+
+    beginUI();
+
+    const float inputH = fontH + 8.0f * s;
+    const float inputY = chatBottom;
+    const float inputW = maxChatWidth;
+
+    // 1. Draw Chat Messages Log
+    const int maxVisible = chatOpen ? 10 : 8;
+    int drawn = 0;
+
+    const float msgBaseY = chatOpen ? (inputY + inputH + 4.0f * s) : chatBottom;
+    const float msgRowH = fontH + 5.0f * s;
+
+    for (int i = static_cast<int>(messages.size()) - 1; i >= 0 && drawn < maxVisible; --i) {
+        const auto& msg = messages[static_cast<size_t>(i)];
+        float alpha = 1.0f;
+        if (!chatOpen) {
+            if (msg.timeRemaining <= 0.0f) continue;
+            if (msg.timeRemaining < 2.0f) {
+                alpha = msg.timeRemaining / 2.0f;
+            }
+        }
+
+        const float msgBottom = msgBaseY + static_cast<float>(drawn) * msgRowH;
+        const float msgBoxH = fontH + 3.0f * s;
+        const float msgTextTopY = msgBottom + (msgBoxH + fontH) * 0.5f;
+        const float textW = textWidth(msg.text, fontScale);
+
+        // Dark background plate behind text for legibility
+        drawRect(marginX - 3.0f * s, msgBottom, textW + 6.0f * s, msgBoxH,
+                 glm::vec4(0.0f, 0.0f, 0.0f, (chatOpen ? 0.65f : 0.45f) * alpha));
+
+        // Text shadow & text
+        drawText(marginX + 1.0f * s, msgTextTopY - 1.0f * s, msg.text, fontScale,
+                 glm::vec4(0.0f, 0.0f, 0.0f, 0.8f * alpha));
+        drawText(marginX, msgTextTopY, msg.text, fontScale,
+                 glm::vec4(msg.color.r, msg.color.g, msg.color.b, msg.color.a * alpha));
+
+        drawn++;
+    }
+
+    // 2. If chat is open: Draw Input Bar & Autocomplete Suggestion Box
+    if (chatOpen) {
+        // Input bar outer borders and background
+        drawRect(marginX - 2.0f * s, inputY - 2.0f * s, inputW + 4.0f * s, inputH + 4.0f * s,
+                 glm::vec4(0.0f, 0.0f, 0.0f, 0.85f));
+        drawRect(marginX - 1.0f * s, inputY - 1.0f * s, inputW + 2.0f * s, inputH + 2.0f * s,
+                 glm::vec4(0.35f, 0.35f, 0.40f, 0.9f));
+        drawRect(marginX, inputY, inputW, inputH, glm::vec4(0.08f, 0.08f, 0.10f, 0.95f));
+
+        // Prompt symbol "> "
+        const std::string prompt = "> ";
+        const float promptW = textWidth(prompt, fontScale);
+        const float textTopY = inputY + (inputH + fontH) * 0.5f;
+
+        drawText(marginX + 4.0f * s, textTopY, prompt, fontScale,
+                 glm::vec4(0.40f, 0.85f, 1.0f, 1.0f));
+
+        // Input text
+        const float textX = marginX + 4.0f * s + promptW;
+        drawText(textX, textTopY, currentInput, fontScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+        // Blinking cursor
+        const bool cursorBlink = std::fmod(uiTime, 0.8f) < 0.45f;
+        if (cursorBlink) {
+            std::string sub = currentInput.substr(0, static_cast<size_t>(std::clamp(cursorIndex, 0, static_cast<int>(currentInput.size()))));
+            float cursorOffset = textWidth(sub, fontScale);
+            drawRect(textX + cursorOffset, textTopY - fontH, 2.0f * s, fontH, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        }
+
+        // 3. Autocomplete Suggestions Box
+        if (!suggestions.empty()) {
+            const int maxSug = std::min(8, static_cast<int>(suggestions.size()));
+            float sugWidest = 80.0f * s;
+            for (int i = 0; i < maxSug; ++i) {
+                sugWidest = std::max(sugWidest, textWidth(suggestions[static_cast<size_t>(i)], fontScale));
+            }
+            const float sugW = sugWidest + 16.0f * s;
+            const float sugRowH = fontH + 5.0f * s;
+            const float sugH = static_cast<float>(maxSug) * sugRowH + 4.0f * s;
+            const float sugX = marginX;
+            const float sugY = inputY + inputH + 4.0f * s;
+
+            // Box shadow & border
+            drawRect(sugX - 2.0f * s, sugY - 2.0f * s, sugW + 4.0f * s, sugH + 4.0f * s,
+                     glm::vec4(0.0f, 0.0f, 0.0f, 0.8f));
+            drawRect(sugX - 1.0f * s, sugY - 1.0f * s, sugW + 2.0f * s, sugH + 2.0f * s,
+                     glm::vec4(0.4f, 0.4f, 0.5f, 0.9f));
+            drawRect(sugX, sugY, sugW, sugH, glm::vec4(0.08f, 0.09f, 0.12f, 0.95f));
+
+            for (int i = 0; i < maxSug; ++i) {
+                const float rowY = sugY + sugH - static_cast<float>(i + 1) * sugRowH - 2.0f * s;
+                const bool isSel = (selectedSuggestion == i);
+
+                if (isSel) {
+                    drawRect(sugX + 2.0f * s, rowY, sugW - 4.0f * s, sugRowH,
+                             glm::vec4(0.25f, 0.45f, 0.75f, 0.85f));
+                }
+
+                const float sugTextTopY = rowY + (sugRowH + fontH) * 0.5f;
+                drawText(sugX + 6.0f * s, sugTextTopY, suggestions[static_cast<size_t>(i)], fontScale,
+                         isSel ? glm::vec4(1.0f, 1.0f, 0.3f, 1.0f) : glm::vec4(0.85f, 0.85f, 0.85f, 1.0f));
+            }
+        }
+    }
 
     endUI();
 }

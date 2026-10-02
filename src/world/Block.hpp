@@ -68,6 +68,7 @@ enum class BlockId : uint8_t {
     Apple,
     Bread,
     BackroomsWallpaper,
+    BackroomsWallpaperBase,
     BackroomsCarpet,
     BackroomsCeiling,
     FluorescentLight,
@@ -174,6 +175,7 @@ enum class TextureTile : uint8_t {
     CraftingArrow,
     SearchIcon,
     BackroomsWallpaper,
+    BackroomsWallpaperBase,
     BackroomsCarpet,
     BackroomsCeiling,
     FluorescentLight,
@@ -245,7 +247,8 @@ inline const BlockDef& blockDef(BlockId id) {
         {"Cooked Beef",      TextureTile::CookedBeef,   TextureTile::CookedBeef,   TextureTile::CookedBeef,   false},
         {"Apple",            TextureTile::Apple,        TextureTile::Apple,        TextureTile::Apple,        false},
         {"Bread",            TextureTile::Bread,        TextureTile::Bread,        TextureTile::Bread,        false},
-        {"Mono-Yellow Wallpaper", TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, true},
+        {"Mono-Yellow Wallpaper",        TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, true},
+        {"Mono-Yellow Wallpaper (Base)", TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaperBase, TextureTile::BackroomsWallpaper, true},
         {"Moist Carpet",     TextureTile::BackroomsCarpet, TextureTile::BackroomsCarpet, TextureTile::BackroomsCarpet, true},
         {"Acoustic Ceiling", TextureTile::BackroomsCeiling, TextureTile::BackroomsCeiling, TextureTile::BackroomsCeiling, true},
         {"Fluorescent Light",TextureTile::FluorescentLight, TextureTile::FluorescentLight, TextureTile::FluorescentLight, true},
@@ -603,7 +606,8 @@ inline glm::vec3 blockColor(BlockId id) {
         case BlockId::CookedBeef:     return {0.55f, 0.28f, 0.16f};
         case BlockId::Apple:          return {0.92f, 0.15f, 0.15f};
         case BlockId::Bread:          return {0.85f, 0.62f, 0.25f};
-        case BlockId::BackroomsWallpaper: return {0.88f, 0.82f, 0.35f};
+        case BlockId::BackroomsWallpaper:
+        case BlockId::BackroomsWallpaperBase: return {0.88f, 0.82f, 0.35f};
         case BlockId::BackroomsCarpet:    return {0.68f, 0.58f, 0.38f};
         case BlockId::BackroomsCeiling:   return {0.75f, 0.73f, 0.65f};
         case BlockId::FluorescentLight:   return {1.00f, 0.98f, 0.85f};
@@ -622,7 +626,7 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         BlockId::Bedrock, BlockId::Water, BlockId::Torch, BlockId::CraftingTable,
         BlockId::TallGrass, BlockId::DirtPath, BlockId::CoalOre, BlockId::IronOre,
         BlockId::GoldOre, BlockId::DiamondOre,
-        BlockId::BackroomsWallpaper, BlockId::BackroomsCarpet, BlockId::BackroomsCeiling,
+        BlockId::BackroomsWallpaper, BlockId::BackroomsWallpaperBase, BlockId::BackroomsCarpet, BlockId::BackroomsCeiling,
         BlockId::FluorescentLight, BlockId::GlitchBlock, BlockId::ExitDoor,
         // Tools & Combat
         BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondPickaxe,
@@ -641,7 +645,7 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         BlockId::Bedrock, BlockId::Water, BlockId::Torch, BlockId::CraftingTable,
         BlockId::TallGrass, BlockId::DirtPath, BlockId::CoalOre, BlockId::IronOre,
         BlockId::GoldOre, BlockId::DiamondOre,
-        BlockId::BackroomsWallpaper, BlockId::BackroomsCarpet, BlockId::BackroomsCeiling,
+        BlockId::BackroomsWallpaper, BlockId::BackroomsWallpaperBase, BlockId::BackroomsCarpet, BlockId::BackroomsCeiling,
         BlockId::FluorescentLight, BlockId::GlitchBlock, BlockId::ExitDoor
     };
 

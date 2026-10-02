@@ -17,6 +17,8 @@ uniform float uFogEnd;
 uniform float uSunlight;
 uniform float uIsBackrooms;
 uniform float uTime;
+uniform vec3 uHeldLightPos;
+uniform float uHeldLightIntensity;
 
 out vec4 FragColor;
 
@@ -46,6 +48,14 @@ void main() {
     float smoothSun = pow(clamp(vLight, 0.0, 1.0), 1.25);
     float smoothTorch = pow(clamp(vTorchLight, 0.0, 1.0), 1.25);
 
+    // Dynamic hand-held light (Lucent / OptiFine dynamic hand lighting)
+    if (uHeldLightIntensity > 0.01) {
+        float heldDist = length(vWorldPos - uHeldLightPos);
+        float heldAtten = clamp(1.0 - heldDist / 14.0, 0.0, 1.0);
+        float heldTorch = heldAtten * heldAtten * uHeldLightIntensity;
+        smoothTorch = max(smoothTorch, heldTorch);
+    }
+
     // Sunlight: modulated dynamically by sun angle / time of day.
     // At night (uSunlight == 0), sunlight gives pitch black night with only 0.025 faint moonlight on sky-exposed surfaces.
     // In deep caves (vLight == 0), skyFactor is 0.0 (absolute pitch black darkness without torches).
@@ -59,8 +69,8 @@ void main() {
     float totalLight = max(skyFactor, torchFactor) * aoFactor * shade;
     vec3 color = texel.rgb * totalLight;
 
-    // Warm golden glow boost for torch illumination
-    if (vTorchLight > 0.05) {
+    // Warm golden glow boost for torch / hand light illumination
+    if (smoothTorch > 0.05) {
         color += texel.rgb * vec3(0.20, 0.10, 0.02) * smoothTorch * aoFactor;
     }
 

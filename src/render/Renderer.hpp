@@ -41,18 +41,31 @@ public:
     void drawSky(const Camera& camera, float timeOfDay,
                  const glm::vec3& skyColor, const glm::vec3& fogColor, float sunlight);
     void drawWorld(const World& world, const Camera& camera,
-                   const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
+                   const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f,
+                   float heldLightIntensity = 0.0f, const glm::vec3& heldLightPos = glm::vec3(0.0f));
     void drawEntities(const EntityManager& entityManager, const World& world, const Camera& camera,
-                      const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
+                      const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f,
+                      float heldLightIntensity = 0.0f, const glm::vec3& heldLightPos = glm::vec3(0.0f));
     void drawPlayer(const Player& player, const World& world, const Camera& camera,
-                    const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f);
-    void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera, float sunlight = 1.0f);
+                    const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight = 1.0f,
+                    float heldLightIntensity = 0.0f, const glm::vec3& heldLightPos = glm::vec3(0.0f));
+    void drawFirstPersonArm(const Player& player, const World& world, const Camera& camera, float sunlight = 1.0f,
+                           float heldLightIntensity = 0.0f, const glm::vec3& heldLightPos = glm::vec3(0.0f));
     void drawSelection(const Camera& camera, const glm::ivec3& block, BlockId blockId = BlockId::Grass);
     void drawBlockBreak(const Camera& camera, const glm::ivec3& block, BlockId blockId, int stage,
                         const World& world, float sunlight = 1.0f);
 
     void updateParticles(float dt, const World& world, const glm::vec3& playerPos) {
         m_particles.update(dt, world, playerPos);
+    }
+    void spawnFlame(const glm::vec3& pos) {
+        m_particles.spawnFlame(pos);
+    }
+    void spawnFire(const glm::vec3& pos, int count = 1) {
+        m_particles.spawnFire(pos, count);
+    }
+    void spawnSmoke(const glm::vec3& pos) {
+        m_particles.spawnSmoke(pos);
     }
     void spawnDigParticles(const glm::vec3& blockPos, const glm::ivec3& normal, BlockId blockId,
                            const World& world, float sunlight = 1.0f, int count = 4) {
@@ -91,6 +104,20 @@ public:
     // Death Screen ("YOU DIED")
     void drawDeathScreen(float animTime, const glm::vec2& mousePos,
                          bool& outHoverRespawn, bool& outHoverQuit);
+
+    // In-game Command & Chat console rendering
+    struct ChatMessage {
+        std::string text;
+        glm::vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+        float timeRemaining{10.0f};
+    };
+    void drawChat(const std::vector<ChatMessage>& messages,
+                  bool chatOpen,
+                  const std::string& currentInput,
+                  int cursorIndex,
+                  const std::vector<std::string>& suggestions,
+                  int selectedSuggestion,
+                  float uiTime);
 
     // F3 debug overlay
     void drawDebugOverlay(const std::vector<std::string>& lines);

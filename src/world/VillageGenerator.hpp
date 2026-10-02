@@ -13,9 +13,9 @@ class VillageGenerator {
 public:
     static void generateVillages(World& world, uint32_t seed, std::vector<Village>& outVillages);
     static void locateVillages(const World& world, uint32_t seed, std::vector<Village>& outVillages);
+    static void buildVillage(World& world, int centerX, int centerZ, int templateType, uint32_t vSeed);
 
 private:
-    static void buildVillage(World& world, int centerX, int centerZ, int templateType, uint32_t vSeed);
 
     // Building archetypes
     static void buildWell(World& world, int cx, int cz);

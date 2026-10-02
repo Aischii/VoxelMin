@@ -180,7 +180,7 @@ void BackroomsGenerator::generateChunk(World& world, Chunk& chunk) const {
                 } else if (almondWater && y == 2 && !wall) {
                     chunk.set(lx, y, lz, BlockId::AlmondWater);
                 } else if (wall) {
-                    chunk.set(lx, y, lz, BlockId::BackroomsWallpaper);
+                    chunk.set(lx, y, lz, (y == 2) ? BlockId::BackroomsWallpaperBase : BlockId::BackroomsWallpaper);
                 } else {
                     chunk.set(lx, y, lz, BlockId::Air);
                 }

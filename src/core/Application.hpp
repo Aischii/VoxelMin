@@ -101,6 +101,17 @@ private:
     void toggleCreativeMode();
     void populateCreativeCatalog();
 
+    // Chat and Command console
+    void openChat(const std::string& initialText);
+    void closeChat();
+    void handleChatInput();
+    void applyTabAutocomplete();
+    void updateChatSuggestions();
+    void executeCommand(const std::string& cmdStr);
+    void locateStructure(const std::string& target);
+    void teleportPlayer(const std::vector<std::string>& args);
+    void addChatMessage(const std::string& text, const glm::vec4& color = glm::vec4(1.0f));
+
     static uint32_t parseSeed(const std::string& input);
 
     // Dimensions and RPG Title Banners
@@ -190,6 +201,16 @@ private:
     int m_creativeScrollRow = 0;
     float m_timeOfDay = 0.22f; // Starts in the morning (~08:30 AM)
     int m_dayCount = 0;
+
+    // Chat & Command console state
+    bool m_chatOpen = false;
+    std::string m_chatInput;
+    int m_chatCursor = 0;
+    std::vector<Renderer::ChatMessage> m_chatLog;
+    std::vector<std::string> m_chatHistory;
+    int m_chatHistoryIndex = -1;
+    std::vector<std::string> m_chatSuggestions;
+    int m_selectedSuggestion = -1;
 
     // Dimension travel & RPG title banner state
     std::string m_bannerTitle;

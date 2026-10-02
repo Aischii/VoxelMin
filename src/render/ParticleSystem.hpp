@@ -43,6 +43,7 @@ public:
     void shutdown();
 
     void spawnFlame(const glm::vec3& pos);
+    void spawnFire(const glm::vec3& pos, int count = 1);
     void spawnSmoke(const glm::vec3& pos);
     void spawnFallingLeaf(const glm::vec3& pos, const glm::vec3& color = glm::vec3(0.24f, 0.65f, 0.18f));
     void spawnHitParticles(const glm::vec3& pos, const glm::vec3& hitDir, bool isCrit = false, int count = 12);

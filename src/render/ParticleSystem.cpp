@@ -59,27 +59,49 @@ void ParticleSystem::clear() {
 void ParticleSystem::spawnFlame(const glm::vec3& pos) {
     if (m_particles.size() >= 1024) return;
     Particle p;
-    p.pos = pos + glm::vec3(randF(-0.04f, 0.04f), randF(0.0f, 0.05f), randF(-0.04f, 0.04f));
-    p.vel = glm::vec3(randF(-0.05f, 0.05f), randF(0.40f, 0.75f), randF(-0.05f, 0.05f));
-    p.color = glm::vec4(1.0f, randF(0.60f, 0.92f), 0.12f, 0.95f);
-    p.size = randF(0.14f, 0.22f);
-    p.maxLife = randF(0.35f, 0.65f);
+    p.pos = pos + glm::vec3(randF(-0.035f, 0.035f), randF(0.0f, 0.04f), randF(-0.035f, 0.035f));
+    p.vel = glm::vec3(randF(-0.04f, 0.04f), randF(0.40f, 0.75f), randF(-0.04f, 0.04f));
+    p.color = glm::vec4(1.0f, randF(0.70f, 0.95f), 0.20f, 0.95f);
+    p.size = randF(0.12f, 0.18f);
+    p.maxLife = randF(0.30f, 0.55f);
     p.life = p.maxLife;
     p.gravity = 0.0f;
+    p.type = ParticleType::Flame;
     m_particles.push_back(p);
+}
+
+void ParticleSystem::spawnFire(const glm::vec3& pos, int count) {
+    if (m_particles.size() >= 1024) return;
+    for (int i = 0; i < count; ++i) {
+        Particle p;
+        p.pos = pos + glm::vec3(randF(-0.15f, 0.15f), randF(0.0f, 0.15f), randF(-0.15f, 0.15f));
+        p.vel = glm::vec3(randF(-0.10f, 0.10f), randF(0.55f, 1.10f), randF(-0.10f, 0.10f));
+        p.color = glm::vec4(1.0f, randF(0.50f, 0.90f), 0.10f, 1.0f);
+        p.size = randF(0.16f, 0.26f);
+        p.maxLife = randF(0.40f, 0.75f);
+        p.life = p.maxLife;
+        p.gravity = 0.0f;
+        p.type = ParticleType::Flame;
+        m_particles.push_back(p);
+
+        if (randF(0.0f, 1.0f) < 0.30f) {
+            spawnSmoke(pos + glm::vec3(0.0f, 0.15f, 0.0f));
+        }
+    }
 }
 
 void ParticleSystem::spawnSmoke(const glm::vec3& pos) {
     if (m_particles.size() >= 1024) return;
     Particle p;
     p.pos = pos + glm::vec3(randF(-0.03f, 0.03f), randF(0.04f, 0.08f), randF(-0.03f, 0.03f));
-    p.vel = glm::vec3(randF(-0.06f, 0.06f), randF(0.45f, 0.80f), randF(-0.06f, 0.06f));
-    const float grey = randF(0.15f, 0.30f);
+    p.vel = glm::vec3(randF(-0.05f, 0.05f), randF(0.35f, 0.65f), randF(-0.05f, 0.05f));
+    const float grey = randF(0.18f, 0.32f);
     p.color = glm::vec4(grey, grey, grey, 0.65f);
-    p.size = randF(0.12f, 0.18f);
-    p.maxLife = randF(0.60f, 1.1f);
+    p.size = randF(0.10f, 0.16f);
+    p.maxLife = randF(0.50f, 0.95f);
     p.life = p.maxLife;
     p.gravity = 0.0f;
+    p.type = ParticleType::Smoke;
     m_particles.push_back(p);
 }
 
@@ -305,6 +327,23 @@ void ParticleSystem::update(float dt, const World& world, const glm::vec3& playe
                 }
                 const float progress = it->life / it->maxLife;
                 it->color.a = progress * 0.95f;
+            } else if (it->type == ParticleType::Flame) {
+                it->vel.y += 0.35f * dt; // upward thermal lift
+                it->vel.x += randF(-0.1f, 0.1f) * dt;
+                it->vel.z += randF(-0.1f, 0.1f) * dt;
+                it->pos += it->vel * dt;
+                const float progress = it->life / it->maxLife;
+                it->size = (0.04f + 0.14f * progress); // shrink as it burns
+                it->color.r = 1.0f;
+                it->color.g = std::clamp(progress * 0.95f, 0.20f, 0.95f);
+                it->color.b = std::clamp(progress * 0.35f - 0.05f, 0.0f, 0.35f);
+                it->color.a = progress * 0.95f;
+            } else if (it->type == ParticleType::Smoke) {
+                it->vel.y += 0.15f * dt;
+                it->pos += it->vel * dt;
+                const float progress = it->life / it->maxLife;
+                it->size = (0.16f - 0.06f * progress); // expand as smoke dissipates
+                it->color.a = progress * 0.55f;
             } else if (it->type == ParticleType::Blood) {
                 it->vel.y -= it->gravity * dt;
                 it->vel.x *= std::max(0.0f, 1.0f - dt * 2.2f);

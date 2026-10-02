@@ -23,10 +23,23 @@
 #include <ctime>
 #include <fstream>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
 namespace vox {
+namespace {
+
+uint32_t hashCoord(int x, int z, uint32_t seed) {
+    uint32_t h = static_cast<uint32_t>(x) * 374761393U +
+                 static_cast<uint32_t>(z) * 668265263U +
+                 seed * 362437U;
+    h = (h ^ (h >> 13)) * 1274126177U;
+    h ^= h >> 16;
+    return h;
+}
+
+} // namespace
 
 Application::~Application() {
     if (m_window) shutdown();
@@ -195,7 +208,35 @@ void Application::run() {
         }
 
         if (m_state == GameState::Playing) {
-            if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
+            for (auto& msg : m_chatLog) {
+                if (msg.timeRemaining > 0.0f) {
+                    msg.timeRemaining -= static_cast<float>(dt);
+                    if (msg.timeRemaining < 0.0f) msg.timeRemaining = 0.0f;
+                }
+            }
+
+            if (m_chatOpen) {
+                handleChatInput();
+                m_player.update(dt, m_input, m_world, &m_audioEngine);
+                m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+                    if (addItem(id, count)) {
+                        m_audioEngine.play(SoundId::ItemPickup, 0.9f);
+                        return true;
+                    }
+                    return false;
+                }, [this](float dmg, const glm::vec3& src) {
+                    m_player.takeDamage(dmg, src, &m_audioEngine);
+                    const glm::vec3 hitPos = m_player.position() + glm::vec3(0.0f, 0.9f, 0.0f);
+                    glm::vec3 hitDir = m_player.position() - src;
+                    if (glm::length(hitDir) > 0.001f) {
+                        hitDir = glm::normalize(hitDir);
+                    } else {
+                        hitDir = glm::vec3(0.0f, 1.0f, 0.0f);
+                    }
+                    m_renderer.spawnBloodSplatter(hitPos, hitDir, 14);
+                });
+                m_renderer.updateParticles(dt, m_world, m_player.position());
+            } else if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
                 pauseGame();
             } else {
                 // Dimension travel cooldown
@@ -238,6 +279,24 @@ void Application::run() {
                     m_renderer.spawnBloodSplatter(hitPos, hitDir, 14);
                 });
                 m_renderer.updateParticles(dt, m_world, m_player.position());
+
+                // Held torch flame & smoke particles in first person
+                if (isTorch(m_player.heldItem()) && m_player.perspective() == Perspective::FirstPerson) {
+                    static float heldTorchParticleTimer = 0.0f;
+                    heldTorchParticleTimer += dt;
+                    if (heldTorchParticleTimer >= 0.08f) {
+                        heldTorchParticleTimer = 0.0f;
+                        const glm::vec3 camPos = m_player.camera().position();
+                        const glm::vec3 forward = m_player.camera().front();
+                        const glm::vec3 right = m_player.camera().right();
+                        const glm::vec3 up = m_player.camera().up();
+                        const glm::vec3 torchTip = camPos + forward * 0.42f + right * 0.22f - up * 0.14f;
+                        m_renderer.spawnFlame(torchTip);
+                        if (std::rand() % 4 == 0) {
+                            m_renderer.spawnSmoke(torchTip + glm::vec3(0.0f, 0.02f, 0.0f));
+                        }
+                    }
+                }
                 updateInteraction(dt);
 
                 if (m_player.isDead()) {
@@ -653,6 +712,17 @@ Menu& Application::activeMenu() {
 }
 
 void Application::handleCharInput(unsigned int codepoint) {
+    if (m_chatOpen) {
+        if (codepoint >= 32 && codepoint <= 126 && m_chatInput.size() < 128) {
+            m_chatInput.insert(m_chatInput.begin() + m_chatCursor, static_cast<char>(codepoint));
+            m_chatCursor++;
+            m_chatHistoryIndex = -1;
+            m_selectedSuggestion = -1;
+            updateChatSuggestions();
+        }
+        return;
+    }
+
     if (m_state == GameState::NewWorld) {
         if (m_newWorldMenu.selection() == 0) {
             if (codepoint >= 32 && codepoint <= 126 && m_newWorldName.size() < 24) {
@@ -1040,6 +1110,766 @@ void Application::switchDimension(DimensionId targetDim, const glm::vec3& target
     const DimensionInfo info = getDimensionInfo(targetDim);
     showTitleBanner(info.title, info.subtitle, 4.5f);
     m_audioEngine.play(SoundId::ItemPickup, 1.0f, 0.6f);
+}
+
+// ---------------------------------------------------------------------------
+// Chat & Command Console
+// ---------------------------------------------------------------------------
+
+void Application::openChat(const std::string& initialText) {
+    m_chatOpen = true;
+    m_chatInput = initialText;
+    m_chatCursor = static_cast<int>(initialText.size());
+    m_chatHistoryIndex = -1;
+    m_selectedSuggestion = -1;
+    updateChatSuggestions();
+    setCursorCaptured(false);
+}
+
+void Application::closeChat() {
+    m_chatOpen = false;
+    m_chatInput.clear();
+    m_chatCursor = 0;
+    m_chatSuggestions.clear();
+    m_selectedSuggestion = -1;
+    setCursorCaptured(true);
+}
+
+void Application::addChatMessage(const std::string& text, const glm::vec4& color) {
+    Renderer::ChatMessage msg;
+    msg.text = text;
+    msg.color = color;
+    msg.timeRemaining = 10.0f;
+    m_chatLog.push_back(msg);
+    if (m_chatLog.size() > 50) {
+        m_chatLog.erase(m_chatLog.begin());
+    }
+}
+
+void Application::handleChatInput() {
+    if (m_input.keyPressed(GLFW_KEY_ESCAPE)) {
+        closeChat();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_ENTER) || m_input.keyPressed(GLFW_KEY_KP_ENTER)) {
+        if (!m_chatInput.empty()) {
+            m_chatHistory.push_back(m_chatInput);
+            if (m_chatHistory.size() > 50) {
+                m_chatHistory.erase(m_chatHistory.begin());
+            }
+
+            if (m_chatInput[0] == '/') {
+                executeCommand(m_chatInput);
+            } else {
+                addChatMessage("<Player> " + m_chatInput, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+            }
+        }
+        closeChat();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_TAB)) {
+        applyTabAutocomplete();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_UP)) {
+        if (!m_chatHistory.empty()) {
+            if (m_chatHistoryIndex < static_cast<int>(m_chatHistory.size()) - 1) {
+                m_chatHistoryIndex++;
+            }
+            m_chatInput = m_chatHistory[m_chatHistory.size() - 1 - static_cast<size_t>(m_chatHistoryIndex)];
+            m_chatCursor = static_cast<int>(m_chatInput.size());
+            m_selectedSuggestion = -1;
+            updateChatSuggestions();
+        }
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_DOWN)) {
+        if (m_chatHistoryIndex > 0) {
+            m_chatHistoryIndex--;
+            m_chatInput = m_chatHistory[m_chatHistory.size() - 1 - static_cast<size_t>(m_chatHistoryIndex)];
+            m_chatCursor = static_cast<int>(m_chatInput.size());
+            m_selectedSuggestion = -1;
+            updateChatSuggestions();
+        } else if (m_chatHistoryIndex == 0) {
+            m_chatHistoryIndex = -1;
+            m_chatInput.clear();
+            m_chatCursor = 0;
+            m_selectedSuggestion = -1;
+            updateChatSuggestions();
+        }
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_LEFT)) {
+        m_chatCursor = std::max(0, m_chatCursor - 1);
+        m_selectedSuggestion = -1;
+        updateChatSuggestions();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_RIGHT)) {
+        m_chatCursor = std::min(static_cast<int>(m_chatInput.size()), m_chatCursor + 1);
+        m_selectedSuggestion = -1;
+        updateChatSuggestions();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_HOME)) {
+        m_chatCursor = 0;
+        m_selectedSuggestion = -1;
+        updateChatSuggestions();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_END)) {
+        m_chatCursor = static_cast<int>(m_chatInput.size());
+        m_selectedSuggestion = -1;
+        updateChatSuggestions();
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_BACKSPACE)) {
+        if (m_chatCursor > 0 && !m_chatInput.empty()) {
+            m_chatInput.erase(static_cast<size_t>(m_chatCursor - 1), 1);
+            m_chatCursor--;
+            m_chatHistoryIndex = -1;
+            m_selectedSuggestion = -1;
+            updateChatSuggestions();
+        }
+        return;
+    }
+
+    if (m_input.keyPressed(GLFW_KEY_DELETE)) {
+        if (m_chatCursor < static_cast<int>(m_chatInput.size())) {
+            m_chatInput.erase(static_cast<size_t>(m_chatCursor), 1);
+            m_chatHistoryIndex = -1;
+            m_selectedSuggestion = -1;
+            updateChatSuggestions();
+        }
+        return;
+    }
+}
+
+void Application::updateChatSuggestions() {
+    m_chatSuggestions.clear();
+    if (m_chatInput.empty() || m_chatInput[0] != '/') return;
+
+    std::string prefix = m_chatInput.substr(0, static_cast<size_t>(m_chatCursor));
+
+    std::vector<std::string> tokens;
+    std::string curToken;
+    for (char c : prefix) {
+        if (c == ' ') {
+            if (!curToken.empty()) {
+                tokens.push_back(curToken);
+                curToken.clear();
+            }
+        } else {
+            curToken += c;
+        }
+    }
+    const bool endsWithSpace = (!prefix.empty() && prefix.back() == ' ');
+    if (!curToken.empty()) {
+        tokens.push_back(curToken);
+    }
+
+    const std::vector<std::string> allRootCommands = {
+        "/locate", "/tp", "/teleport", "/dimension", "/dim",
+        "/gamemode", "/gm", "/time", "/help", "/clear"
+    };
+
+    if (tokens.empty() || (tokens.size() == 1 && !endsWithSpace)) {
+        std::string search = tokens.empty() ? "" : tokens[0];
+        for (const auto& cmd : allRootCommands) {
+            if (search.empty() || cmd.rfind(search, 0) == 0) {
+                m_chatSuggestions.push_back(cmd);
+            }
+        }
+    } else {
+        std::string root = tokens[0];
+        std::transform(root.begin(), root.end(), root.begin(), ::tolower);
+
+        int tokenIndex = static_cast<int>(tokens.size()) - (endsWithSpace ? 0 : 1);
+        std::string curArg = endsWithSpace ? "" : tokens.back();
+        std::transform(curArg.begin(), curArg.end(), curArg.begin(), ::tolower);
+
+        if (root == "/locate") {
+            if (tokenIndex == 1) {
+                const std::vector<std::string> structs = {
+                    "village", "exit_door", "glitch", "well", "house", "tower", "farm"
+                };
+                for (const auto& s : structs) {
+                    if (curArg.empty() || s.rfind(curArg, 0) == 0) {
+                        m_chatSuggestions.push_back(s);
+                    }
+                }
+            }
+        } else if (root == "/dimension" || root == "/dim") {
+            if (tokenIndex == 1) {
+                const std::vector<std::string> dims = {"overworld", "backrooms"};
+                for (const auto& d : dims) {
+                    if (curArg.empty() || d.rfind(curArg, 0) == 0) {
+                        m_chatSuggestions.push_back(d);
+                    }
+                }
+            }
+        } else if (root == "/gamemode" || root == "/gm") {
+            if (tokenIndex == 1) {
+                const std::vector<std::string> modes = {"survival", "creative"};
+                for (const auto& m : modes) {
+                    if (curArg.empty() || m.rfind(curArg, 0) == 0) {
+                        m_chatSuggestions.push_back(m);
+                    }
+                }
+            }
+        } else if (root == "/time") {
+            if (tokenIndex == 1) {
+                const std::vector<std::string> actions = {"set", "add"};
+                for (const auto& a : actions) {
+                    if (curArg.empty() || a.rfind(curArg, 0) == 0) {
+                        m_chatSuggestions.push_back(a);
+                    }
+                }
+            } else if (tokenIndex == 2 && tokens.size() >= 2 && tokens[1] == "set") {
+                const std::vector<std::string> timeValues = {
+                    "day", "noon", "sunset", "night", "midnight", "0", "6000", "12000", "18000"
+                };
+                for (const auto& t : timeValues) {
+                    if (curArg.empty() || t.rfind(curArg, 0) == 0) {
+                        m_chatSuggestions.push_back(t);
+                    }
+                }
+            }
+        } else if (root == "/help") {
+            if (tokenIndex == 1) {
+                const std::vector<std::string> helpCommands = {
+                    "locate", "tp", "dimension", "gamemode", "time", "clear"
+                };
+                for (const auto& h : helpCommands) {
+                    if (curArg.empty() || h.rfind(curArg, 0) == 0) {
+                        m_chatSuggestions.push_back(h);
+                    }
+                }
+            }
+        } else if (root == "/tp" || root == "/teleport") {
+            if (tokenIndex >= 1 && tokenIndex <= 3) {
+                if (curArg.empty()) {
+                    m_chatSuggestions.push_back("~");
+                }
+            }
+        }
+    }
+}
+
+void Application::applyTabAutocomplete() {
+    if (m_chatSuggestions.empty()) {
+        updateChatSuggestions();
+    }
+    if (m_chatSuggestions.empty()) return;
+
+    if (m_selectedSuggestion < 0 || m_selectedSuggestion >= static_cast<int>(m_chatSuggestions.size()) - 1) {
+        m_selectedSuggestion = 0;
+    } else {
+        m_selectedSuggestion++;
+    }
+
+    const std::string& choice = m_chatSuggestions[static_cast<size_t>(m_selectedSuggestion)];
+
+    std::string prefix = m_chatInput.substr(0, static_cast<size_t>(m_chatCursor));
+    size_t lastSpace = prefix.find_last_of(' ');
+
+    std::string beforeToken;
+    if (lastSpace != std::string::npos) {
+        beforeToken = prefix.substr(0, lastSpace + 1);
+    }
+
+    std::string afterCursor = m_chatInput.substr(static_cast<size_t>(m_chatCursor));
+
+    m_chatInput = beforeToken + choice + " " + afterCursor;
+    m_chatCursor = static_cast<int>(beforeToken.size() + choice.size() + 1);
+
+    updateChatSuggestions();
+}
+
+void Application::locateStructure(const std::string& target) {
+    const glm::vec3 pPos = m_player.position();
+    const int px = static_cast<int>(std::floor(pPos.x));
+    const int pz = static_cast<int>(std::floor(pPos.z));
+
+    if (target == "village" || target == "well" || target == "house" || target == "cottage" || target == "tower" || target == "farm") {
+        if (m_world.currentDimension() != DimensionId::Overworld) {
+            addChatMessage("Villages only generate in the Overworld.", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+
+        // If no villages exist, actively search terrain and generate one
+        if (m_world.villages().empty()) {
+            int bestX = px + 48;
+            int bestZ = pz + 48;
+            bool foundSpot = false;
+
+            // Search outward in concentric rings around player
+            for (int r = 32; r <= 256 && !foundSpot; r += 16) {
+                for (int dz = -r; dz <= r && !foundSpot; dz += 16) {
+                    for (int dx = -r; dx <= r && !foundSpot; dx += 16) {
+                        if (std::abs(dx) != r && std::abs(dz) != r) continue;
+
+                        const int testX = px + dx;
+                        const int testZ = pz + dz;
+
+                        // Check area footprint
+                        bool valid = true;
+                        int samples = 0;
+                        int minY = 999;
+                        int maxY = -999;
+
+                        for (int fz = -12; fz <= 12 && valid; fz += 6) {
+                            for (int fx = -12; fx <= 12 && valid; fx += 6) {
+                                const int sx = testX + fx;
+                                const int sz = testZ + fz;
+                                const int sy = m_world.surfaceHeight(sx, sz);
+                                const BlockId b = m_world.getBlock(sx, sy, sz);
+
+                                if (sy < 28 || sy > 54 || b == BlockId::Water) {
+                                    valid = false;
+                                    break;
+                                }
+                                if (sy < minY) minY = sy;
+                                if (sy > maxY) maxY = sy;
+                                samples++;
+                            }
+                        }
+
+                        if (valid && samples > 0 && (maxY - minY <= 8)) {
+                            bestX = testX;
+                            bestZ = testZ;
+                            foundSpot = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Ensure chunks in footprint are generated
+            const int centerChunkX = (bestX >= 0 ? bestX : bestX - 15) / 16;
+            const int centerChunkZ = (bestZ >= 0 ? bestZ : bestZ - 15) / 16;
+            for (int dcz = -3; dcz <= 3; ++dcz) {
+                for (int dcx = -3; dcx <= 3; ++dcx) {
+                    m_world.generateSingleChunk(centerChunkX + dcx, centerChunkZ + dcz, m_activeWorldType);
+                }
+            }
+
+            // Generate village structure
+            const int templateType = static_cast<int>(m_world.seed() % 4);
+            VillageGenerator::buildVillage(m_world, bestX, bestZ, templateType, m_world.seed());
+
+            const int floorY = m_world.surfaceHeight(bestX, bestZ);
+            Village v;
+            v.center = glm::vec3(static_cast<float>(bestX) + 0.5f,
+                                 static_cast<float>(floorY + 1),
+                                 static_cast<float>(bestZ) + 0.5f);
+            v.radius = 36;
+            v.templateType = templateType;
+            v.name = "Pigman Village";
+            m_world.addVillage(v);
+        }
+
+        // Locate nearest village
+        const auto& vList = m_world.villages();
+        float closestDist = 1e9f;
+        glm::vec3 closestLoc(0.0f);
+        std::string foundName = "Village";
+
+        for (const auto& v : vList) {
+            glm::vec3 compLoc = v.center;
+            std::string name = v.name;
+
+            if (target == "well") {
+                compLoc = v.center;
+                name = "Village Well";
+            } else if (target == "house" || target == "cottage") {
+                compLoc = v.center + glm::vec3(12.0f, 0.0f, 12.0f);
+                name = "Village House";
+            } else if (target == "tower") {
+                compLoc = v.center + glm::vec3(18.0f, 0.0f, -16.0f);
+                name = "Village Watchtower";
+            } else if (target == "farm") {
+                compLoc = v.center + glm::vec3(-14.0f, 0.0f, 14.0f);
+                name = "Village Farm";
+            }
+
+            float dist = glm::distance(glm::vec2(pPos.x, pPos.z), glm::vec2(compLoc.x, compLoc.z));
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestLoc = compLoc;
+                foundName = name;
+            }
+        }
+
+        int targetX = static_cast<int>(std::floor(closestLoc.x));
+        int targetY = m_world.surfaceHeight(targetX, static_cast<int>(std::floor(closestLoc.z))) + 1;
+        int targetZ = static_cast<int>(std::floor(closestLoc.z));
+
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "Nearest %s is at [%d, %d, %d] (%.0f blocks away)",
+                      foundName.c_str(), targetX, targetY, targetZ, closestDist);
+        addChatMessage(msg, glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+        return;
+    }
+
+    if (target == "exit_door" || target == "exit" || target == "door" || target == "fire_exit") {
+        if (m_world.currentDimension() != DimensionId::Backrooms) {
+            addChatMessage("Fire Exit doors only exist in The Backrooms.", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+
+        const int cellDim = 160;
+        const int curCellX = (px >= 0 ? px : px - (cellDim - 1)) / cellDim;
+        const int curCellZ = (pz >= 0 ? pz : pz - (cellDim - 1)) / cellDim;
+
+        float closestDist = 1e9f;
+        glm::ivec3 closestLoc(0);
+        bool found = false;
+
+        for (int dz = -5; dz <= 5; ++dz) {
+            for (int dx = -5; dx <= 5; ++dx) {
+                int cx = curCellX + dx;
+                int cz = curCellZ + dz;
+                uint32_t h = hashCoord(cx, cz, m_world.seed() + 9999);
+                if ((h & 0xFF) > 128) continue;
+                int tx = cx * cellDim + static_cast<int>((h >> 8) % (cellDim - 16)) + 8;
+                int tz = cz * cellDim + static_cast<int>((h >> 16) % (cellDim - 16)) + 8;
+                float dist = std::sqrt(static_cast<float>((tx - px) * (tx - px) + (tz - pz) * (tz - pz)));
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestLoc = glm::ivec3(tx, 2, tz);
+                    found = true;
+                }
+            }
+        }
+
+        // If not found in immediate cells, pick adjacent cell and place exit door
+        if (!found) {
+            int tx = curCellX * cellDim + 40;
+            int tz = curCellZ * cellDim + 40;
+            closestLoc = glm::ivec3(tx, 2, tz);
+            closestDist = std::sqrt(static_cast<float>((tx - px) * (tx - px) + (tz - pz) * (tz - pz)));
+            found = true;
+        }
+
+        // Generate chunk and place exit door
+        const int chunkX = (closestLoc.x >= 0 ? closestLoc.x : closestLoc.x - 15) / 16;
+        const int chunkZ = (closestLoc.z >= 0 ? closestLoc.z : closestLoc.z - 15) / 16;
+        m_world.generateSingleChunk(chunkX, chunkZ, WorldType::Default);
+
+        m_world.setBlock(closestLoc.x, 1, closestLoc.z, BlockId::BackroomsCarpet);
+        m_world.setBlock(closestLoc.x, 2, closestLoc.z, BlockId::ExitDoor);
+        m_world.setBlock(closestLoc.x, 3, closestLoc.z, BlockId::Air);
+        m_world.setBlock(closestLoc.x, 4, closestLoc.z, BlockId::Air);
+
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "Nearest Fire Exit Door is at [%d, %d, %d] (%.0f blocks away)",
+                      closestLoc.x, closestLoc.y, closestLoc.z, closestDist);
+        addChatMessage(msg, glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+        return;
+    }
+
+    if (target == "glitch" || target == "glitch_block" || target == "reality_glitch") {
+        const int cellDim = 128;
+        const int curCellX = (px >= 0 ? px : px - (cellDim - 1)) / cellDim;
+        const int curCellZ = (pz >= 0 ? pz : pz - (cellDim - 1)) / cellDim;
+
+        float closestDist = 1e9f;
+        glm::ivec3 closestLoc(0);
+        bool found = false;
+
+        for (int dz = -5; dz <= 5; ++dz) {
+            for (int dx = -5; dx <= 5; ++dx) {
+                int cx = curCellX + dx;
+                int cz = curCellZ + dz;
+                uint32_t h = hashCoord(cx, cz, m_world.seed() + 7777);
+                if ((h & 0xFF) > 160) continue;
+                int tx = cx * cellDim + static_cast<int>((h >> 8) % (cellDim - 16)) + 8;
+                int tz = cz * cellDim + static_cast<int>((h >> 16) % (cellDim - 16)) + 8;
+                float dist = std::sqrt(static_cast<float>((tx - px) * (tx - px) + (tz - pz) * (tz - pz)));
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestLoc = glm::ivec3(tx, 2, tz);
+                    found = true;
+                }
+            }
+        }
+
+        if (!found) {
+            int tx = curCellX * cellDim + 32;
+            int tz = curCellZ * cellDim + 32;
+            closestLoc = glm::ivec3(tx, 2, tz);
+            closestDist = std::sqrt(static_cast<float>((tx - px) * (tx - px) + (tz - pz) * (tz - pz)));
+            found = true;
+        }
+
+        // Generate chunk and place glitch block
+        const int chunkX = (closestLoc.x >= 0 ? closestLoc.x : closestLoc.x - 15) / 16;
+        const int chunkZ = (closestLoc.z >= 0 ? closestLoc.z : closestLoc.z - 15) / 16;
+        m_world.generateSingleChunk(chunkX, chunkZ, m_activeWorldType);
+
+        if (m_world.currentDimension() == DimensionId::Overworld) {
+            int sy = m_world.surfaceHeight(closestLoc.x, closestLoc.z);
+            closestLoc.y = sy;
+            m_world.setBlock(closestLoc.x, sy, closestLoc.z, BlockId::GlitchBlock);
+        } else {
+            m_world.setBlock(closestLoc.x, 2, closestLoc.z, BlockId::GlitchBlock);
+        }
+
+        char msg[128];
+        std::snprintf(msg, sizeof(msg), "Nearest Reality Glitch is at [%d, %d, %d] (%.0f blocks away)",
+                      closestLoc.x, closestLoc.y, closestLoc.z, closestDist);
+        addChatMessage(msg, glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+        return;
+    }
+
+    addChatMessage("Unknown structure '" + target + "'. Available: village, exit_door, glitch, well, house, tower, farm", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+}
+
+void Application::teleportPlayer(const std::vector<std::string>& args) {
+    const glm::vec3 curPos = m_player.position();
+    float targetX = curPos.x;
+    float targetY = curPos.y;
+    float targetZ = curPos.z;
+
+    auto parseCoord = [](const std::string& str, float curVal, float& outVal) -> bool {
+        if (str.empty()) return false;
+        if (str[0] == '~') {
+            if (str.size() == 1) {
+                outVal = curVal;
+                return true;
+            }
+            try {
+                outVal = curVal + std::stof(str.substr(1));
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
+        try {
+            outVal = std::stof(str);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
+
+    if (args.size() == 2) {
+        // /tp <x> <z> -> auto surface Y
+        if (!parseCoord(args[0], curPos.x, targetX) || !parseCoord(args[1], curPos.z, targetZ)) {
+            addChatMessage("Invalid coordinates. Usage: /tp <x> [y] <z>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+        int ix = static_cast<int>(std::floor(targetX));
+        int iz = static_cast<int>(std::floor(targetZ));
+        if (m_world.currentDimension() == DimensionId::Overworld) {
+            int sy = m_world.surfaceHeight(ix, iz);
+            targetY = static_cast<float>(sy + 1);
+        } else {
+            targetY = 2.0f;
+        }
+    } else if (args.size() >= 3) {
+        // /tp <x> <y> <z>
+        if (!parseCoord(args[0], curPos.x, targetX) ||
+            !parseCoord(args[1], curPos.y, targetY) ||
+            !parseCoord(args[2], curPos.z, targetZ)) {
+            addChatMessage("Invalid coordinates. Usage: /tp <x> [y] <z>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+    } else {
+        addChatMessage("Usage: /tp <x> [y] <z>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+        return;
+    }
+
+    m_player.setPosition(glm::vec3(targetX, targetY, targetZ));
+    m_world.updateStreaming(m_player.position(), m_viewDistanceChunks, m_activeWorldType);
+
+    char msg[128];
+    std::snprintf(msg, sizeof(msg), "Teleported to [%.1f, %.1f, %.1f]", targetX, targetY, targetZ);
+    addChatMessage(msg, glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+}
+
+void Application::executeCommand(const std::string& cmdStr) {
+    size_t first = cmdStr.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return;
+    std::string line = cmdStr.substr(first);
+    if (line.empty()) return;
+
+    addChatMessage(line, glm::vec4(0.85f, 0.85f, 0.85f, 1.0f));
+
+    std::istringstream iss(line);
+    std::string cmd;
+    iss >> cmd;
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
+
+    std::vector<std::string> args;
+    std::string arg;
+    while (iss >> arg) {
+        args.push_back(arg);
+    }
+
+    if (cmd == "/help") {
+        if (args.empty()) {
+            addChatMessage("--- Available Commands ---", glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+            addChatMessage("/locate <structure> - Find nearby structure", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            addChatMessage("/tp <x> [y] <z> - Teleport coordinates (~ for relative)", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            addChatMessage("/dimension <overworld|backrooms> - Switch dimension", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            addChatMessage("/gamemode <survival|creative> - Change game mode", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            addChatMessage("/time <set|add> <value> - Change world time", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            addChatMessage("/clear - Clear chat messages", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+        } else {
+            std::string sub = args[0];
+            std::transform(sub.begin(), sub.end(), sub.begin(), ::tolower);
+            if (sub == "locate") {
+                addChatMessage("Usage: /locate <village|exit_door|glitch|well|house|tower|farm>", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            } else if (sub == "tp" || sub == "teleport") {
+                addChatMessage("Usage: /tp <x> [y] <z> (e.g. /tp 100 64 200 or /tp ~ 10 ~)", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            } else if (sub == "dimension" || sub == "dim") {
+                addChatMessage("Usage: /dimension <overworld|backrooms>", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            } else if (sub == "gamemode" || sub == "gm") {
+                addChatMessage("Usage: /gamemode <survival|creative>", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            } else if (sub == "time") {
+                addChatMessage("Usage: /time <set|add> <day|noon|sunset|night|midnight|<number>>", glm::vec4(0.9f, 0.9f, 0.9f, 1.0f));
+            } else {
+                addChatMessage("Unknown command '/help " + sub + "'.", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            }
+        }
+        return;
+    }
+
+    if (cmd == "/clear") {
+        m_chatLog.clear();
+        return;
+    }
+
+    if (cmd == "/locate") {
+        if (args.empty()) {
+            addChatMessage("Usage: /locate <village|exit_door|glitch|well|house|tower|farm>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+        std::string target = args[0];
+        std::transform(target.begin(), target.end(), target.begin(), ::tolower);
+        locateStructure(target);
+        return;
+    }
+
+    if (cmd == "/tp" || cmd == "/teleport") {
+        if (args.empty()) {
+            addChatMessage("Usage: /tp <x> [y] <z>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+        teleportPlayer(args);
+        return;
+    }
+
+    if (cmd == "/dimension" || cmd == "/dim") {
+        if (args.empty()) {
+            addChatMessage("Usage: /dimension <overworld|backrooms>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+        std::string dimName = args[0];
+        std::transform(dimName.begin(), dimName.end(), dimName.begin(), ::tolower);
+        if (dimName == "overworld" || dimName == "surface" || dimName == "0") {
+            if (m_world.currentDimension() == DimensionId::Overworld) {
+                addChatMessage("Already in Overworld.", glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+            } else {
+                switchDimension(DimensionId::Overworld, m_overworldReturnPos);
+                addChatMessage("Teleported to Overworld.", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            }
+        } else if (dimName == "backrooms" || dimName == "level0" || dimName == "1") {
+            if (m_world.currentDimension() == DimensionId::Backrooms) {
+                addChatMessage("Already in The Backrooms.", glm::vec4(1.0f, 0.85f, 0.2f, 1.0f));
+            } else {
+                switchDimension(DimensionId::Backrooms, glm::vec3(0.5f, 2.0f, 0.5f));
+                addChatMessage("Teleported to The Backrooms (Level 0).", glm::vec4(0.9f, 0.85f, 0.2f, 1.0f));
+            }
+        } else {
+            addChatMessage("Unknown dimension '" + args[0] + "'. Available: overworld, backrooms", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+        }
+        return;
+    }
+
+    if (cmd == "/gamemode" || cmd == "/gm") {
+        if (args.empty()) {
+            addChatMessage("Usage: /gamemode <survival|creative>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+        std::string mode = args[0];
+        std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "creative" || mode == "c" || mode == "1") {
+            m_creativeMode = true;
+            addChatMessage("Game mode set to Creative Mode.", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+        } else if (mode == "survival" || mode == "s" || mode == "0") {
+            m_creativeMode = false;
+            m_player.setFlying(false);
+            addChatMessage("Game mode set to Survival Mode.", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+        } else {
+            addChatMessage("Unknown game mode '" + args[0] + "'. Available: survival, creative", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+        }
+        return;
+    }
+
+    if (cmd == "/time") {
+        if (args.size() < 2) {
+            addChatMessage("Usage: /time <set|add> <value>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            return;
+        }
+        std::string sub = args[0];
+        std::transform(sub.begin(), sub.end(), sub.begin(), ::tolower);
+        std::string valStr = args[1];
+        std::transform(valStr.begin(), valStr.end(), valStr.begin(), ::tolower);
+
+        if (sub == "set") {
+            if (valStr == "day" || valStr == "morning") {
+                m_timeOfDay = 0.22f;
+                addChatMessage("Set time to Day (08:30).", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            } else if (valStr == "noon" || valStr == "midday") {
+                m_timeOfDay = 0.25f;
+                addChatMessage("Set time to Noon (12:00).", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            } else if (valStr == "sunset" || valStr == "dusk") {
+                m_timeOfDay = 0.50f;
+                addChatMessage("Set time to Sunset (18:00).", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            } else if (valStr == "night") {
+                m_timeOfDay = 0.75f;
+                addChatMessage("Set time to Night (21:00).", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            } else if (valStr == "midnight") {
+                m_timeOfDay = 0.85f;
+                addChatMessage("Set time to Midnight (00:00).", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            } else {
+                try {
+                    float ticks = std::stof(valStr);
+                    m_timeOfDay = std::fmod(ticks / 24000.0f, 1.0f);
+                    if (m_timeOfDay < 0.0f) m_timeOfDay += 1.0f;
+                    addChatMessage("Set time to " + valStr + " ticks.", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+                } catch (...) {
+                    addChatMessage("Invalid time value '" + valStr + "'.", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+                }
+            }
+        } else if (sub == "add") {
+            try {
+                float ticks = std::stof(valStr);
+                m_timeOfDay = std::fmod(m_timeOfDay + ticks / 24000.0f, 1.0f);
+                if (m_timeOfDay < 0.0f) m_timeOfDay += 1.0f;
+                addChatMessage("Added " + valStr + " ticks to time.", glm::vec4(0.3f, 0.9f, 0.3f, 1.0f));
+            } catch (...) {
+                addChatMessage("Invalid time value '" + valStr + "'.", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+            }
+        } else {
+            addChatMessage("Usage: /time <set|add> <value>", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
+        }
+        return;
+    }
+
+    addChatMessage("Unknown command '" + cmd + "'. Type /help for help.", glm::vec4(1.0f, 0.4f, 0.4f, 1.0f));
 }
 
 void Application::startGame() {
@@ -1944,6 +2774,14 @@ void Application::handleInventoryInput() {
 // ---------------------------------------------------------------------------
 
 void Application::handlePlayInput() {
+    if (m_input.keyPressed(GLFW_KEY_SLASH)) {
+        openChat("/");
+        return;
+    }
+    if (m_input.keyPressed(GLFW_KEY_T)) {
+        openChat("");
+        return;
+    }
     if (m_input.keyPressed(GLFW_KEY_E)) {
         openInventory(false);
         return;
@@ -2080,6 +2918,25 @@ void Application::updateInteraction(float dt) {
                 if (m_input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
                     m_player.triggerSwing();
                     m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
+                    
+                    // Pop any unsupported attached wall torches
+                    {
+                        const int bx = m_target.block.x;
+                        const int by = m_target.block.y;
+                        const int bz = m_target.block.z;
+                        auto checkPop = [this](int tx, int ty, int tz, BlockId expected) {
+                            if (m_world.getBlock(tx, ty, tz) == expected) {
+                                m_world.setBlock(tx, ty, tz, BlockId::Air);
+                                m_entityManager.spawnItem(BlockId::Torch, glm::vec3(static_cast<float>(tx) + 0.5f, static_cast<float>(ty) + 0.5f, static_cast<float>(tz) + 0.5f), 1);
+                            }
+                        };
+                        checkPop(bx + 1, by, bz, BlockId::TorchWallWest);
+                        checkPop(bx - 1, by, bz, BlockId::TorchWallEast);
+                        checkPop(bx, by, bz + 1, BlockId::TorchWallNorth);
+                        checkPop(bx, by, bz - 1, BlockId::TorchWallSouth);
+                        checkPop(bx, by + 1, bz, BlockId::Torch);
+                    }
+
                     const SoundId digSnd = getDigSound(targetBlock);
                     const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
                     m_audioEngine.play3D(digSnd, blockCenter, camera.position(), camera.front(), 0.90f, &m_world);
@@ -2120,6 +2977,25 @@ void Application::updateInteraction(float dt) {
 
                 if (m_miningProgress >= 1.0f) {
                     m_world.setBlock(m_target.block.x, m_target.block.y, m_target.block.z, BlockId::Air);
+
+                    // Pop any unsupported attached wall torches
+                    {
+                        const int bx = m_target.block.x;
+                        const int by = m_target.block.y;
+                        const int bz = m_target.block.z;
+                        auto checkPop = [this](int tx, int ty, int tz, BlockId expected) {
+                            if (m_world.getBlock(tx, ty, tz) == expected) {
+                                m_world.setBlock(tx, ty, tz, BlockId::Air);
+                                m_entityManager.spawnItem(BlockId::Torch, glm::vec3(static_cast<float>(tx) + 0.5f, static_cast<float>(ty) + 0.5f, static_cast<float>(tz) + 0.5f), 1);
+                            }
+                        };
+                        checkPop(bx + 1, by, bz, BlockId::TorchWallWest);
+                        checkPop(bx - 1, by, bz, BlockId::TorchWallEast);
+                        checkPop(bx, by, bz + 1, BlockId::TorchWallNorth);
+                        checkPop(bx, by, bz - 1, BlockId::TorchWallSouth);
+                        checkPop(bx, by + 1, bz, BlockId::Torch);
+                    }
+
                     const glm::vec3 blockCenter = glm::vec3(m_target.block) + glm::vec3(0.5f);
                     m_renderer.spawnBlockBreakParticles(glm::vec3(m_target.block), targetBlock, m_world, computeSunlight(), 24);
                     const SoundId breakSnd = getDigSound(targetBlock);
@@ -2243,16 +3119,27 @@ void Application::updateInteraction(float dt) {
                         placed = BlockId::Wood;
                     }
                 } else if (isTorch(placed)) {
+                    // Torches can ONLY be placed on the side of a solid vertical wall.
+                    // Cannot be placed on top of blocks, on ceilings, or floating.
+                    if (m_target.normal.y != 0) {
+                        return; // Disallow placing on top or bottom
+                    }
+
+                    const BlockId attachedBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
+                    if (!isSolid(attachedBlock)) {
+                        return; // Must be attached to a solid block
+                    }
+
                     if (m_target.normal.x > 0) {
-                        placed = BlockId::TorchWallWest; // Attached to West wall
+                        placed = BlockId::TorchWallWest; // Attached to West wall (+X face)
                     } else if (m_target.normal.x < 0) {
-                        placed = BlockId::TorchWallEast; // Attached to East wall
+                        placed = BlockId::TorchWallEast; // Attached to East wall (-X face)
                     } else if (m_target.normal.z > 0) {
-                        placed = BlockId::TorchWallNorth; // Attached to North wall
+                        placed = BlockId::TorchWallNorth; // Attached to North wall (+Z face)
                     } else if (m_target.normal.z < 0) {
-                        placed = BlockId::TorchWallSouth; // Attached to South wall
+                        placed = BlockId::TorchWallSouth; // Attached to South wall (-Z face)
                     } else {
-                        placed = BlockId::Torch; // Floor torch
+                        return;
                     }
                 }
                 m_world.setBlock(place.x, place.y, place.z, placed);
@@ -2620,11 +3507,18 @@ void Application::renderScene() {
         m_renderer.drawSky(camera, m_timeOfDay, skyColor, fogColor, sunlight);
     }
 
+    const BlockId heldBlock = m_player.heldItem();
+    float heldLightIntensity = 0.0f;
+    glm::vec3 heldLightPos = m_player.camera().position();
+    if (isLightSource(heldBlock) || emittedLight(heldBlock) > 0) {
+        heldLightIntensity = static_cast<float>(emittedLight(heldBlock)) / 15.0f;
+    }
+
     if (m_state == GameState::Playing) {
         glPolygonMode(GL_FRONT_AND_BACK, m_wireframe ? GL_LINE : GL_FILL);
-        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
+        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
 
         if (m_target.hit) {
             const BlockId targetBlock = m_world.getBlock(m_target.block.x, m_target.block.y, m_target.block.z);
@@ -2635,7 +3529,7 @@ void Application::renderScene() {
             }
         }
 
-        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight, heldLightIntensity, heldLightPos);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         if (underwater) {
@@ -2664,14 +3558,17 @@ void Application::renderScene() {
             }
             m_renderer.drawTitleBanner(m_bannerTitle, m_bannerSubtitle, std::clamp(alpha, 0.0f, 1.0f), static_cast<float>(m_uiTime));
         }
+
+        m_renderer.drawChat(m_chatLog, m_chatOpen, m_chatInput, m_chatCursor,
+                            m_chatSuggestions, m_selectedSuggestion, static_cast<float>(m_uiTime));
         return;
     }
 
     if (m_state == GameState::GameOver) {
-        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
+        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight, heldLightIntensity, heldLightPos);
 
         bool hoverRespawn = false, hoverQuit = false;
         m_renderer.drawDeathScreen(static_cast<float>(m_uiTime), mouseInFramebuffer(), hoverRespawn, hoverQuit);
@@ -2679,10 +3576,10 @@ void Application::renderScene() {
     }
 
     if (m_state == GameState::Inventory) {
-        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight);
+        m_renderer.drawWorld(m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawEntities(m_entityManager, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawPlayer(m_player, m_world, m_player.camera(), fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawFirstPersonArm(m_player, m_world, m_player.camera(), sunlight, heldLightIntensity, heldLightPos);
         if (underwater) {
             m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
         } else if (m_world.currentDimension() == DimensionId::Backrooms) {
@@ -2704,11 +3601,11 @@ void Application::renderScene() {
         return;
     }
 
-    m_renderer.drawWorld(m_world, camera, fogColor, fogStart, fogEnd, sunlight);
-    m_renderer.drawEntities(m_entityManager, m_world, camera, fogColor, fogStart, fogEnd, sunlight);
+    m_renderer.drawWorld(m_world, camera, fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+    m_renderer.drawEntities(m_entityManager, m_world, camera, fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
     if (pausedBackground) {
-        m_renderer.drawPlayer(m_player, m_world, camera, fogColor, fogStart, fogEnd, sunlight);
-        m_renderer.drawFirstPersonArm(m_player, m_world, camera, sunlight);
+        m_renderer.drawPlayer(m_player, m_world, camera, fogColor, fogStart, fogEnd, sunlight, heldLightIntensity, heldLightPos);
+        m_renderer.drawFirstPersonArm(m_player, m_world, camera, sunlight, heldLightIntensity, heldLightPos);
     }
     if (underwater && pausedBackground) {
         m_renderer.drawUnderwaterOverlay(static_cast<float>(m_uiTime));
