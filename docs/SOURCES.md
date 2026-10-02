@@ -223,9 +223,23 @@ These are the published algorithms the voxel code implements:
   - **Bounding Sphere Culling for Dynamic Entities**: Rapid $O(1)$ sphere rejection ($P(\vec{c}) < -r$) for mobs, dropped items, and particle systems.
   - **Multi-Tier Hierarchical Culling**: Shared chunk AABB culling across opaque and cutout passes, avoiding redundant matrix transformations and GPU vertex buffer transfers for occluded geometry.
 
+## 20. Voxel Wiki & Dynamic Palette Compression
+- **Voxel Wiki Article**: [https://voxel.wiki/wiki/palette-compression/](https://voxel.wiki/wiki/palette-compression/)
+- **Video Reference**: [https://youtu.be/u4i13GVvAdg](https://youtu.be/u4i13GVvAdg)
+- **Domain**: Dynamic multi-tier bit-packed palette compression for chunk voxel grids.
+- **Key Concepts & Implementations in VoxelMin**:
+  - **Dynamic Bit-Packing (0, 1, 2, 4, 8 bits/voxel)**: `ChunkPalette` in `src/world/Chunk.hpp` dynamically adjusts bit allocation based on unique block cardinality:
+    - *Uniform chunks (1 unique block)*: 0 bits/voxel (1 byte palette, 0 bytes index array).
+    - *2 unique blocks*: 1 bit/voxel (2,560 bytes).
+    - *3–4 unique blocks*: 2 bits/voxel (5,120 bytes).
+    - *5–16 unique blocks*: 4 bits/voxel (10,240 bytes).
+    - *17+ unique blocks*: 8 bits/voxel (20,480 bytes).
+  - **On-the-Fly Bit Depth Promotion & Compaction**: Automatic promotion on new block insertion and pruning / re-indexing via `compact()`.
+  - **L1/L2 Cache Locality**: Substantially reduced voxel memory footprint cuts cache misses during greedy meshing passes.
+
 ---
 
-## 20. Core Libraries
+## 21. Core Libraries
 
 - [GLFW](https://www.glfw.org/) -- Windowing, OpenGL context, and input.
 - [GLEW](https://github.com/nigels-com/glew) -- OpenGL 3.3 extension loading.
@@ -233,3 +247,4 @@ These are the published algorithms the voxel code implements:
 - [miniaudio](https://miniaud.io/) -- Audio playback, procedural synthesizers, and DSP filters.
 - [FastNoiseLite](https://github.com/Auburn/FastNoiseLite) -- Fast coherent noise generation library (`src/world/FastNoiseLite.hpp`).
 - [stb](https://github.com/nothings/stb) -- Single-header `stb_image` for PNG decoding, `stb_truetype` for OTF/TTF fonts, and `stb_image_resize` for downscaling.
+

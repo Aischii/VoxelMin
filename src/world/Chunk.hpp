@@ -17,75 +17,209 @@ struct RLERun {
 };
 
 // ---------------------------------------------------------------------------
-// ChunkPalette implements palette-compressed voxel storage (FerriteCore style).
-// - Uniform single-block chunks (e.g. 100% Air or Stone) consume 0 index array
-//   bytes (1 byte palette).
-// - Multi-block chunks use an indexed 8-bit palette array + distinct block table.
+// ChunkPalette implements dynamic bit-packed palette compression
+// (Voxel Wiki / FerriteCore architecture).
+// - Uniform single-block chunks (e.g. 100% Air or Stone): 0 bits/voxel (1 byte).
+// - 2 unique blocks: 1 bit/voxel (2,560 bytes).
+// - 3–4 unique blocks: 2 bits/voxel (5,120 bytes).
+// - 5–16 unique blocks: 4 bits/voxel (10,240 bytes).
+// - 17+ unique blocks: 8 bits/voxel (20,480 bytes).
 // ---------------------------------------------------------------------------
 class ChunkPalette {
 public:
     static constexpr size_t TotalVoxels = static_cast<size_t>(config::CHUNK_SIZE_X) *
                                           config::CHUNK_SIZE_Y * config::CHUNK_SIZE_Z;
 
-    ChunkPalette() : m_isSingle(true), m_singleBlock(BlockId::Air) {}
+    ChunkPalette() : m_bitsPerVoxel(0), m_palette({ BlockId::Air }) {}
 
     BlockId get(size_t idx) const {
-        if (m_isSingle) return m_singleBlock;
-        return m_palette[m_indices[idx]];
+        if (m_palette.empty()) return BlockId::Air;
+        if (m_bitsPerVoxel == 0) return m_palette[0];
+        const uint8_t raw = getRawIndex(idx);
+        if (raw < m_palette.size()) return m_palette[raw];
+        return BlockId::Air;
     }
 
     void set(size_t idx, BlockId block) {
-        if (m_isSingle) {
-            if (m_singleBlock == block) return;
-            m_isSingle = false;
-            m_palette = { m_singleBlock };
-            m_indices.assign(TotalVoxels, 0);
+        if (m_palette.empty()) {
+            fill(block);
+            return;
         }
 
-        const uint8_t palIdx = getOrAddPaletteIndex(block);
-        m_indices[idx] = palIdx;
+        if (m_bitsPerVoxel == 0) {
+            if (m_palette[0] == block) return;
+            m_palette.push_back(block);
+            promote(1);
+            setRawIndex(idx, 1);
+            return;
+        }
+
+        // Check if block already exists in palette
+        for (size_t i = 0; i < m_palette.size(); ++i) {
+            if (m_palette[i] == block) {
+                setRawIndex(idx, static_cast<uint8_t>(i));
+                return;
+            }
+        }
+
+        // New unique block
+        const uint8_t newPalIdx = static_cast<uint8_t>(m_palette.size());
+        m_palette.push_back(block);
+
+        if (m_palette.size() > 16 && m_bitsPerVoxel < 8) {
+            promote(8);
+        } else if (m_palette.size() > 4 && m_bitsPerVoxel < 4) {
+            promote(4);
+        } else if (m_palette.size() > 2 && m_bitsPerVoxel < 2) {
+            promote(2);
+        }
+
+        setRawIndex(idx, newPalIdx);
     }
 
     void fill(BlockId block) {
-        m_isSingle = true;
-        m_singleBlock = block;
-        m_palette.clear();
-        m_indices.clear();
-        m_indices.shrink_to_fit();
+        m_bitsPerVoxel = 0;
+        m_palette = { block };
+        m_packedData.clear();
+        m_packedData.shrink_to_fit();
     }
 
     size_t memoryUsage() const {
-        if (m_isSingle) return sizeof(ChunkPalette);
-        return sizeof(ChunkPalette) + m_palette.size() * sizeof(BlockId) + m_indices.size() * sizeof(uint8_t);
+        return sizeof(ChunkPalette) +
+               m_palette.size() * sizeof(BlockId) +
+               m_packedData.size() * sizeof(uint8_t);
     }
 
-    bool isSingle() const { return m_isSingle; }
-    BlockId singleBlock() const { return m_singleBlock; }
+    bool isSingle() const { return m_bitsPerVoxel == 0; }
+    BlockId singleBlock() const { return m_palette.empty() ? BlockId::Air : m_palette[0]; }
     const std::vector<BlockId>& palette() const { return m_palette; }
-    const std::vector<uint8_t>& indices() const { return m_indices; }
+    uint8_t bitsPerVoxel() const { return m_bitsPerVoxel; }
 
     void compact() {
-        if (m_isSingle || m_indices.empty()) return;
-        const uint8_t first = m_indices[0];
-        for (size_t i = 1; i < m_indices.size(); ++i) {
-            if (m_indices[i] != first) return;
+        if (m_palette.empty() || m_bitsPerVoxel == 0) return;
+
+        std::vector<bool> used(m_palette.size(), false);
+        size_t uniqueUsed = 0;
+        uint8_t singleIdx = 0;
+
+        for (size_t i = 0; i < TotalVoxels; ++i) {
+            uint8_t p = getRawIndex(i);
+            if (p < m_palette.size() && !used[p]) {
+                used[p] = true;
+                uniqueUsed++;
+                singleIdx = p;
+            }
         }
-        fill(m_palette[first]);
+
+        if (uniqueUsed <= 1) {
+            BlockId b = (m_palette.empty()) ? BlockId::Air : m_palette[singleIdx];
+            fill(b);
+            return;
+        }
+
+        uint8_t targetBits = 8;
+        if (uniqueUsed <= 2) targetBits = 1;
+        else if (uniqueUsed <= 4) targetBits = 2;
+        else if (uniqueUsed <= 16) targetBits = 4;
+
+        std::vector<BlockId> newPalette;
+        std::vector<uint8_t> oldToNew(m_palette.size(), 0);
+        newPalette.reserve(uniqueUsed);
+
+        for (size_t i = 0; i < m_palette.size(); ++i) {
+            if (used[i]) {
+                oldToNew[i] = static_cast<uint8_t>(newPalette.size());
+                newPalette.push_back(m_palette[i]);
+            }
+        }
+
+        std::vector<uint8_t> oldIndices;
+        oldIndices.reserve(TotalVoxels);
+        for (size_t i = 0; i < TotalVoxels; ++i) {
+            uint8_t oldP = getRawIndex(i);
+            oldIndices.push_back((oldP < oldToNew.size()) ? oldToNew[oldP] : 0);
+        }
+
+        m_palette = std::move(newPalette);
+        m_bitsPerVoxel = targetBits;
+
+        size_t newBytes = 0;
+        if (m_bitsPerVoxel == 1) newBytes = (TotalVoxels + 7) / 8;
+        else if (m_bitsPerVoxel == 2) newBytes = (TotalVoxels + 3) / 4;
+        else if (m_bitsPerVoxel == 4) newBytes = (TotalVoxels + 1) / 2;
+        else if (m_bitsPerVoxel == 8) newBytes = TotalVoxels;
+
+        m_packedData.assign(newBytes, 0);
+        for (size_t i = 0; i < TotalVoxels; ++i) {
+            setRawIndex(i, oldIndices[i]);
+        }
     }
 
 private:
-    uint8_t getOrAddPaletteIndex(BlockId block) {
-        for (size_t i = 0; i < m_palette.size(); ++i) {
-            if (m_palette[i] == block) return static_cast<uint8_t>(i);
+    uint8_t getRawIndex(size_t idx) const {
+        switch (m_bitsPerVoxel) {
+            case 0: return 0;
+            case 1: return (m_packedData[idx >> 3] >> (idx & 7)) & 1;
+            case 2: return (m_packedData[idx >> 2] >> ((idx & 3) << 1)) & 3;
+            case 4: return (m_packedData[idx >> 1] >> ((idx & 1) << 2)) & 0x0F;
+            case 8: return m_packedData[idx];
+            default: return 0;
         }
-        m_palette.push_back(block);
-        return static_cast<uint8_t>(m_palette.size() - 1);
     }
 
-    bool m_isSingle = true;
-    BlockId m_singleBlock = BlockId::Air;
+    void setRawIndex(size_t idx, uint8_t palIdx) {
+        switch (m_bitsPerVoxel) {
+            case 1: {
+                const uint8_t shift = static_cast<uint8_t>(idx & 7);
+                uint8_t& b = m_packedData[idx >> 3];
+                b = static_cast<uint8_t>((b & ~(1u << shift)) | ((palIdx & 1u) << shift));
+                break;
+            }
+            case 2: {
+                const uint8_t shift = static_cast<uint8_t>((idx & 3) << 1);
+                uint8_t& b = m_packedData[idx >> 2];
+                b = static_cast<uint8_t>((b & ~(3u << shift)) | ((palIdx & 3u) << shift));
+                break;
+            }
+            case 4: {
+                const uint8_t shift = static_cast<uint8_t>((idx & 1) << 2);
+                uint8_t& b = m_packedData[idx >> 1];
+                b = static_cast<uint8_t>((b & ~(0x0Fu << shift)) | ((palIdx & 0x0Fu) << shift));
+                break;
+            }
+            case 8: {
+                m_packedData[idx] = palIdx;
+                break;
+            }
+            default: break;
+        }
+    }
+
+    void promote(uint8_t newBits) {
+        if (newBits <= m_bitsPerVoxel) return;
+
+        std::vector<uint8_t> oldIndices;
+        oldIndices.reserve(TotalVoxels);
+        for (size_t i = 0; i < TotalVoxels; ++i) {
+            oldIndices.push_back(getRawIndex(i));
+        }
+
+        m_bitsPerVoxel = newBits;
+        size_t newBytes = 0;
+        if (m_bitsPerVoxel == 1) newBytes = (TotalVoxels + 7) / 8;
+        else if (m_bitsPerVoxel == 2) newBytes = (TotalVoxels + 3) / 4;
+        else if (m_bitsPerVoxel == 4) newBytes = (TotalVoxels + 1) / 2;
+        else if (m_bitsPerVoxel == 8) newBytes = TotalVoxels;
+
+        m_packedData.assign(newBytes, 0);
+        for (size_t i = 0; i < TotalVoxels; ++i) {
+            setRawIndex(i, oldIndices[i]);
+        }
+    }
+
+    uint8_t m_bitsPerVoxel = 0;
     std::vector<BlockId> m_palette;
-    std::vector<uint8_t> m_indices;
+    std::vector<uint8_t> m_packedData;
 };
 
 // ---------------------------------------------------------------------------

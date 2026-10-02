@@ -70,9 +70,13 @@ Ordered milestones. Each is a coherent, shippable increment. Update
 
 ---
 
-## v1.M4 -- Sub-Chunk Architecture, MoreCulling Occlusion & Worker Pool
-*Inspired by [Sodium](https://github.com/CaffeineMC/sodium), [LearnOpenGL Scene Culling](https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling), [MoreCulling](https://github.com/fxmorin/MoreCulling), and [memoryLeakFix](https://github.com/fxmorin/memoryLeakFix)*
+## v1.M4 -- Sub-Chunk Architecture, Bit-Packed Palettes, MoreCulling & Worker Pool
+*Inspired by [Sodium](https://github.com/CaffeineMC/sodium), [LearnOpenGL Scene Culling](https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling), [Voxel Wiki Palette Compression](https://voxel.wiki/wiki/palette-compression/), [MoreCulling](https://github.com/fxmorin/MoreCulling), and [memoryLeakFix](https://github.com/fxmorin/memoryLeakFix)*
 
+- **Dynamic Bit-Packed Chunk Palette Compression**:
+  - Multi-tier dynamic bit packing (0, 1, 2, 4, 8 bits/voxel) in `ChunkPalette`.
+  - Up to $87.5\%$ voxel RAM reduction across uniform and low-entropy chunk sections (reducing chunk memory from 20 KB to 2.5 KB - 5 KB per chunk).
+  - On-the-fly bit depth promotion upon placing new block types, and active palette garbage collection / compaction with `compact()`.
 - **Vertical 16x16x16 Sub-Chunks (`ChunkSection`) & Sub-Chunk Frustum Culling**:
   - Subdividing vertical chunk columns into $16\times 16\times 16$ sections.
   - Empty air sections consume 0 GPU buffer memory and skip draw calls entirely.
