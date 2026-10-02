@@ -54,8 +54,7 @@ void World::init(uint32_t seed) {
     m_chunks.clear();
     m_loadedList.clear();
     m_activeFluids.clear();
-    m_overworldCache.clear();
-    m_backroomsCache.clear();
+    m_dimensionCaches.clear();
 }
 
 void World::init(int chunksX, int chunksZ, uint32_t seed) {
@@ -67,27 +66,24 @@ void World::init(int chunksX, int chunksZ, uint32_t seed) {
     m_chunks.clear();
     m_loadedList.clear();
     m_activeFluids.clear();
-    m_overworldCache.clear();
-    m_backroomsCache.clear();
+    m_dimensionCaches.clear();
 }
 
 void World::saveChunkToCache(const Chunk& chunk) {
-    auto& cache = (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
-    cache[ChunkCoord{chunk.chunkX(), chunk.chunkZ()}] = chunk.rleCompress();
+    savedChunkCache()[ChunkCoord{chunk.chunkX(), chunk.chunkZ()}] = chunk.rleCompress();
 }
 
 void World::cacheChunkData(int cx, int cz, const std::vector<RLERun>& runs) {
-    auto& cache = (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
-    cache[ChunkCoord{cx, cz}] = runs;
+    savedChunkCache()[ChunkCoord{cx, cz}] = runs;
 }
 
 bool World::hasSavedChunk(int cx, int cz) const {
-    const auto& cache = (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
+    const auto& cache = savedChunkCache();
     return cache.find(ChunkCoord{cx, cz}) != cache.end();
 }
 
 void World::syncAllChunksToCache() {
-    auto& cache = (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
+    auto& cache = savedChunkCache();
     for (const auto& pair : m_chunks) {
         if (pair.second && pair.second->terrainGenerated) {
             cache[pair.first] = pair.second->rleCompress();
@@ -182,7 +178,7 @@ void World::generateSingleChunk(int cx, int cz, WorldType type) {
     if (chunk->terrainGenerated) return;
 
     // If chunk was previously generated or loaded from disk, restore its exact blocks directly!
-    auto& cache = (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
+    auto& cache = savedChunkCache();
     auto it = cache.find(ChunkCoord{cx, cz});
     if (it != cache.end()) {
         chunk->decompressRle(it->second);
@@ -262,7 +258,7 @@ void World::updateStreaming(const glm::vec3& playerPos, int viewDistanceChunks, 
     }
 
     if (!toUnload.empty()) {
-        auto& cache = (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
+        auto& cache = savedChunkCache();
         for (const auto& coord : toUnload) {
             auto it = m_chunks.find(coord);
             if (it != m_chunks.end()) {

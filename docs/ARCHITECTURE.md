@@ -479,12 +479,38 @@ tills it into a `Dirt Path` (costs shovel durability in survival); a broken
 - **Progress Tracking**: `TerrainGenerator` and `World` accept a `ProgressCallback` (`std::function<void(float, const std::string&)>`) that reports percentage completion ($0.0 \dots 1.0$) and phase descriptions ("Raising terrain & digging caves...", "Planting lush trees & foliage...", "Founding pigman settlements...", "Illuminating world & baking sunlight...").
 - **Live UI & Event Pumping**: Renders a centered dark framed modal with gold border, world title, percentage readout, smooth progress bar, and rotating gameplay tips. Invokes `glfwSwapBuffers()` and `glfwPollEvents()` between stages to eliminate OS window lag/freeze warnings.
 
+## Dimension Subsystem
+
+VoxelMin supports an extensible multi-dimension architecture:
+- **`DimensionId` & `DimensionInfo`** (`src/world/Dimension.hpp`): Central metadata defining dimensional characteristics:
+  - `skyColor`, `fogColor`, `fogStart`, `fogEnd`
+  - `hasCeiling` (enclosed bedrock ceiling vs open sky)
+  - `hasSunlight` (celestial sun/moon lighting cycle vs ambient constant diffuse)
+  - `baseAmbientLight` (minimum diffuse lighting level)
+  - `allowsMobSpawning` (toggle Overworld surface mob simulation)
+- **Dimension Storage**: `World` stores separate chunk cache instances per dimension (`m_dimensionCaches[DimensionId]`), automatically isolating modified block state across dimensions.
+- **Dimension Transition Safety**:
+  - `findSafeSpawn`: Spiral search finding floor clearance without spawning inside walls.
+  - `findSafeOverworldReturn`: Offsets the player safely adjacent to the reality glitch block upon returning.
+  - `m_dimensionCooldown`: A 2.0s transition cooldown preventing accidental re-teleportation loops.
+- **The Backrooms Level 0 ("The Yellow Hell")**:
+  - Infinite non-linear partitioned office maze generated via `BackroomsGenerator`.
+  - Ambient fluorescent light fixtures at Y=5 with OpenSimplex2 dark blackout zone noise.
+  - Reality Glitch blocks (`GlitchBlock`), rare Fire Exit doors (`ExitDoor`), and Almond Water items (`AlmondWater`).
+
+## Item & Block Architecture
+
+- **Blocks (`src/world/Block.hpp`)**: `BlockId` and `BlockDef` handle 3D voxel properties (opacity, solidity, light emission, bounds, texture atlas tiles).
+- **Items (`src/world/Item.hpp`)**: `ItemSlot` handles stack count, tool durability, harvestability tier formulas, attack damage, and food nutrition.
+- **Crafting & Creative Catalog (`src/world/Block.hpp` / `src/world/CraftingRecipes.hpp`)**: Groupings for Building blocks, Tools & Combat, Materials & Food, and searchable indices.
+
 ## Extension points
 
 - **New block**: add to `BlockId`/`TextureTile`, the `defs[]` table, the atlas
   generator and `blockColor`. If the block has a non-cube shape, also add a `BlockBounds` entry and either an `emitCrossModel` path (foliage) or a custom mesh path (torch).
   - Directional blocks (like `WoodX`, `WoodZ` alongside `Wood`) define distinct block IDs mapping `WoodTop` end rings and `WoodSide` bark to corresponding faces in `ChunkMesher::getFaceTile()`, automatically resolved upon right-click block placement from the targeted face normal.
   - Pathway blocks (like `DirtPath`) define dedicated top and side soil textures for natural earthen village roadways.
+- **New dimension**: Add an enum to `DimensionId`, define its `DimensionInfo` in `src/world/Dimension.hpp`, add a generator in `src/world/`, and register its transition block/portal trigger.
 - **Entity Hurt Flash**: Damage indicators use negative vertex AO (`ao = -1.0f`) in `Mob::buildGeometry()` when `m_hurtTimer > 0.0f`. `chunk.frag` detects `vAO < 0.0` and blends a vibrant red overlay (`vec3(1.0, 0.18, 0.18)`), replacing legacy black tinting.
 - **New pre-generated world shape**: edit `TerrainGenerator`.
 - **Infinite terrain**: replace the fixed chunk vector in `World` with a

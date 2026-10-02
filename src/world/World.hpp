@@ -128,15 +128,24 @@ public:
     void setCurrentDimension(DimensionId dim) { m_currentDimension = dim; }
     void switchDimension(DimensionId newDim, const glm::vec3& newPos);
 
-    // Persistent Chunk Cache
+    // Persistent Chunk Cache per Dimension
     bool hasSavedChunk(int cx, int cz) const;
     void saveChunkToCache(const Chunk& chunk);
     void cacheChunkData(int cx, int cz, const std::vector<RLERun>& runs);
     const std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash>& savedChunkCache() const {
-        return (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
+        return savedChunkCache(m_currentDimension);
     }
     std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash>& savedChunkCache() {
-        return (m_currentDimension == DimensionId::Backrooms) ? m_backroomsCache : m_overworldCache;
+        return savedChunkCache(m_currentDimension);
+    }
+    const std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash>& savedChunkCache(DimensionId dim) const {
+        auto it = m_dimensionCaches.find(dim);
+        if (it != m_dimensionCaches.end()) return it->second;
+        static const std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash> empty;
+        return empty;
+    }
+    std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash>& savedChunkCache(DimensionId dim) {
+        return m_dimensionCaches[dim];
     }
     void syncAllChunksToCache();
 
@@ -152,8 +161,7 @@ private:
     mutable std::vector<std::unique_ptr<Chunk>> m_dummyChunks;
     std::vector<Village> m_villages;
     std::vector<glm::ivec3> m_activeFluids;
-    std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash> m_overworldCache;
-    std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash> m_backroomsCache;
+    std::unordered_map<DimensionId, std::unordered_map<ChunkCoord, std::vector<RLERun>, ChunkCoordHash>> m_dimensionCaches;
 };
 
 } // namespace vox
