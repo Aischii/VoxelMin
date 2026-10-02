@@ -87,19 +87,36 @@ public:
     void clearParticles() { m_particles.clear(); }
     size_t particleCount() const { return m_particles.particleCount(); }
 
-    // HUD shown while playing (crosshair, 9-slot hotbar, health hearts, hunger drumsticks, oxygen bubbles, XP bar).
+    // HUD shown while playing (crosshair, 9-slot hotbar, RPG vitals card, oxygen bubbles).
     void drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount,
                  float health, float maxHealth,
                  float hunger, float maxHunger,
                  float oxygen, float maxOxygen,
+                 int xp, int maxXp, int level,
                  bool inWater, float hurtTimer, float animTime,
-                 bool isCreative = false);
+                 bool isCreative = false,
+                 float levelUpTimer = 0.0f);
+
+    // Custom beveled RPG Vitals Card HUD (top-left anchored: avatar portrait, level badge, health/hunger/XP bars)
+    void drawRpgVitalsHud(float x, float y,
+                          int hp, int maxHp,
+                          int food, int maxFood,
+                          int xp, int maxXp,
+                          int level,
+                          float hurtTimer, float animTime,
+                          float uiScale,
+                          float levelUpTimer = 0.0f);
 
     // Screen edge damage flash & vignette
     void drawHurtVignette(float hurtTimer, float healthRatio, float animTime);
 
-    // RPG Region & Dimension Title Banner ("LEVEL 0" / "The Yellow Hell")
-    void drawTitleBanner(const std::string& title, const std::string& subtitle, float alpha, float animTime);
+    // Cinematic Biome & Dimension Titles ("Explorer's Title")
+    void drawTitleBanner(const std::string& mainTitle,
+                         const std::string& subtitle,
+                         const glm::vec3& mainColor,
+                         float alpha,
+                         float animTime = 0.0f,
+                         float yOffset = 0.0f);
 
     // Death Screen ("YOU DIED")
     void drawDeathScreen(float animTime, const glm::vec2& mousePos,

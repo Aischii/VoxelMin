@@ -49,16 +49,16 @@ inline const DimensionInfo& getDimensionInfo(DimensionId id) {
 
     static const DimensionInfo backroomsInfo = {
         DimensionId::Backrooms,
-        "The Backrooms",
-        "LEVEL 0",
-        "The Yellow Hell",
-        glm::vec3(0.72f, 0.65f, 0.32f), // Mono-yellow ambient haze
-        glm::vec3(0.52f, 0.46f, 0.20f), // Damp yellow fog
-        14.0f,
-        32.0f,
+        "The Ochre Annex",
+        "THE OCHRE ANNEX",
+        "The Endless Archives",
+        glm::vec3(0.14f, 0.12f, 0.05f), // Sky locked clear color
+        glm::vec3(0.18f, 0.16f, 0.07f), // Damp ochre horror fog
+        12.0f,
+        26.0f,
         true,   // Indoor enclosed ceiling
         false,  // No celestial sun/moon
-        0.92f,  // Fluorescent ambient diffuse
+        0.0f,   // Minimum ambient lighting
         false   // No Overworld mobs
     };
 
@@ -77,6 +77,16 @@ inline const std::vector<DimensionId>& getAllDimensions() {
         DimensionId::Backrooms
     };
     return dims;
+}
+
+inline glm::vec3 getDimensionTitleColor(DimensionId id) {
+    switch (id) {
+        case DimensionId::Backrooms:
+            return glm::vec3(0.898f, 0.757f, 0.345f); // #E5C158 Sickly Amber
+        case DimensionId::Overworld:
+        default:
+            return glm::vec3(0.302f, 0.902f, 0.396f); // #4DE665 Pale Jade
+    }
 }
 
 inline bool isValidDimension(DimensionId id) {

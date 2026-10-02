@@ -8,15 +8,22 @@ namespace vox {
 class World;
 class Chunk;
 
+enum class OchreArchetype : uint8_t {
+    StandardCorridors = 0,
+    FilingArchives = 1,
+    RedstoneConduits = 2,
+    DrainageSump = 3,
+    FalseOverworld = 4,
+};
+
 // ---------------------------------------------------------------------------
-// BackroomsGenerator: Procedural Infinite Maze Generation for Level 0 ("The Yellow Hell").
-// - Infinite mono-yellow wallpaper maze partitions
-// - Damp stained carpet floor (Y=1)
-// - Acoustic ceiling tiles with buzzing fluorescent light panels (Y=5)
-// - Office support pillars (2x2 & 3x3), partitioned rooms, open column halls
-// - Dark blackout anomaly zones (sparse/broken lights)
-// - Anomalous Reality Glitches and Emergency Fire Exit doors to escape back to Overworld
-// - Almond Water supply item caches
+// BackroomsGenerator: Procedural Infinite Maze Generation for Level 0 ("The Ochre Annex").
+// - 5 Modular Macro-Cell Archetypes (16x16 Chunk Bounds)
+// - 2-block thick walls with outer OchrePlaster & procedural Wood inner framing
+// - Y=0 Bedrock, Y=1 DampOchreWool, Y=2..4 Corridors, Y=5 ChiseledLimestone, Y>=6 Bedrock seal
+// - Resonant Lantern ceiling lighting with blackout zones
+// - Anomalous FracturedBedrock portals and VaultHatch exits
+// - CondensationFlask caches
 // ---------------------------------------------------------------------------
 class BackroomsGenerator {
 public:
@@ -25,7 +32,9 @@ public:
     void generateChunk(World& world, Chunk& chunk) const;
     glm::vec3 findSafeSpawn(World& world, int startX = 0, int startZ = 0) const;
 
+    static OchreArchetype getArchetype(int cx, int cz, uint32_t seed);
     static bool isWall(int wx, int wz, uint32_t seed);
+    static bool isInnerCore(int wx, int wz, uint32_t seed);
     static bool isPillar(int wx, int wz, uint32_t seed);
     static bool isLight(int wx, int wz, uint32_t seed);
     static bool isBlackoutZone(int wx, int wz, uint32_t seed);

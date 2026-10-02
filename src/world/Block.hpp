@@ -1,4 +1,5 @@
 #pragma once
+#include "entity/MobAi.hpp"
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -67,19 +68,34 @@ enum class BlockId : uint8_t {
     CookedBeef,
     Apple,
     Bread,
-    BackroomsWallpaper,
-    BackroomsWallpaperBase,
-    BackroomsCarpet,
-    BackroomsCeiling,
-    FluorescentLight,
-    GlitchBlock,
-    ExitDoor,
-    AlmondWater,
-    Count
+    OchrePlaster,
+    OchrePlasterBase,
+    DampOchreWool,
+    ChiseledLimestone,
+    ResonantLantern,
+    FracturedBedrock,
+    VaultHatch,
+    CondensationFlask,
+    SpawnEggPig,
+    SpawnEggCow,
+    SpawnEggPigmanVillager,
+    SpawnEggArchivist,
+    SpawnEggWoolWeaver,
+    Count,
+
+    // Legacy Backrooms Aliases
+    BackroomsWallpaper = OchrePlaster,
+    BackroomsWallpaperBase = OchrePlasterBase,
+    BackroomsCarpet = DampOchreWool,
+    BackroomsCeiling = ChiseledLimestone,
+    FluorescentLight = ResonantLantern,
+    GlitchBlock = FracturedBedrock,
+    ExitDoor = VaultHatch,
+    AlmondWater = CondensationFlask,
 };
 
-// Index into the 16x16 procedural atlas (see render/Texture.cpp).
-enum class TextureTile : uint8_t {
+// Index into the 32x32 procedural atlas (see render/Texture.cpp).
+enum class TextureTile : uint16_t {
     GrassTop = 0,
     GrassSide,
     Dirt,
@@ -174,15 +190,34 @@ enum class TextureTile : uint8_t {
     BootsIcon,
     CraftingArrow,
     SearchIcon,
-    BackroomsWallpaper,
-    BackroomsWallpaperBase,
-    BackroomsCarpet,
-    BackroomsCeiling,
-    FluorescentLight,
-    GlitchBlock,
-    ExitDoor,
-    AlmondWater,
-    Count
+    OchrePlaster,
+    OchrePlasterBase,
+    DampOchreWool,
+    ChiseledLimestone,
+    ResonantLantern,
+    FracturedBedrock,
+    VaultHatch,
+    CondensationFlask,
+    ArchivistFace,
+    ArchivistTorso,
+    ArchivistSkin,
+    SpawnEggPig,
+    SpawnEggCow,
+    SpawnEggPigmanVillager,
+    SpawnEggArchivist,
+    SpawnEggWoolWeaver,
+    ArchivistAtlas = 256,
+    Count,
+
+    // Legacy Aliases
+    BackroomsWallpaper = OchrePlaster,
+    BackroomsWallpaperBase = OchrePlasterBase,
+    BackroomsCarpet = DampOchreWool,
+    BackroomsCeiling = ChiseledLimestone,
+    FluorescentLight = ResonantLantern,
+    GlitchBlock = FracturedBedrock,
+    ExitDoor = VaultHatch,
+    AlmondWater = CondensationFlask,
 };
 
 struct BlockDef {
@@ -247,14 +282,19 @@ inline const BlockDef& blockDef(BlockId id) {
         {"Cooked Beef",      TextureTile::CookedBeef,   TextureTile::CookedBeef,   TextureTile::CookedBeef,   false},
         {"Apple",            TextureTile::Apple,        TextureTile::Apple,        TextureTile::Apple,        false},
         {"Bread",            TextureTile::Bread,        TextureTile::Bread,        TextureTile::Bread,        false},
-        {"Mono-Yellow Wallpaper",        TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaper, true},
-        {"Mono-Yellow Wallpaper (Base)", TextureTile::BackroomsWallpaper, TextureTile::BackroomsWallpaperBase, TextureTile::BackroomsWallpaper, true},
-        {"Moist Carpet",     TextureTile::BackroomsCarpet, TextureTile::BackroomsCarpet, TextureTile::BackroomsCarpet, true},
-        {"Acoustic Ceiling", TextureTile::BackroomsCeiling, TextureTile::BackroomsCeiling, TextureTile::BackroomsCeiling, true},
-        {"Fluorescent Light",TextureTile::FluorescentLight, TextureTile::FluorescentLight, TextureTile::FluorescentLight, true},
-        {"Reality Glitch",   TextureTile::GlitchBlock,  TextureTile::GlitchBlock,  TextureTile::GlitchBlock,  false},
-        {"Fire Exit Door",   TextureTile::ExitDoor,     TextureTile::ExitDoor,     TextureTile::ExitDoor,     false},
-        {"Almond Water",     TextureTile::AlmondWater,  TextureTile::AlmondWater,  TextureTile::AlmondWater,  false},
+        {"Ochre Plaster",        TextureTile::OchrePlaster, TextureTile::OchrePlaster, TextureTile::OchrePlaster, true},
+        {"Ochre Plaster (Base)", TextureTile::OchrePlaster, TextureTile::OchrePlasterBase, TextureTile::OchrePlaster, true},
+        {"Damp Ochre Wool",      TextureTile::DampOchreWool, TextureTile::DampOchreWool, TextureTile::DampOchreWool, true},
+        {"Chiseled Limestone",   TextureTile::ChiseledLimestone, TextureTile::ChiseledLimestone, TextureTile::ChiseledLimestone, true},
+        {"Resonant Lantern",     TextureTile::ResonantLantern, TextureTile::ResonantLantern, TextureTile::ResonantLantern, true},
+        {"Fractured Bedrock",    TextureTile::FracturedBedrock, TextureTile::FracturedBedrock, TextureTile::FracturedBedrock, false},
+        {"Vault Hatch",          TextureTile::VaultHatch,   TextureTile::VaultHatch,   TextureTile::VaultHatch,   false},
+        {"Condensation Flask",   TextureTile::CondensationFlask, TextureTile::CondensationFlask, TextureTile::CondensationFlask, false},
+        {"Spawn Pig",            TextureTile::SpawnEggPig, TextureTile::SpawnEggPig, TextureTile::SpawnEggPig, false},
+        {"Spawn Cow",            TextureTile::SpawnEggCow, TextureTile::SpawnEggCow, TextureTile::SpawnEggCow, false},
+        {"Spawn Pigman Villager",TextureTile::SpawnEggPigmanVillager, TextureTile::SpawnEggPigmanVillager, TextureTile::SpawnEggPigmanVillager, false},
+        {"Spawn Archivist",      TextureTile::SpawnEggArchivist, TextureTile::SpawnEggArchivist, TextureTile::SpawnEggArchivist, false},
+        {"Spawn Wool Weaver",    TextureTile::SpawnEggWoolWeaver, TextureTile::SpawnEggWoolWeaver, TextureTile::SpawnEggWoolWeaver, false},
     };
     return defs[static_cast<int>(id)];
 }
@@ -278,8 +318,12 @@ inline BlockBounds blockBounds(BlockId id) {
             return { {0.35f, 0.15f, 0.0f}, {0.65f, 0.85f, 0.55f} };
         case BlockId::TallGrass:
             return { {0.15f, 0.0f, 0.15f}, {0.85f, 0.80f, 0.85f} };
-        case BlockId::AlmondWater:
+        case BlockId::CondensationFlask:
             return { {0.25f, 0.0f, 0.25f}, {0.75f, 0.65f, 0.75f} };
+        case BlockId::ResonantLantern:
+            return { {0.1875f, 0.0f, 0.1875f}, {0.8125f, 0.875f, 0.8125f} };
+        case BlockId::VaultHatch:
+            return { {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.25f} };
         default:
             return { {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f} };
     }
@@ -363,8 +407,27 @@ inline FoodProperties foodNutrition(BlockId id) {
     }
 }
 
+inline bool isSpawnEgg(BlockId id) {
+    return id == BlockId::SpawnEggPig ||
+           id == BlockId::SpawnEggCow ||
+           id == BlockId::SpawnEggPigmanVillager ||
+           id == BlockId::SpawnEggArchivist ||
+           id == BlockId::SpawnEggWoolWeaver;
+}
+
+inline MobType spawnEggMobType(BlockId id) {
+    switch (id) {
+        case BlockId::SpawnEggPig:            return MobType::Pig;
+        case BlockId::SpawnEggCow:            return MobType::Cow;
+        case BlockId::SpawnEggPigmanVillager: return MobType::PigmanVillager;
+        case BlockId::SpawnEggArchivist:      return MobType::Archivist;
+        case BlockId::SpawnEggWoolWeaver:     return MobType::WoolWeaver;
+        default:                              return MobType::Pig;
+    }
+}
+
 inline bool isItem(BlockId id) {
-    return isTool(id) || isFood(id) || id == BlockId::Stick || id == BlockId::Coal ||
+    return isTool(id) || isFood(id) || isSpawnEgg(id) || id == BlockId::Stick || id == BlockId::Coal ||
            id == BlockId::IronIngot || id == BlockId::Diamond;
 }
 
@@ -403,7 +466,9 @@ inline float toolMiningMultiplier(BlockId tool, BlockId block) {
     if (isPickaxe(tool)) {
         if (block == BlockId::Stone || block == BlockId::Cobblestone ||
             block == BlockId::CoalOre || block == BlockId::IronOre ||
-            block == BlockId::GoldOre || block == BlockId::DiamondOre) {
+            block == BlockId::GoldOre || block == BlockId::DiamondOre ||
+            block == BlockId::ChiseledLimestone || block == BlockId::VaultHatch ||
+            block == BlockId::OchrePlaster || block == BlockId::OchrePlasterBase) {
             if (tool == BlockId::DiamondPickaxe) return 8.0f;
             if (tool == BlockId::IronPickaxe)    return 6.0f;
             if (tool == BlockId::StonePickaxe)   return 4.0f;
@@ -420,14 +485,16 @@ inline float toolMiningMultiplier(BlockId tool, BlockId block) {
         }
     } else if (isShovel(tool)) {
         if (block == BlockId::Dirt || block == BlockId::Grass ||
-            block == BlockId::Sand || block == BlockId::DirtPath) {
+            block == BlockId::Sand || block == BlockId::DirtPath ||
+            block == BlockId::OchrePlaster || block == BlockId::OchrePlasterBase) {
             if (tool == BlockId::DiamondShovel) return 8.0f;
             if (tool == BlockId::IronShovel)    return 6.0f;
             if (tool == BlockId::StoneShovel)   return 4.0f;
             return 2.0f;
         }
     } else if (isSword(tool)) {
-        if (block == BlockId::Leaves || block == BlockId::TallGrass) {
+        if (block == BlockId::Leaves || block == BlockId::TallGrass ||
+            block == BlockId::DampOchreWool) {
             return 15.0f;
         }
     }
@@ -442,8 +509,10 @@ inline float blockHardness(BlockId id) {
         case BlockId::TorchWallWest:
         case BlockId::TorchWallSouth:
         case BlockId::TorchWallNorth:
-        case BlockId::AlmondWater:
+        case BlockId::CondensationFlask:
             return 0.0f;
+        case BlockId::ResonantLantern:
+            return 0.30f;
         case BlockId::Leaves:
             return 0.35f;
         case BlockId::Dirt:
@@ -451,9 +520,14 @@ inline float blockHardness(BlockId id) {
         case BlockId::Sand:
         case BlockId::DirtPath:
             return 0.65f;
+        case BlockId::DampOchreWool:
+            return 0.80f;
         case BlockId::Planks:
+        case BlockId::OchrePlaster:
+        case BlockId::OchrePlasterBase:
             return 1.25f;
         case BlockId::Stone:
+        case BlockId::ChiseledLimestone:
             return 1.50f;
         case BlockId::Cobblestone:
         case BlockId::Wood:
@@ -468,7 +542,10 @@ inline float blockHardness(BlockId id) {
             return 3.00f;
         case BlockId::DiamondOre:
             return 4.00f;
+        case BlockId::VaultHatch:
+            return 5.00f;
         case BlockId::Bedrock:
+        case BlockId::FracturedBedrock:
             return -1.0f;
         default:
             return 1.0f;
@@ -479,10 +556,11 @@ inline bool canHarvestBlock(BlockId tool, BlockId block) {
     if (block == BlockId::DiamondOre || block == BlockId::GoldOre) {
         return tool == BlockId::IronPickaxe || tool == BlockId::DiamondPickaxe;
     }
-    if (block == BlockId::IronOre) {
+    if (block == BlockId::IronOre || block == BlockId::VaultHatch) {
         return tool == BlockId::StonePickaxe || tool == BlockId::IronPickaxe || tool == BlockId::DiamondPickaxe;
     }
-    if (block == BlockId::Stone || block == BlockId::Cobblestone || block == BlockId::CoalOre) {
+    if (block == BlockId::Stone || block == BlockId::Cobblestone ||
+        block == BlockId::CoalOre || block == BlockId::ChiseledLimestone) {
         return isPickaxe(tool);
     }
     return true;
@@ -493,10 +571,11 @@ inline float getBreakTime(BlockId tool, BlockId block) {
     if (base <= 0.0f) return 0.0f;
 
     float speed = toolMiningMultiplier(tool, block);
-    // Mining stone/ores without a pickaxe is severely penalized
+    // Mining stone/ores/chiseled stone without a pickaxe is severely penalized
     if ((block == BlockId::Stone || block == BlockId::Cobblestone ||
          block == BlockId::CoalOre || block == BlockId::IronOre ||
-         block == BlockId::GoldOre || block == BlockId::DiamondOre) && !isPickaxe(tool)) {
+         block == BlockId::GoldOre || block == BlockId::DiamondOre ||
+         block == BlockId::ChiseledLimestone || block == BlockId::VaultHatch) && !isPickaxe(tool)) {
         speed = 0.30f;
     }
 
@@ -548,6 +627,10 @@ inline BlockId getDropForBlock(BlockId block) {
         case BlockId::TorchWallSouth:
         case BlockId::TorchWallNorth:
             return BlockId::Torch;
+        case BlockId::OchrePlasterBase:
+            return BlockId::OchrePlaster;
+        case BlockId::DampOchreWool:
+            return (std::rand() % 2 == 0) ? BlockId::Stick : BlockId::DampOchreWool;
         default:
             return block;
     }
@@ -614,6 +697,11 @@ inline glm::vec3 blockColor(BlockId id) {
         case BlockId::GlitchBlock:        return {0.45f, 0.15f, 0.70f};
         case BlockId::ExitDoor:           return {0.85f, 0.18f, 0.18f};
         case BlockId::AlmondWater:        return {0.80f, 0.90f, 0.95f};
+        case BlockId::SpawnEggPig:            return {0.95f, 0.65f, 0.70f};
+        case BlockId::SpawnEggCow:            return {0.45f, 0.35f, 0.28f};
+        case BlockId::SpawnEggPigmanVillager: return {0.85f, 0.60f, 0.45f};
+        case BlockId::SpawnEggArchivist:      return {0.35f, 0.25f, 0.18f};
+        case BlockId::SpawnEggWoolWeaver:     return {0.70f, 0.82f, 0.82f};
         default:                   return {1.00f, 0.00f, 1.00f};
     }
 }
@@ -633,10 +721,12 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         BlockId::WoodAxe, BlockId::StoneAxe, BlockId::IronAxe, BlockId::DiamondAxe,
         BlockId::WoodShovel, BlockId::StoneShovel, BlockId::IronShovel, BlockId::DiamondShovel,
         BlockId::WoodSword, BlockId::StoneSword, BlockId::IronSword, BlockId::DiamondSword,
-        // Materials & Food
+        // Materials & Food & Spawn Eggs
         BlockId::Stick, BlockId::Coal, BlockId::IronIngot, BlockId::Diamond,
         BlockId::Apple, BlockId::Bread, BlockId::RawPorkchop, BlockId::CookedPorkchop,
-        BlockId::RawBeef, BlockId::CookedBeef, BlockId::AlmondWater
+        BlockId::RawBeef, BlockId::CookedBeef, BlockId::AlmondWater,
+        BlockId::SpawnEggPig, BlockId::SpawnEggCow, BlockId::SpawnEggPigmanVillager,
+        BlockId::SpawnEggArchivist, BlockId::SpawnEggWoolWeaver
     };
 
     static const std::vector<BlockId> buildingItems = {
@@ -653,13 +743,17 @@ inline const std::vector<BlockId>& getCreativeCatalog(int tab = 0) {
         BlockId::WoodPickaxe, BlockId::StonePickaxe, BlockId::IronPickaxe, BlockId::DiamondPickaxe,
         BlockId::WoodAxe, BlockId::StoneAxe, BlockId::IronAxe, BlockId::DiamondAxe,
         BlockId::WoodShovel, BlockId::StoneShovel, BlockId::IronShovel, BlockId::DiamondShovel,
-        BlockId::WoodSword, BlockId::StoneSword, BlockId::IronSword, BlockId::DiamondSword
+        BlockId::WoodSword, BlockId::StoneSword, BlockId::IronSword, BlockId::DiamondSword,
+        BlockId::SpawnEggPig, BlockId::SpawnEggCow, BlockId::SpawnEggPigmanVillager,
+        BlockId::SpawnEggArchivist, BlockId::SpawnEggWoolWeaver
     };
 
     static const std::vector<BlockId> foodMatItems = {
         BlockId::Stick, BlockId::Coal, BlockId::IronIngot, BlockId::Diamond,
         BlockId::Apple, BlockId::Bread, BlockId::RawPorkchop, BlockId::CookedPorkchop,
-        BlockId::RawBeef, BlockId::CookedBeef, BlockId::AlmondWater
+        BlockId::RawBeef, BlockId::CookedBeef, BlockId::AlmondWater,
+        BlockId::SpawnEggPig, BlockId::SpawnEggCow, BlockId::SpawnEggPigmanVillager,
+        BlockId::SpawnEggArchivist, BlockId::SpawnEggWoolWeaver
     };
 
     switch (tab) {

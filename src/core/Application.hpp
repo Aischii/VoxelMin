@@ -115,7 +115,7 @@ private:
     static uint32_t parseSeed(const std::string& input);
 
     // Dimensions and RPG Title Banners
-    void showTitleBanner(const std::string& title, const std::string& subtitle, float duration = 4.0f);
+    void showTitleBanner(const std::string& title, const std::string& subtitle, const glm::vec3& color = glm::vec3(1.0f));
     void switchDimension(DimensionId targetDim, const glm::vec3& targetPos);
     glm::vec3 findSafeOverworldReturn(const glm::vec3& nearPos);
 
@@ -212,11 +212,18 @@ private:
     std::vector<std::string> m_chatSuggestions;
     int m_selectedSuggestion = -1;
 
-    // Dimension travel & RPG title banner state
-    std::string m_bannerTitle;
-    std::string m_bannerSubtitle;
-    float m_bannerTimer = 0.0f;
-    float m_bannerDuration = 4.0f;
+    // Biome tracking & Debounce pipeline
+    std::string m_lastAnnouncedBiome;
+    std::string m_pendingBiome;
+    float m_biomeStayTimer = 0.0f;
+
+    // Dimension travel & Explorer's title banner state
+    std::string m_activeBannerMain;
+    std::string m_activeBannerSub;
+    glm::vec3 m_activeBannerColor = glm::vec3(1.0f);
+    float m_bannerTimeline = 0.0f;
+    enum class BannerState { Hidden, FadeIn, Hold, FadeOut } m_bannerState = BannerState::Hidden;
+
     float m_dimensionCooldown = 0.0f;
     glm::vec3 m_overworldReturnPos{0.5f, 65.0f, 0.5f};
 
@@ -233,6 +240,7 @@ private:
     // Simulation ticks
     float m_fluidTickTimer = 0.0f;
     float m_ecologyTickTimer = 0.0f;
+    float m_paranoiaTimer = 45.0f;
 
     RayHit m_target;
     double m_lastTime = 0.0;

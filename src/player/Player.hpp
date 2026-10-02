@@ -76,6 +76,13 @@ public:
     bool isDead() const { return m_isDead; }
     float hurtTimer() const { return m_hurtTimer; }
 
+    int xp() const { return m_xp; }
+    int neededXp() const { return 30 + m_level * 3; }
+    int level() const { return m_level; }
+    float levelUpTimer() const { return m_levelUpTimer; }
+    void addXp(int amount);
+    void setXp(int xp, int level = 1) { m_xp = xp; m_level = level; }
+
     bool isCreative() const { return m_creative; }
     void setCreative(bool c) {
         m_creative = c;
@@ -121,6 +128,9 @@ private:
     float m_maxHunger = 100.0f;
     float m_oxygen = 15.0f;
     float m_maxOxygen = 15.0f;
+    int m_xp = 31;
+    int m_level = 13;
+    float m_levelUpTimer = 0.0f;
     float m_fallDistance = 0.0f;
     float m_invulnerableTimer = 0.0f;
     float m_hurtTimer = 0.0f;

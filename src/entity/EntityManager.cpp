@@ -20,7 +20,32 @@ uint32_t hashSpawn(uint32_t a, uint32_t b, uint32_t c) {
 
 void EntityManager::spawnDefaults(const World& world, uint32_t seed) {
     clear();
-    if (world.currentDimension() == DimensionId::Backrooms) return;
+    if (world.currentDimension() == DimensionId::Backrooms) {
+        int spawnedArchivists = 0;
+        int spawnedWeavers = 0;
+        for (uint32_t i = 0; i < 500 && (spawnedArchivists < 1 || spawnedWeavers < 2); ++i) {
+            const uint32_t rx = hashSpawn(seed, i, 701);
+            const uint32_t rz = hashSpawn(seed, i, 802);
+            const int x = -40 + static_cast<int>(rx % 81);
+            const int z = -40 + static_cast<int>(rz % 81);
+            if (std::abs(x) < 8 && std::abs(z) < 8) continue; // Skip immediate spawn origin
+
+            if (world.getBlock(x, 1, z) == BlockId::DampOchreWool &&
+                world.getBlock(x, 2, z) == BlockId::Air &&
+                world.getBlock(x, 3, z) == BlockId::Air) {
+                if (spawnedArchivists < 1) {
+                    m_mobs.push_back(std::make_unique<Mob>(MobType::Archivist,
+                        glm::vec3(static_cast<float>(x) + 0.5f, 2.001f, static_cast<float>(z) + 0.5f), 0.0f));
+                    spawnedArchivists++;
+                } else if (spawnedWeavers < 2) {
+                    m_mobs.push_back(std::make_unique<Mob>(MobType::WoolWeaver,
+                        glm::vec3(static_cast<float>(x) + 0.5f, 2.001f, static_cast<float>(z) + 0.5f), 0.0f));
+                    spawnedWeavers++;
+                }
+            }
+        }
+        return;
+    }
 
     const int worldW = world.widthBlocks();
     const int worldD = world.depthBlocks();
@@ -127,12 +152,13 @@ void EntityManager::clear() {
     m_items.clear();
 }
 
-void EntityManager::update(float dt, const World& world, const glm::vec3& playerPos,
+void EntityManager::update(float dt, World& world, const glm::vec3& playerPos,
+                           const glm::vec3& playerCamFront,
                            const std::function<bool(BlockId, int)>& onPickup,
                            const std::function<void(float, const glm::vec3&)>& onPlayerDamage) {
     for (auto it = m_mobs.begin(); it != m_mobs.end(); ) {
         if (!(*it)->isAlive()) {
-            // Drop meat/food on mob death
+            // Drop items on mob death
             const glm::vec3 dropPos = (*it)->position() + glm::vec3(0.0f, 0.4f, 0.0f);
             if ((*it)->type() == MobType::Pig) {
                 const int count = 1 + (std::rand() % 2); // 1-2 Raw Porkchops
@@ -140,17 +166,23 @@ void EntityManager::update(float dt, const World& world, const glm::vec3& player
             } else if ((*it)->type() == MobType::Cow) {
                 const int count = 1 + (std::rand() % 3); // 1-3 Raw Beef
                 spawnItem(BlockId::RawBeef, dropPos, count);
+            } else if ((*it)->type() == MobType::WoolWeaver) {
+                const int count = 1 + (std::rand() % 2);
+                spawnItem(BlockId::Stick, dropPos, count);
+            } else if ((*it)->type() == MobType::Archivist) {
+                spawnItem(BlockId::CondensationFlask, dropPos, 1);
             }
             it = m_mobs.erase(it);
         } else {
-            (*it)->update(dt, world, playerPos);
+            (*it)->update(dt, world, playerPos, playerCamFront);
             // Hostile mob melee attack on player
-            if ((*it)->type() == MobType::PigmanVillager && (*it)->isHostile()) {
+            if (((*it)->type() == MobType::PigmanVillager || (*it)->type() == MobType::Archivist) && (*it)->isHostile()) {
                 const float dist = glm::distance((*it)->position(), playerPos);
-                if (dist <= 1.5f && (*it)->canAttack()) {
+                if (dist <= 1.6f && (*it)->canAttack()) {
                     (*it)->resetAttackCooldown(1.0f);
                     if (onPlayerDamage) {
-                        onPlayerDamage(15.0f, (*it)->position());
+                        const float dmg = ((*it)->type() == MobType::Archivist) ? 20.0f : 15.0f;
+                        onPlayerDamage(dmg, (*it)->position());
                     }
                 }
             }

@@ -20,7 +20,8 @@ public:
     void clear();
     void clearMobs() { m_mobs.clear(); }
 
-    void update(float dt, const World& world, const glm::vec3& playerPos,
+    void update(float dt, World& world, const glm::vec3& playerPos,
+                const glm::vec3& playerCamFront = glm::vec3(0.0f, 0.0f, -1.0f),
                 const std::function<bool(BlockId, int)>& onPickup = nullptr,
                 const std::function<void(float, const glm::vec3&)>& onPlayerDamage = nullptr);
     Mob* hitTest(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDist);

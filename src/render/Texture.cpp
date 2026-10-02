@@ -373,6 +373,48 @@ bool loadTilePng(std::vector<uint8_t>& pixels, int tile, const std::string& file
     return true;
 }
 
+bool loadAtlasRegionPng(std::vector<uint8_t>& pixels, int startTile, const std::string& filename) {
+    const std::string paths[] = {
+        "assets/textures/" + filename,
+        "assets/models/mobs/" + filename,
+        "assets/models/" + filename,
+        "../assets/textures/" + filename,
+        "../assets/models/mobs/" + filename,
+        "../assets/models/" + filename,
+        "../../assets/textures/" + filename,
+        "bin/assets/textures/" + filename
+    };
+    int w = 0, h = 0, channels = 0;
+    stbi_uc* data = nullptr;
+    for (const auto& p : paths) {
+        data = stbi_load(p.c_str(), &w, &h, &channels, 4);
+        if (data) break;
+    }
+    if (!data) return false;
+
+    const int startCol = startTile % TILES;
+    const int startRow = startTile / TILES;
+
+    for (int y = 0; y < h; ++y) {
+        const int srcY = y;
+        const int dstY = startRow * TILE + (h - 1 - y);
+        if (dstY < 0 || dstY >= SIZE) continue;
+        for (int x = 0; x < w; ++x) {
+            const int dstX = startCol * TILE + x;
+            if (dstX < 0 || dstX >= SIZE) continue;
+            const size_t srcIdx = (static_cast<size_t>(srcY) * w + x) * 4;
+            const size_t dstIdx = (static_cast<size_t>(dstY) * SIZE + dstX) * 4;
+            pixels[dstIdx + 0] = data[srcIdx + 0];
+            pixels[dstIdx + 1] = data[srcIdx + 1];
+            pixels[dstIdx + 2] = data[srcIdx + 2];
+            pixels[dstIdx + 3] = data[srcIdx + 3];
+        }
+    }
+
+    stbi_image_free(data);
+    return true;
+}
+
 void makePigSkin(std::vector<uint8_t>& pixels, int tile) {
     fillNoise(pixels, tile, {0.94f, 0.65f, 0.65f}, 0.04f, 701);
 }
@@ -1185,28 +1227,29 @@ void makeSearchIcon(std::vector<uint8_t>& pixels, int tile) {
     setPixelRgba(pixels, tile, 6, 6, 60, 60, 65, 255);
 }
 
-void makeBackroomsWallpaper(std::vector<uint8_t>& pixels, int tile, bool hasBaseboard = false) {
-    // Mono-yellow wallpaper with subtle vertical chevron / herringbone pattern
+void makeOchrePlaster(std::vector<uint8_t>& pixels, int tile, bool hasBaseboard = false) {
+    // Mustard-ochre matte clay with subtle horizontal drying cracks and pale fiber flecks
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
-            float r = 0.84f + (rnd(x, y, 71) - 0.5f) * 0.04f;
-            float g = 0.78f + (rnd(x, y, 73) - 0.5f) * 0.04f;
-            float b = 0.38f + (rnd(x, y, 79) - 0.5f) * 0.04f;
+            float r = 0.82f + (rnd(x, y, 71) - 0.5f) * 0.05f;
+            float g = 0.65f + (rnd(x, y, 73) - 0.5f) * 0.05f;
+            float b = 0.28f + (rnd(x, y, 79) - 0.5f) * 0.04f;
 
-            // Subtle vertical herringbone / chevron stripes (repeating every 4 pixels)
-            const int modX = x % 4;
-            const int chevronY = (y + (modX >= 2 ? (3 - modX) : modX)) % 4;
-            if (chevronY == 0 || modX == 0) {
-                r -= 0.06f;
-                g -= 0.06f;
-                b -= 0.03f;
-            } else if (chevronY == 2) {
-                r += 0.03f;
-                g += 0.03f;
-                b += 0.02f;
+            // Horizontal clay drying cracks
+            if ((y % 5 == 0 && (x >= 2 && x <= 8)) || (y % 7 == 0 && (x >= 9 && x <= 14))) {
+                r -= 0.10f;
+                g -= 0.09f;
+                b -= 0.05f;
             }
 
-            // Dark brown wooden baseboard trim at bottom 2 rows ONLY for bottom base block
+            // Pale fiber flecks
+            if (rnd(x, y, 119) > 0.90f) {
+                r += 0.08f;
+                g += 0.08f;
+                b += 0.06f;
+            }
+
+            // Darker clay foundation base on bottom 2 rows for baseboard block
             if (hasBaseboard && y <= 1) {
                 r = 0.38f + (rnd(x, y, 101) - 0.5f) * 0.04f;
                 g = 0.26f + (rnd(x, y, 103) - 0.5f) * 0.03f;
@@ -1218,140 +1261,280 @@ void makeBackroomsWallpaper(std::vector<uint8_t>& pixels, int tile, bool hasBase
     }
 }
 
-void makeBackroomsCarpet(std::vector<uint8_t>& pixels, int tile) {
-    // Damp stained brownish-yellow carpet floor
+void makeDampOchreWool(std::vector<uint8_t>& pixels, int tile) {
+    // Heavy textile weave with localized darker moisture patches and olive-brown mold spots
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
             const float noise = (rnd(x, y, 222) - 0.5f) * 0.08f;
-            const float stain = (rnd(x / 4, y / 4, 333) - 0.5f) * 0.06f;
-            float r = 0.65f + noise + stain;
-            float g = 0.56f + noise + stain;
-            float b = 0.36f + noise + stain * 0.8f;
+            const float moisture = (rnd(x / 3, y / 3, 333) - 0.5f) * 0.10f;
+            const bool isWeave = ((x + y) % 2 == 0);
+            const float weave = isWeave ? 0.04f : -0.04f;
+
+            float r = 0.68f + noise + moisture + weave;
+            float g = 0.58f + noise + moisture + weave;
+            float b = 0.32f + noise + moisture * 0.8f + weave;
+
+            // Olive-brown mold spots
+            if (rnd(x / 2, y / 2, 777) > 0.82f) {
+                r -= 0.12f;
+                g -= 0.06f;
+                b -= 0.14f;
+            }
+
             setPixel(pixels, tile, x, y, {r, g, b});
         }
     }
 }
 
-void makeBackroomsCeiling(std::vector<uint8_t>& pixels, int tile) {
-    // Greyish-beige acoustic ceiling tile with surface pores & border grid
+void makeChiseledLimestone(std::vector<uint8_t>& pixels, int tile) {
+    // Pale sand-colored stone with a 1px recessed geometric border and central rune chiseling
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
-            const float noise = (rnd(x, y, 444) - 0.5f) * 0.05f;
-            float r = 0.72f + noise;
-            float g = 0.70f + noise;
-            float b = 0.62f + noise;
+            const float noise = (rnd(x, y, 444) - 0.5f) * 0.04f;
+            float r = 0.82f + noise;
+            float g = 0.79f + noise;
+            float b = 0.68f + noise;
 
-            // Tile border grid
-            if (x == 0 || y == 0) {
-                r -= 0.14f;
-                g -= 0.14f;
+            // 1px Recessed outer geometric border
+            if (x == 1 || x == TILE - 2 || y == 1 || y == TILE - 2) {
+                r -= 0.15f;
+                g -= 0.15f;
                 b -= 0.14f;
             }
-            // Acoustic micro-pores
-            if (rnd(x, y, 555) > 0.85f) {
+
+            // Outer bevel edge
+            if (x == 0 || y == 0) {
                 r -= 0.08f;
                 g -= 0.08f;
                 b -= 0.08f;
             }
+
+            // Central geometric rune chiseling
+            const int dx = std::abs(x - 7);
+            const int dy = std::abs(y - 7);
+            if ((dx + dy == 4) || (dx == 0 && dy <= 3) || (dy == 0 && dx <= 3)) {
+                r -= 0.18f;
+                g -= 0.18f;
+                b -= 0.16f;
+            }
+
             setPixel(pixels, tile, x, y, {r, g, b});
         }
     }
 }
 
-void makeFluorescentLight(std::vector<uint8_t>& pixels, int tile) {
-    // Glowing fluorescent tube panel (bright white/yellow neon glow with metal frame)
+void makeResonantLantern(std::vector<uint8_t>& pixels, int tile) {
+    // Iron-banded casing enclosing an active golden glowstone core with fine redstone filament lines
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
-            if (x == 0 || x == TILE - 1 || y == 0 || y == TILE - 1) {
-                setPixel(pixels, tile, x, y, {0.35f, 0.35f, 0.35f});
-            } else if (x >= 4 && x <= 11 && y >= 3 && y <= 12) {
-                setPixel(pixels, tile, x, y, {1.00f, 0.98f, 0.88f});
+            // Iron outer frame bands
+            if (x == 0 || x == 1 || x == TILE - 2 || x == TILE - 1 ||
+                y == 0 || y == 1 || y == TILE - 2 || y == TILE - 1 ||
+                x == 7 || x == 8) {
+                const float ironN = (rnd(x, y, 666) - 0.5f) * 0.04f;
+                setPixel(pixels, tile, x, y, {0.32f + ironN, 0.32f + ironN, 0.34f + ironN});
             } else {
-                setPixel(pixels, tile, x, y, {0.90f, 0.88f, 0.75f});
+                // Glowing golden core with redstone filaments
+                const float glowN = (rnd(x, y, 888) - 0.5f) * 0.06f;
+                const bool isRedstone = ((x == 4 && y >= 4 && y <= 11) || (x == 11 && y >= 4 && y <= 11) || (y == 7));
+                if (isRedstone) {
+                    setPixel(pixels, tile, x, y, {0.95f, 0.25f, 0.15f});
+                } else {
+                    setPixel(pixels, tile, x, y, {0.98f + glowN, 0.86f + glowN, 0.35f + glowN});
+                }
             }
         }
     }
 }
 
-void makeGlitchBlock(std::vector<uint8_t>& pixels, int tile) {
-    // Reality Glitch: Dark distorted void matrix with magenta/cyan noise & reality tears
+void makeFracturedBedrock(std::vector<uint8_t>& pixels, int tile) {
+    // Cracked bedrock with dark violet void particles
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
-            const float roll = rnd(x, y, 777);
-            if (roll > 0.75f) {
-                setPixel(pixels, tile, x, y, {0.85f, 0.10f, 0.90f});
-            } else if (roll > 0.55f) {
-                setPixel(pixels, tile, x, y, {0.10f, 0.85f, 0.95f});
-            } else if (roll > 0.35f) {
-                setPixel(pixels, tile, x, y, {0.95f, 0.95f, 0.95f});
-            } else {
-                setPixel(pixels, tile, x, y, {0.08f, 0.02f, 0.15f});
+            const float n = rnd(x / 2, y / 2, 99);
+            float g = 0.22f + n * 0.24f;
+            float r = g;
+            float b = g;
+
+            const float voidRoll = rnd(x, y, 777);
+            if (voidRoll > 0.70f) {
+                // Dark violet void fracture
+                r = 0.45f + (rnd(x, y, 778) - 0.5f) * 0.1f;
+                g = 0.08f;
+                b = 0.75f + (rnd(x, y, 779) - 0.5f) * 0.1f;
+            } else if (voidRoll > 0.60f) {
+                r = 0.15f;
+                g = 0.02f;
+                b = 0.25f;
             }
+
+            setPixel(pixels, tile, x, y, {r, g, b});
         }
     }
 }
 
-void makeExitDoor(std::vector<uint8_t>& pixels, int tile) {
-    // Red metal fire exit emergency door with glowing green EXIT sign
+void makeVaultHatch(std::vector<uint8_t>& pixels, int tile) {
+    // Reinforced iron vault bulkhead with mechanical latch
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
+            // Heavy riveted steel border
             if (x == 0 || x == TILE - 1 || y == 0 || y == TILE - 1) {
-                setPixel(pixels, tile, x, y, {0.30f, 0.30f, 0.30f});
-            } else if (y >= 11 && y <= 13 && x >= 4 && x <= 11) {
-                setPixel(pixels, tile, x, y, {0.15f, 0.95f, 0.25f});
-            } else if (y == 7 && x >= 11 && x <= 13) {
-                setPixel(pixels, tile, x, y, {0.85f, 0.85f, 0.85f});
+                setPixel(pixels, tile, x, y, {0.28f, 0.28f, 0.30f});
+            } else if ((x == 1 || x == 14) && (y == 1 || y == 14 || y == 7 || y == 8)) {
+                // Rivets
+                setPixel(pixels, tile, x, y, {0.65f, 0.65f, 0.70f});
+            } else if (y >= 6 && y <= 9 && x >= 6 && x <= 9) {
+                // Center mechanical circular wheel / latch
+                const int dx = x - 7;
+                const int dy = y - 7;
+                if (dx * dx + dy * dy <= 2) {
+                    setPixel(pixels, tile, x, y, {0.85f, 0.75f, 0.25f}); // Brass latch
+                } else {
+                    setPixel(pixels, tile, x, y, {0.35f, 0.35f, 0.38f});
+                }
             } else {
                 const float n = (rnd(x, y, 999) - 0.5f) * 0.05f;
-                setPixel(pixels, tile, x, y, {0.78f + n, 0.15f + n, 0.15f + n});
+                setPixel(pixels, tile, x, y, {0.48f + n, 0.48f + n, 0.52f + n});
             }
         }
     }
 }
 
-void makeAlmondWater(std::vector<uint8_t>& pixels, int tile) {
-    // Almond Water: Glass canteen bottle filled with sweet almond water & wooden cork stopper
+void makeCondensationFlask(std::vector<uint8_t>& pixels, int tile) {
+    // Purified condensation vial with silver stopper and crystal water
     for (int y = 0; y < TILE; ++y) {
         for (int x = 0; x < TILE; ++x) {
             if (y >= 14 && y <= 15 && x >= 7 && x <= 8) {
-                // Cork stopper
-                setPixelRgba(pixels, tile, x, y, 165, 115, 60, 255);
+                // Silver cap
+                setPixelRgba(pixels, tile, x, y, 200, 205, 215, 255);
             } else if (y == 13 && x >= 7 && x <= 8) {
-                // Cork neck base
-                setPixelRgba(pixels, tile, x, y, 140, 95, 45, 255);
+                setPixelRgba(pixels, tile, x, y, 170, 175, 185, 255);
             } else if (y == 12 && x >= 6 && x <= 9) {
-                // Glass neck rim
                 setPixelRgba(pixels, tile, x, y, 180, 215, 230, 255);
             } else if (y >= 3 && y <= 11 && x >= 4 && x <= 11) {
-                // Outer glass outline
                 if (x == 4 || x == 11 || y == 3 || y == 11) {
                     if (x == 5 && y >= 7 && y <= 10) {
-                        setPixelRgba(pixels, tile, x, y, 245, 255, 255, 255); // Glass highlight shine
+                        setPixelRgba(pixels, tile, x, y, 255, 255, 255, 255); // Specular shine
                     } else {
-                        setPixelRgba(pixels, tile, x, y, 155, 195, 215, 240);
+                        setPixelRgba(pixels, tile, x, y, 160, 205, 225, 240);
                     }
                 } else if (y >= 4 && y <= 9) {
-                    // Creamy almond water liquid
-                    if (x == 5 && y >= 6 && y <= 8) {
-                        setPixelRgba(pixels, tile, x, y, 250, 248, 238, 255); // Inner reflection
-                    } else {
-                        const float n = (rnd(x, y, 4321) - 0.5f) * 12.0f;
-                        const uint8_t r = static_cast<uint8_t>(std::clamp(236.0f + n, 0.0f, 255.0f));
-                        const uint8_t g = static_cast<uint8_t>(std::clamp(224.0f + n, 0.0f, 255.0f));
-                        const uint8_t b = static_cast<uint8_t>(std::clamp(198.0f + n, 0.0f, 255.0f));
-                        setPixelRgba(pixels, tile, x, y, r, g, b, 255);
-                    }
-                } else if (y == 10) {
-                    // Liquid meniscus / air gap
-                    setPixelRgba(pixels, tile, x, y, 215, 235, 245, 200);
+                    // Purified condensation essence
+                    const float n = (rnd(x, y, 4321) - 0.5f) * 10.0f;
+                    const uint8_t r = static_cast<uint8_t>(std::clamp(170.0f + n, 0.0f, 255.0f));
+                    const uint8_t g = static_cast<uint8_t>(std::clamp(215.0f + n, 0.0f, 255.0f));
+                    const uint8_t b = static_cast<uint8_t>(std::clamp(245.0f + n, 0.0f, 255.0f));
+                    setPixelRgba(pixels, tile, x, y, r, g, b, 255);
                 } else {
-                    setPixelRgba(pixels, tile, x, y, 220, 238, 248, 220);
+                    setPixelRgba(pixels, tile, x, y, 210, 235, 250, 220);
                 }
             } else {
                 setPixelRgba(pixels, tile, x, y, 0, 0, 0, 0);
             }
         }
     }
+}
+
+void makeArchivistFace(std::vector<uint8_t>& pixels, int tile) {
+    // Ashen grey skin with hollow dark sunken eyes
+    fillNoise(pixels, tile, {0.52f, 0.52f, 0.55f}, 0.04f, 1337);
+
+    // Sunken dark eye sockets
+    for (int y = 6; y <= 8; ++y) {
+        for (int x = 2; x <= 5; ++x) {
+            setPixel(pixels, tile, x, y, {0.05f, 0.05f, 0.06f});
+        }
+        for (int x = 10; x <= 13; ++x) {
+            setPixel(pixels, tile, x, y, {0.05f, 0.05f, 0.06f});
+        }
+    }
+    // Faint white pinpoint pupils
+    setPixel(pixels, tile, 4, 7, {0.95f, 0.95f, 1.0f});
+    setPixel(pixels, tile, 11, 7, {0.95f, 0.95f, 1.0f});
+
+    // Dark agape hollow mouth fissure
+    for (int y = 2; y <= 4; ++y) {
+        for (int x = 6; x <= 9; ++x) {
+            setPixel(pixels, tile, x, y, {0.08f, 0.08f, 0.10f});
+        }
+    }
+}
+
+void makeArchivistTorso(std::vector<uint8_t>& pixels, int tile) {
+    // Dark frayed tattered archivist robe / tunic
+    fillNoise(pixels, tile, {0.25f, 0.24f, 0.26f}, 0.05f, 1338);
+
+    // Rib cage shadow fissures & tears
+    for (int y = 4; y <= 12; y += 3) {
+        for (int x = 4; x <= 11; ++x) {
+            setPixel(pixels, tile, x, y, {0.14f, 0.14f, 0.16f});
+        }
+    }
+}
+
+void makeArchivistSkin(std::vector<uint8_t>& pixels, int tile) {
+    fillNoise(pixels, tile, {0.52f, 0.52f, 0.55f}, 0.04f, 1339);
+}
+
+void makeSpawnEgg(std::vector<uint8_t>& pixels, int tile, Rgb base, Rgb spot) {
+    for (int y = 0; y < TILE; ++y) {
+        for (int x = 0; x < TILE; ++x) {
+            setPixelRgba(pixels, tile, x, y, 0, 0, 0, 0);
+        }
+    }
+
+    static const struct { int y, minX, maxX; } rows[] = {
+        { 2, 6, 9 },
+        { 3, 5, 10 },
+        { 4, 4, 11 },
+        { 5, 4, 11 },
+        { 6, 4, 11 },
+        { 7, 4, 11 },
+        { 8, 5, 10 },
+        { 9, 5, 10 },
+        { 10, 5, 10 },
+        { 11, 6, 9 },
+        { 12, 6, 9 },
+        { 13, 7, 8 }
+    };
+
+    const Rgb darkBase = { base.r * 0.70f, base.g * 0.70f, base.b * 0.70f };
+    const Rgb lightBase = { std::min(1.0f, base.r * 1.20f), std::min(1.0f, base.g * 1.20f), std::min(1.0f, base.b * 1.20f) };
+    const Rgb darkSpot = { spot.r * 0.75f, spot.g * 0.75f, spot.b * 0.75f };
+
+    for (const auto& r : rows) {
+        for (int x = r.minX; x <= r.maxX; ++x) {
+            const bool isBorder = (x == r.minX || x == r.maxX || r.y == 2 || r.y == 13);
+            if (isBorder) {
+                setPixelRgba(pixels, tile, x, r.y, toByte(darkBase.r), toByte(darkBase.g), toByte(darkBase.b), 255);
+            } else if (x == r.minX + 1 && r.y >= 8 && r.y <= 11) {
+                setPixelRgba(pixels, tile, x, r.y, toByte(lightBase.r), toByte(lightBase.g), toByte(lightBase.b), 255);
+            } else {
+                const float n = (rnd(x, r.y, 888) - 0.5f) * 0.04f;
+                setPixelRgba(pixels, tile, x, r.y, toByte(base.r + n), toByte(base.g + n), toByte(base.b + n), 255);
+            }
+        }
+    }
+
+    auto drawSpot = [&](int sx, int sy, int sw, int sh) {
+        for (int dy = 0; dy < sh; ++dy) {
+            for (int dx = 0; dx < sw; ++dx) {
+                const int px = sx + dx;
+                const int py = sy + dy;
+                if (dx == 0 && dy == 0) {
+                    setPixelRgba(pixels, tile, px, py, toByte(spot.r), toByte(spot.g), toByte(spot.b), 255);
+                } else {
+                    setPixelRgba(pixels, tile, px, py, toByte(darkSpot.r), toByte(darkSpot.g), toByte(darkSpot.b), 255);
+                }
+            }
+        }
+    };
+
+    drawSpot(6, 4, 2, 2);
+    drawSpot(9, 6, 2, 2);
+    drawSpot(5, 8, 2, 2);
+    drawSpot(8, 10, 2, 2);
+    drawSpot(7, 12, 1, 1);
 }
 
 } // namespace
@@ -1536,15 +1719,30 @@ void Texture::createAtlas() {
     makeCraftingArrow(pixels, static_cast<int>(TextureTile::CraftingArrow));
     makeSearchIcon(pixels, static_cast<int>(TextureTile::SearchIcon));
 
-    // Backrooms Level 0 Tiles
-    makeBackroomsWallpaper(pixels, static_cast<int>(TextureTile::BackroomsWallpaper), false);
-    makeBackroomsWallpaper(pixels, static_cast<int>(TextureTile::BackroomsWallpaperBase), true);
-    makeBackroomsCarpet(pixels, static_cast<int>(TextureTile::BackroomsCarpet));
-    makeBackroomsCeiling(pixels, static_cast<int>(TextureTile::BackroomsCeiling));
-    makeFluorescentLight(pixels, static_cast<int>(TextureTile::FluorescentLight));
-    makeGlitchBlock(pixels, static_cast<int>(TextureTile::GlitchBlock));
-    makeExitDoor(pixels, static_cast<int>(TextureTile::ExitDoor));
-    makeAlmondWater(pixels, static_cast<int>(TextureTile::AlmondWater));
+    // Ochre Annex Level 0 Tiles
+    makeOchrePlaster(pixels, static_cast<int>(TextureTile::OchrePlaster), false);
+    makeOchrePlaster(pixels, static_cast<int>(TextureTile::OchrePlasterBase), true);
+    makeDampOchreWool(pixels, static_cast<int>(TextureTile::DampOchreWool));
+    makeChiseledLimestone(pixels, static_cast<int>(TextureTile::ChiseledLimestone));
+    makeResonantLantern(pixels, static_cast<int>(TextureTile::ResonantLantern));
+    makeFracturedBedrock(pixels, static_cast<int>(TextureTile::FracturedBedrock));
+    makeVaultHatch(pixels, static_cast<int>(TextureTile::VaultHatch));
+    makeCondensationFlask(pixels, static_cast<int>(TextureTile::CondensationFlask));
+
+    // Threat Entities
+    makeArchivistFace(pixels, static_cast<int>(TextureTile::ArchivistFace));
+    makeArchivistTorso(pixels, static_cast<int>(TextureTile::ArchivistTorso));
+    makeArchivistSkin(pixels, static_cast<int>(TextureTile::ArchivistSkin));
+
+    // Multi-tile Mob Atlas Textures (64x64)
+    loadAtlasRegionPng(pixels, static_cast<int>(TextureTile::ArchivistAtlas), "archivist.png");
+
+    // Spawn Mob Eggs
+    makeSpawnEgg(pixels, static_cast<int>(TextureTile::SpawnEggPig), {0.94f, 0.62f, 0.68f}, {0.75f, 0.28f, 0.38f});
+    makeSpawnEgg(pixels, static_cast<int>(TextureTile::SpawnEggCow), {0.28f, 0.20f, 0.15f}, {0.82f, 0.78f, 0.72f});
+    makeSpawnEgg(pixels, static_cast<int>(TextureTile::SpawnEggPigmanVillager), {0.72f, 0.52f, 0.28f}, {0.92f, 0.58f, 0.65f});
+    makeSpawnEgg(pixels, static_cast<int>(TextureTile::SpawnEggArchivist), {0.32f, 0.24f, 0.18f}, {0.80f, 0.78f, 0.74f});
+    makeSpawnEgg(pixels, static_cast<int>(TextureTile::SpawnEggWoolWeaver), {0.45f, 0.55f, 0.52f}, {0.85f, 0.82f, 0.72f});
 
     const int maxLod = static_cast<int>(std::floor(std::log2(static_cast<double>(TILE))));
 

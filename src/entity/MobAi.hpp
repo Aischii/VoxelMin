@@ -7,18 +7,12 @@ enum class MobType : uint8_t {
     Pig,
     Cow,
     PigmanVillager,
+    Archivist,
+    WoolWeaver,
 };
 
 // ---------------------------------------------------------------------------
 // AI goals.
-//
-// Every mob behaviour is a named bit in a mask rather than an `if` buried in
-// the AI update. That means a whole goal can be switched off for a mob type by
-// editing one table entry below, which is the same "filter layer" idea used by
-// the AI-Improvements mod (see docs/SOURCES.md, section 4).
-//
-// The bits are ordered cheapest-test-first (a single block probe) so the goals
-// that run most often are also the ones that bail out fastest.
 // ---------------------------------------------------------------------------
 enum AiGoal : uint32_t {
     AiLookAt    = 1u << 0,  // idle mobs track the player
@@ -31,6 +25,8 @@ enum AiGoal : uint32_t {
     AiPanic     = 1u << 7,  // flee after being hit
     AiRetaliate = 1u << 8,  // fight back when attacked
     AiHomeLeash = 1u << 9,  // return to home village when outside leash radius
+    AiStalk     = 1u << 10, // freeze when observed in frustum, shadow sprint when unobserved
+    AiSeekLight = 1u << 11, // hunt and extinguish light sources
 };
 
 using AiGoalMask = uint32_t;
@@ -53,8 +49,7 @@ inline constexpr float kWanderTurnRate  = 150.0f;
 inline constexpr float kPanicTurnRate   = 360.0f;
 inline constexpr float kHostileTurnRate = 420.0f;
 
-// Per-mob-type goal sets. Mobs jump naturally over 1-block ledges rather than
-// teleporting with step-up.
+// Per-mob-type goal sets.
 inline constexpr AiGoalMask kPigGoals =
     AiIdle | AiWander | AiPanic | AiLookAt | AiJump | AiAvoidEdge | AiFloat;
 
@@ -64,8 +59,16 @@ inline constexpr AiGoalMask kCowGoals =
 inline constexpr AiGoalMask kPigmanVillagerGoals =
     AiIdle | AiWander | AiRetaliate | AiHomeLeash | AiLookAt | AiJump | AiAvoidEdge | AiFloat;
 
+inline constexpr AiGoalMask kArchivistGoals =
+    AiStalk | AiJump | AiFloat;
+
+inline constexpr AiGoalMask kWoolWeaverGoals =
+    AiSeekLight | AiWander | AiJump | AiFloat;
+
 inline AiProfile aiProfileFor(MobType type) {
     switch (type) {
+        case MobType::Archivist:      return AiProfile{kArchivistGoals};
+        case MobType::WoolWeaver:     return AiProfile{kWoolWeaverGoals};
         case MobType::PigmanVillager: return AiProfile{kPigmanVillagerGoals};
         case MobType::Cow:            return AiProfile{kCowGoals};
         case MobType::Pig:

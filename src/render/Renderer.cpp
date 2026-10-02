@@ -1096,12 +1096,144 @@ void Renderer::drawDurabilityBar(float x, float y, float w, float h, int durabil
     drawRect(x, y, w * pct, h, barCol);
 }
 
+void Renderer::drawRpgVitalsHud(float x, float y,
+                                int hp, int maxHp,
+                                int food, int maxFood,
+                                int xp, int maxXp,
+                                int level,
+                                float hurtTimer, float animTime,
+                                float uiScale,
+                                float levelUpTimer) {
+    const float s = uiScale;
+
+    // Damage shake on portrait box
+    const float shakeX = (hurtTimer > 0.0f) ? std::sin(animTime * 60.0f) * 2.0f * s : 0.0f;
+    const float rootX = x + shakeX;
+    const float rootY = y;
+
+    const glm::vec4 darkBorder(0.102f, 0.102f, 0.102f, 1.0f);     // #1A1A1A
+    const glm::vec4 highlightBorder(0.847f, 0.847f, 0.847f, 1.0f); // #D8D8D8
+    const glm::vec4 slateBg(0.431f, 0.439f, 0.459f, 1.0f);         // #6E7075
+
+    // 1. Portrait Module (Left Box: 48x48)
+    // Outer 1px shadow/border
+    drawRect(rootX - 1.0f * s, rootY - 1.0f * s, 48.0f * s + 2.0f * s, 48.0f * s + 2.0f * s, darkBorder);
+    // Inner slate background
+    drawRect(rootX, rootY, 48.0f * s, 48.0f * s, slateBg);
+    // Top & Left highlights
+    drawRect(rootX, rootY + 47.0f * s, 48.0f * s, 1.0f * s, highlightBorder);
+    drawRect(rootX, rootY, 1.0f * s, 48.0f * s, highlightBorder);
+
+    // Avatar Inset: Centered inside portrait box, size 32x32px
+    drawTexturedRect(rootX + 8.0f * s, rootY + 8.0f * s, 32.0f * s, 32.0f * s, TextureTile::PlayerFace);
+
+    // 2. Level Badge Inset (Bottom-Right notch: 18x14px)
+    const float badgeW = 18.0f * s;
+    const float badgeH = 14.0f * s;
+    const float badgeX = rootX + 30.0f * s;
+    const float badgeY = rootY - 2.0f * s;
+
+    // Badge 1px border and light grey background (#D8D8D8)
+    drawRect(badgeX - 1.0f * s, badgeY - 1.0f * s, badgeW + 2.0f * s, badgeH + 2.0f * s, darkBorder);
+    drawRect(badgeX, badgeY, badgeW, badgeH, highlightBorder);
+
+    // Level up golden flash
+    if (levelUpTimer > 0.0f) {
+        const float flash = std::clamp(levelUpTimer / 0.5f, 0.0f, 1.0f);
+        drawRect(badgeX, badgeY, badgeW, badgeH, glm::vec4(1.0f, 0.85f, 0.10f, flash * 0.85f));
+    }
+
+    // Lime green level text (#3BF029) with drop shadow (#0E4708)
+    const std::string lvlStr = std::to_string(level);
+    const float lvlScale = std::max(1.0f, s * 0.75f);
+    const float lw = textWidth(lvlStr, lvlScale);
+    const float lh = textHeight(lvlScale);
+    const float lx = badgeX + (badgeW - lw) * 0.5f;
+    const float ly = badgeY + (badgeH + lh) * 0.5f - 1.0f * s;
+    drawText(lx + 1.0f, ly - 1.0f, lvlStr, lvlScale, glm::vec4(0.055f, 0.278f, 0.031f, 1.0f));
+    drawText(lx, ly, lvlStr, lvlScale, glm::vec4(0.231f, 0.941f, 0.161f, 1.0f));
+
+    // 3. Stepped Horizontal Bar Assembly (Right Side)
+    const float barX = x + 48.0f * s;
+
+    // --- Health Bar (Top: 160x14px) ---
+    const float hpY = y + 34.0f * s;
+    drawRect(barX, hpY - 1.0f * s, 160.0f * s + 1.0f * s, 14.0f * s + 2.0f * s, darkBorder);
+    drawRect(barX + 1.0f * s, hpY, 159.0f * s, 14.0f * s, glm::vec4(0.239f, 0.031f, 0.031f, 1.0f)); // Track #3D0808
+
+    const float hpRatio = (maxHp > 0) ? std::clamp(static_cast<float>(hp) / static_cast<float>(maxHp), 0.0f, 1.0f) : 0.0f;
+    const float hpFillW = 159.0f * s * hpRatio;
+    if (hpFillW > 0.0f) {
+        glm::vec4 hpTop(0.839f, 0.082f, 0.082f, 1.0f); // #D61515
+        glm::vec4 hpBottom(0.690f, 0.047f, 0.047f, 1.0f); // #B00C0C
+        if (hurtTimer > 0.0f) {
+            const float hurtFactor = std::clamp(hurtTimer / 0.45f, 0.0f, 1.0f);
+            hpTop = glm::mix(hpTop, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), hurtFactor * 0.85f);
+            hpBottom = glm::mix(hpBottom, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), hurtFactor * 0.85f);
+        }
+        drawGradientRect(barX + 1.0f * s, hpY, hpFillW, 14.0f * s, hpBottom, hpTop);
+    }
+
+    const std::string hpStr = std::to_string(hp) + " / " + std::to_string(maxHp);
+    const float barTxtScale = std::max(1.0f, s * 0.70f);
+    const float hpTw = textWidth(hpStr, barTxtScale);
+    const float hpTh = textHeight(barTxtScale);
+    const float hpTx = barX + (160.0f * s - hpTw) * 0.5f;
+    const float hpTy = hpY + (14.0f * s + hpTh) * 0.5f - 1.0f * s;
+    drawText(hpTx + 1.0f, hpTy - 1.0f, hpStr, barTxtScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.90f));
+    drawText(hpTx, hpTy, hpStr, barTxtScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+    // --- Hunger Bar (Middle: 160x14px) ---
+    const float foodTremor = (food <= 6) ? std::sin(animTime * 25.0f) * 1.0f * s : 0.0f;
+    const float foodY = y + 18.0f * s + foodTremor;
+    drawRect(barX, foodY - 1.0f * s, 160.0f * s + 1.0f * s, 14.0f * s + 2.0f * s, darkBorder);
+    drawRect(barX + 1.0f * s, foodY, 159.0f * s, 14.0f * s, glm::vec4(0.055f, 0.239f, 0.031f, 1.0f)); // Track #0E3D08
+
+    const float foodRatio = (maxFood > 0) ? std::clamp(static_cast<float>(food) / static_cast<float>(maxFood), 0.0f, 1.0f) : 0.0f;
+    const float foodFillW = 159.0f * s * foodRatio;
+    if (foodFillW > 0.0f) {
+        drawGradientRect(barX + 1.0f * s, foodY, foodFillW, 14.0f * s,
+                         glm::vec4(0.114f, 0.561f, 0.063f, 1.0f),  // #1D8F10
+                         glm::vec4(0.173f, 0.769f, 0.106f, 1.0f)); // #2CC41B
+    }
+
+    const std::string foodStr = std::to_string(food) + " / " + std::to_string(maxFood);
+    const float foodTw = textWidth(foodStr, barTxtScale);
+    const float foodTh = textHeight(barTxtScale);
+    const float foodTx = barX + (160.0f * s - foodTw) * 0.5f;
+    const float foodTy = foodY + (14.0f * s + foodTh) * 0.5f - 1.0f * s;
+    drawText(foodTx + 1.0f, foodTy - 1.0f, foodStr, barTxtScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.90f));
+    drawText(foodTx, foodTy, foodStr, barTxtScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+
+    // --- Experience Bar (Bottom Stepped: 136x10px) ---
+    const float xpY = y + 4.0f * s;
+    drawRect(barX, xpY - 1.0f * s, 136.0f * s + 1.0f * s, 10.0f * s + 2.0f * s, darkBorder);
+    drawRect(barX + 1.0f * s, xpY, 135.0f * s, 10.0f * s, glm::vec4(0.231f, 0.208f, 0.020f, 1.0f)); // Track #3B3505
+
+    const float xpRatio = (maxXp > 0) ? std::clamp(static_cast<float>(xp) / static_cast<float>(maxXp), 0.0f, 1.0f) : 0.0f;
+    const float xpFillW = 135.0f * s * xpRatio;
+    if (xpFillW > 0.0f) {
+        drawRect(barX + 1.0f * s, xpY, xpFillW, 10.0f * s, glm::vec4(0.910f, 0.839f, 0.102f, 1.0f)); // Fill #E8D61A
+    }
+
+    const std::string xpStr = std::to_string(xp) + " / " + std::to_string(maxXp);
+    const float xpTxtScale = std::max(1.0f, s * 0.55f);
+    const float xpTw = textWidth(xpStr, xpTxtScale);
+    const float xpTh = textHeight(xpTxtScale);
+    const float xpTx = barX + (136.0f * s - xpTw) * 0.5f;
+    const float xpTy = xpY + (10.0f * s + xpTh) * 0.5f - 1.0f * s;
+    drawText(xpTx + 1.0f, xpTy - 1.0f, xpStr, xpTxtScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.90f));
+    drawText(xpTx, xpTy, xpStr, xpTxtScale, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+}
+
 void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount,
                        float health, float maxHealth,
                        float hunger, float maxHunger,
                        float oxygen, float maxOxygen,
+                       int xp, int maxXp, int level,
                        bool inWater, float hurtTimer, float animTime,
-                       bool isCreative) {
+                       bool isCreative,
+                       float levelUpTimer) {
     const float s = m_uiScale;
 
     beginUI();
@@ -1176,84 +1308,34 @@ void Renderer::drawHud(int selectedSlot, const ItemSlot* hotbar, int slotCount,
         }
     }
 
-    // 3. Survival Vitals (Health Hearts & Hunger Drumsticks above hotbar)
-    if (!isCreative) {
+    // 3. Top-Left Anchored RPG Vitals Card (scaled up 30% to 0.78x)
+    const float sVitals = s * 0.78f;
+    const float cardRootX = 12.0f * s;
+    const float cardRootY = static_cast<float>(m_fbHeight) - 12.0f * s - 48.0f * sVitals;
+    const int hpVal = isCreative ? 20 : static_cast<int>(std::round(health * (20.0f / maxHealth)));
+    const int maxHpVal = 20;
+    const int foodVal = isCreative ? 20 : static_cast<int>(std::round(hunger * (20.0f / maxHunger)));
+    const int maxFoodVal = 20;
+
+    drawRpgVitalsHud(cardRootX, cardRootY,
+                     hpVal, maxHpVal,
+                     foodVal, maxFoodVal,
+                     xp, maxXp, level,
+                     hurtTimer, animTime, sVitals,
+                     levelUpTimer);
+
+    // 4. Air Bubbles (above hotbar on right when submerged)
+    if (inWater || oxygen < maxOxygen) {
+        const float oxyRatio = std::clamp(oxygen / maxOxygen, 0.0f, 1.0f);
+        const int bubbles = static_cast<int>(std::ceil(oxyRatio * 10.0f));
         const float iconSize = 9.0f * s;
         const float iconSpacing = 8.0f * s;
-        const float vitalsY = hotbarMarginY + slot + 6.0f * s;
+        const float bubbleStartX = hotbarStartX + totalHotbarW - iconSize;
+        const float bubbleY = hotbarMarginY + slot + 4.0f * s;
 
-        // XP Bar (Directly between hotbar and hearts)
-        const float xpBarW = totalHotbarW;
-        const float xpBarH = 3.0f * s;
-        const float xpBarY = hotbarMarginY + slot + 2.0f * s;
-        drawRect(hotbarStartX, xpBarY, xpBarW, xpBarH, glm::vec4(0.0f, 0.0f, 0.0f, 0.8f));
-        drawRect(hotbarStartX + 1.0f * s, xpBarY + 0.5f * s, xpBarW - 2.0f * s, xpBarH - 1.0f * s, glm::vec4(0.1f, 0.25f, 0.05f, 1.0f));
-        drawRect(hotbarStartX + 1.0f * s, xpBarY + 0.5f * s, (xpBarW - 2.0f * s) * 0.45f, xpBarH - 1.0f * s, glm::vec4(0.50f, 1.0f, 0.15f, 1.0f));
-
-        // Green Level Number
-        const std::string lvlStr = "1";
-        const float lvlScale = std::max(1.0f, s * 0.70f);
-        const float lw = textWidth(lvlStr, lvlScale);
-        const float lh = textHeight(lvlScale);
-        drawText(cx - lw * 0.5f + 1.0f, xpBarY + lh + 1.0f * s - 1.0f, lvlStr, lvlScale, glm::vec4(0.0f, 0.0f, 0.0f, 0.9f));
-        drawText(cx - lw * 0.5f, xpBarY + lh + 1.0f * s, lvlStr, lvlScale, glm::vec4(0.50f, 1.0f, 0.15f, 1.0f));
-
-        // 10 Health Hearts on Left (0..20 HP, 2 HP per heart)
-        const float heartsStartX = hotbarStartX;
-        const float hp = std::clamp(health, 0.0f, maxHealth);
-        const int hpPoints = static_cast<int>(std::ceil(hp * (20.0f / maxHealth)));
-
-        for (int h = 0; h < 10; ++h) {
-            float hx = heartsStartX + h * iconSpacing;
-            float hy = vitalsY;
-
-            // Low health jitter / damage shake
-            if (hpPoints <= 4) {
-                const float shake = std::sin(animTime * 20.0f + h) * 1.5f * s;
-                hy += shake;
-            } else if (hurtTimer > 0.0f) {
-                hy += (std::rand() % 3 - 1) * 1.0f * s;
-            }
-
-            drawTexturedRect(hx, hy, iconSize, iconSize, TextureTile::HeartEmpty);
-
-            const int heartVal = (h + 1) * 2;
-            if (hpPoints >= heartVal) {
-                drawTexturedRect(hx, hy, iconSize, iconSize, TextureTile::HeartFull);
-            } else if (hpPoints == heartVal - 1) {
-                drawTexturedRect(hx, hy, iconSize, iconSize, TextureTile::HeartHalf);
-            }
-        }
-
-        // 10 Food Drumsticks on Right (0..20 Hunger, 2 Hunger per drumstick)
-        const float foodStartX = hotbarStartX + totalHotbarW - iconSize;
-        const float hng = std::clamp(hunger, 0.0f, maxHunger);
-        const int hngPoints = static_cast<int>(std::ceil(hng * (20.0f / maxHunger)));
-
-        for (int f = 0; f < 10; ++f) {
-            const float fx = foodStartX - f * iconSpacing;
-            const float fy = vitalsY;
-
-            drawTexturedRect(fx, fy, iconSize, iconSize, TextureTile::FoodEmpty);
-
-            const int foodVal = (f + 1) * 2;
-            if (hngPoints >= foodVal) {
-                drawTexturedRect(fx, fy, iconSize, iconSize, TextureTile::FoodFull);
-            } else if (hngPoints == foodVal - 1) {
-                drawTexturedRect(fx, fy, iconSize, iconSize, TextureTile::FoodHalf);
-            }
-        }
-
-        // 10 Air Bubbles above Food when in water
-        if (inWater || oxygen < maxOxygen) {
-            const float oxyRatio = std::clamp(oxygen / maxOxygen, 0.0f, 1.0f);
-            const int bubbles = static_cast<int>(std::ceil(oxyRatio * 10.0f));
-            const float bubbleY = vitalsY + iconSize + 2.0f * s;
-
-            for (int b = 0; b < bubbles; ++b) {
-                const float bx = foodStartX - b * iconSpacing;
-                drawTexturedRect(bx, bubbleY, iconSize, iconSize, TextureTile::AirBubble);
-            }
+        for (int b = 0; b < bubbles; ++b) {
+            const float bx = bubbleStartX - b * iconSpacing;
+            drawTexturedRect(bx, bubbleY, iconSize, iconSize, TextureTile::AirBubble);
         }
     }
 
@@ -1292,22 +1374,28 @@ void Renderer::drawHurtVignette(float hurtTimer, float healthRatio, float animTi
     endUI();
 }
 
-void Renderer::drawTitleBanner(const std::string& title, const std::string& subtitle, float alpha, float /*animTime*/) {
-    if (alpha <= 0.01f || title.empty()) return;
+void Renderer::drawTitleBanner(const std::string& mainTitle,
+                               const std::string& subtitle,
+                               const glm::vec3& mainColor,
+                               float alpha,
+                               float /*animTime*/,
+                               float yOffset) {
+    if (alpha <= 0.005f || mainTitle.empty()) return;
 
     const float s = m_uiScale;
     beginUI();
 
     const float fbW = static_cast<float>(m_fbWidth);
     const float fbH = static_cast<float>(m_fbHeight);
-    const float centerY = fbH * 0.72f;
+    const float centerY = fbH * 0.78f + yOffset;
 
-    // Font metrics and scaling
-    const float titleScale = std::max(2.0f, s * 1.5f);
-    const float titleW = textWidth(title, titleScale);
+    // Font metrics and scaling (2.2x base UI text scale)
+    const float titleScale = std::max(2.2f, s * 2.2f);
+    const float titleW = textWidth(mainTitle, titleScale);
     const float titleH = textHeight(titleScale);
 
-    const float subScale = std::max(1.0f, s * 0.75f);
+    // Secondary sub-header (1.2x base UI text scale)
+    const float subScale = std::max(1.2f, s * 1.2f);
     const float subW = subtitle.empty() ? 0.0f : textWidth(subtitle, subScale);
     const float subH = subtitle.empty() ? 0.0f : textHeight(subScale);
 
@@ -1326,33 +1414,36 @@ void Renderer::drawTitleBanner(const std::string& title, const std::string& subt
     const float lineX = (fbW - lineW) * 0.5f;
     const float lineThick = std::max(1.0f, 1.5f * s);
 
-    // Top gold line & diamond
-    drawRect(lineX, topLineY, lineW, lineThick, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
+    const glm::vec4 lineCol(mainColor * 0.9f, alpha * 0.85f);
+    const glm::vec4 diamondCol(mainColor, alpha);
+
+    // Top line & diamond
+    drawRect(lineX, topLineY, lineW, lineThick, lineCol);
     const float dSize = 4.0f * s;
-    drawRect((fbW - dSize) * 0.5f, topLineY - (dSize * 0.5f) + (lineThick * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
+    drawRect((fbW - dSize) * 0.5f, topLineY - (dSize * 0.5f) + (lineThick * 0.5f), dSize, dSize, diamondCol);
 
-    // Bottom gold line & diamond
-    drawRect(lineX, bottomLineY, lineW, lineThick, glm::vec4(0.92f, 0.82f, 0.35f, alpha * 0.85f));
-    drawRect((fbW - dSize) * 0.5f, bottomLineY - (dSize * 0.5f) + (lineThick * 0.5f), dSize, dSize, glm::vec4(1.0f, 0.95f, 0.45f, alpha));
+    // Bottom line & diamond
+    drawRect(lineX, bottomLineY, lineW, lineThick, lineCol);
+    drawRect((fbW - dSize) * 0.5f, bottomLineY - (dSize * 0.5f) + (lineThick * 0.5f), dSize, dSize, diamondCol);
 
-    // 2. Large Title Text (centered horizontally and positioned at contentTop)
+    // 2. Large Primary Header Text (centered horizontally)
     const float titleX = (fbW - titleW) * 0.5f;
     const float titleY = contentTop;
 
-    // Shadow
-    drawText(titleX + 2.0f * s, titleY - 2.0f * s, title, titleScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.95f));
-    // Foreground Title
-    drawText(titleX, titleY, title, titleScale, glm::vec4(1.0f, 0.92f, 0.35f, alpha));
+    // 2px drop-shadow (+2, -2) in solid black with 80% alpha
+    drawText(titleX + 2.0f * s, titleY - 2.0f * s, mainTitle, titleScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.80f));
+    // Colored Foreground
+    drawText(titleX, titleY, mainTitle, titleScale, glm::vec4(mainColor, alpha));
 
-    // 3. Subtitle Text (centered horizontally and positioned below Title)
+    // 3. Secondary Sub-Header (Biome / Zone Name)
     if (!subtitle.empty()) {
         const float subX = (fbW - subW) * 0.5f;
         const float subY = titleY - titleH - gap;
 
-        // Subtitle Shadow
-        drawText(subX + 1.0f * s, subY - 1.0f * s, subtitle, subScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.90f));
-        // Subtitle Foreground (Parchment/Amber)
-        drawText(subX, subY, subtitle, subScale, glm::vec4(0.95f, 0.85f, 0.75f, alpha * 0.95f));
+        // Subtitle Shadow (1px outline/drop-shadow)
+        drawText(subX + 1.0f * s, subY - 1.0f * s, subtitle, subScale, glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.85f));
+        // Subtitle Clean Silver #E0E0E0
+        drawText(subX, subY, subtitle, subScale, glm::vec4(0.878f, 0.878f, 0.878f, alpha));
     }
 
     endUI();

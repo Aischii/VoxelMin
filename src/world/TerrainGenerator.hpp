@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <glm/glm.hpp>
 
 namespace vox {
 
@@ -51,6 +52,7 @@ public:
     static float sampleContinentalness(float wx, float wz, uint32_t seed);
     static float sampleRiver(float wx, float wz, uint32_t seed);
     static float sampleTerrainHeight(float wx, float wz, uint32_t seed, WorldType type);
+    static std::string getBiomeName(const glm::vec3& pos, uint32_t seed, WorldType type = WorldType::Default);
 
 private:
     void plantTreeInChunk(Chunk& chunk, int originX, int originZ, int x, int groundY, int z, float cont) const;

@@ -16,6 +16,10 @@ enum class MobState : uint8_t {
     Panic,
     Hostile,
     ReturnToVillage,
+    StalkFrozen,
+    ShadowSprint,
+    SeekLight,
+    RetreatShadows,
 };
 
 class Mob {
@@ -35,7 +39,8 @@ public:
     bool onGround() const { return m_onGround; }
     int stepUpCount() const { return m_stepUps; }
     int jumpCount() const { return m_jumps; }
-    bool isHostile() const { return m_state == MobState::Hostile; }
+    bool isHostile() const { return m_state == MobState::Hostile || m_state == MobState::ShadowSprint; }
+    bool isFrozen() const { return m_state == MobState::StalkFrozen; }
     bool canAttack() const { return m_attackCooldown <= 0.0f; }
     void resetAttackCooldown(float cd = 1.0f) { m_attackCooldown = cd; }
 
@@ -45,7 +50,7 @@ public:
 
     void alertAggro(const glm::vec3& targetPos);
     void takeDamage(int amount, const glm::vec3& sourcePos);
-    void update(float dt, const World& world, const glm::vec3& playerPos);
+    void update(float dt, World& world, const glm::vec3& playerPos, const glm::vec3& playerCamFront = glm::vec3(0.0f, 0.0f, -1.0f));
 
     bool collidesWithRay(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDist, float& outDist) const;
     void appendGeometry(std::vector<Vertex>& vertices, const World& world) const;
@@ -54,7 +59,7 @@ public:
     float halfHeight() const;
 
 private:
-    void updateAI(float dt, const World& world, const glm::vec3& playerPos);
+    void updateAI(float dt, World& world, const glm::vec3& playerPos, const glm::vec3& playerCamFront);
     void updatePhysics(float dt, const World& world);
     void updateStuckResponse(float dt);
 

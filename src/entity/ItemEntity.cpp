@@ -1,5 +1,6 @@
 #include "entity/ItemEntity.hpp"
 #include "core/Config.hpp"
+#include "render/BBModel.hpp"
 #include "world/World.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -309,6 +310,18 @@ void ItemEntity::appendGeometry(std::vector<Vertex>& vertices, const World& worl
 
     const float light = sunSum / 15.0f;
     const float torchLight = torchSum / 15.0f;
+
+    const BBModel* bbModel = BBModelManager::instance().getItemModel(m_blockId);
+    if (!bbModel) {
+        bbModel = BBModelManager::instance().getBlockModel(m_blockId);
+    }
+
+    if (bbModel && bbModel->isValid()) {
+        const float itemScale = 0.022f; // Scale 16px model to ~0.35m
+        glm::mat4 centeredModel = glm::translate(model, glm::vec3(-8.0f * itemScale, -8.0f * itemScale, -8.0f * itemScale));
+        bbModel->appendGeometry(vertices, centeredModel, def.side, light, torchLight, 1.0f, itemScale);
+        return;
+    }
 
     if (isSolid(m_blockId)) {
         addItemBox(vertices, glm::vec3(0.0f), size, model, def.top, def.side, def.bottom, light, torchLight);

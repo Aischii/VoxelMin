@@ -910,6 +910,51 @@ void AudioEngine::precomputeSounds() {
         m_samples[static_cast<size_t>(SoundId::WaterFlow)].data = std::move(data);
     }
 
+    // SoundId::StepDampWool (Wet squelching footstep on damp wool)
+    {
+        const int n = static_cast<int>(0.28f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        std::mt19937 rng(606);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        float lp = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::sin((t / 0.28f) * PI) * std::exp(-t * 9.0f);
+            const float noise = dist(rng);
+            lp += (noise - lp) * 0.12f;
+            const float squelch = 0.35f * std::sin(2.0f * PI * (90.0f + 60.0f * std::sin(2.0f * PI * 14.0f * t)) * t);
+            data[i] = (lp * 0.5f + squelch) * env * 0.52f;
+        }
+        m_samples[static_cast<size_t>(SoundId::StepDampWool)].data = std::move(data);
+    }
+
+    // SoundId::PhantomFootstep (Distant muffled ominous corridor footstep)
+    {
+        const int n = static_cast<int>(0.40f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::exp(-t * 12.0f);
+            const float thud = 0.4f * std::sin(2.0f * PI * (65.0f - 20.0f * t) * t);
+            const float echo = 0.2f * std::sin(2.0f * PI * 55.0f * (t - 0.12f)) * (t > 0.12f ? std::exp(-(t - 0.12f) * 10.0f) : 0.0f);
+            data[i] = (thud + echo) * env * 0.45f;
+        }
+        m_samples[static_cast<size_t>(SoundId::PhantomFootstep)].data = std::move(data);
+    }
+
+    // SoundId::DistantClock (Slow metallic ominous ticking pulse)
+    {
+        const int n = static_cast<int>(0.25f * SAMPLE_RATE);
+        std::vector<float> data(n);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float env = std::exp(-t * 22.0f);
+            const float tick = std::sin(2.0f * PI * 1650.0f * t) * 0.6f + std::sin(2.0f * PI * 820.0f * t) * 0.4f;
+            data[i] = tick * env * 0.40f;
+        }
+        m_samples[static_cast<size_t>(SoundId::DistantClock)].data = std::move(data);
+    }
+
     // Ambient Wind Loop (10 seconds)
     {
         const int n = 10 * SAMPLE_RATE;
@@ -1032,39 +1077,31 @@ void AudioEngine::synthesizeGameMusic() {
 }
 
 void AudioEngine::synthesizeBackroomsMusic() {
-    // 32-second haunting, unsettling liminal horror ambient drone
+    // 32-second haunting 55 Hz sine + 110 Hz pulse drone synthesizer with resonant tension
     const int n = 32 * SAMPLE_RATE;
     m_backroomsMusicPcm.assign(n * 2, 0.0f);
 
     for (int i = 0; i < n; ++i) {
         const float t = static_cast<float>(i) / SAMPLE_RATE;
 
-        // 1. 60Hz Fluorescent Ballast Hum with harmonic saturation & electrical micro-jitter
-        const float humPhaseMod = 0.08f * std::sin(2.0f * PI * 7.3f * t);
-        const float hum60 = std::sin(2.0f * PI * 60.0f * t + humPhaseMod);
-        const float hum120 = 0.45f * std::sin(2.0f * PI * 120.0f * t);
-        const float hum180 = 0.25f * std::sin(2.0f * PI * 180.0f * t);
-        const float hum300 = 0.12f * std::sin(2.0f * PI * 300.0f * t);
-        const float ballastBuzz = (hum60 + hum120 + hum180 + hum300) * 0.16f;
+        // 1. Dual-Oscillator Drone: 55 Hz Sine + 110 Hz Pulse Wave
+        const float sub55 = std::sin(2.0f * PI * 55.0f * t);
+        const float pulse110 = (std::fmod(t * 110.0f, 1.0f) < 0.35f ? 1.0f : -1.0f) * 0.35f;
 
-        // 2. Unsettling Dissonant Minor 2nd & Tritone Drones (D#2 = 77.78Hz, A2 = 110.0Hz, C3 = 130.81Hz, F#3 = 185.0Hz)
-        const float drone1 = std::sin(2.0f * PI * 77.78f * t);
-        const float drone2 = std::sin(2.0f * PI * 110.00f * t);
-        const float drone3 = std::sin(2.0f * PI * 130.81f * t);
-        const float drone4 = 0.6f * std::sin(2.0f * PI * 185.00f * t);
-        const float swell = 0.5f + 0.5f * std::sin(2.0f * PI * (t / 16.0f));
-        const float eeriePad = (drone1 * 0.4f + drone2 * 0.35f + drone3 * 0.25f + drone4 * swell * 0.3f) * 0.14f;
+        // 2. 60Hz/120Hz Resonant Ballast Harmonics
+        const float ballast60 = 0.40f * std::sin(2.0f * PI * 60.0f * t + 0.05f * std::sin(2.0f * PI * 5.0f * t));
+        const float ballast120 = 0.20f * std::sin(2.0f * PI * 120.0f * t);
 
-        // 3. Phasing Metallic Liminal Resonance
-        const float phaseFreq = 220.0f + 18.0f * std::sin(2.0f * PI * 0.15f * t);
-        const float metallic = 0.08f * std::sin(2.0f * PI * phaseFreq * t) * (0.4f + 0.6f * std::cos(2.0f * PI * 0.08f * t));
+        // 3. Dissonant Tension Chords (D#2 77.78Hz, F#3 185.0Hz)
+        const float tension1 = 0.25f * std::sin(2.0f * PI * 77.78f * t);
+        const float tension2 = 0.15f * std::sin(2.0f * PI * 185.0f * t) * (0.5f + 0.5f * std::sin(2.0f * PI * (t / 16.0f)));
 
-        // 4. Subtle flyback resonance / fluorescent whine (12 kHz)
-        const float whine = 0.015f * std::sin(2.0f * PI * 12400.0f * t);
+        // 4. Subtle flyback resonance (12.4 kHz)
+        const float whine = 0.012f * std::sin(2.0f * PI * 12400.0f * t);
 
-        const float monoSignal = ballastBuzz + eeriePad + metallic + whine;
+        const float monoSignal = (sub55 * 0.5f + pulse110 * 0.4f + ballast60 + ballast120 + tension1 + tension2 + whine) * 0.22f;
 
-        // Subtle slow stereo panning drift
+        // Slow stereo drift
         const float panL = 0.5f + 0.3f * std::sin(2.0f * PI * (t / 11.0f));
         const float panR = 0.5f - 0.3f * std::sin(2.0f * PI * (t / 11.0f));
 

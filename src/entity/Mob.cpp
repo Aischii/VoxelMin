@@ -1,5 +1,6 @@
 #include "entity/Mob.hpp"
 #include "core/Config.hpp"
+#include "render/BBModel.hpp"
 #include "world/Block.hpp"
 #include "world/World.hpp"
 
@@ -108,7 +109,11 @@ void addOrientedBox(std::vector<Vertex>& vertices,
 
 Mob::Mob(MobType type, const glm::vec3& position, float yaw)
     : m_type(type), m_position(position), m_yaw(yaw), m_targetYaw(yaw) {
-    if (type == MobType::PigmanVillager) {
+    if (type == MobType::Archivist) {
+        m_health = 35;
+    } else if (type == MobType::WoolWeaver) {
+        m_health = 15;
+    } else if (type == MobType::PigmanVillager) {
         m_health = 20;
     } else if (type == MobType::Cow) {
         m_health = 15;
@@ -121,11 +126,15 @@ Mob::Mob(MobType type, const glm::vec3& position, float yaw)
 }
 
 float Mob::halfWidth() const {
+    if (m_type == MobType::Archivist) return 0.35f;
+    if (m_type == MobType::WoolWeaver) return 0.40f;
     if (m_type == MobType::PigmanVillager) return 0.35f;
     return (m_type == MobType::Pig) ? 0.35f : 0.42f;
 }
 
 float Mob::halfHeight() const {
+    if (m_type == MobType::Archivist) return 1.15f;
+    if (m_type == MobType::WoolWeaver) return 0.20f;
     if (m_type == MobType::PigmanVillager) return 0.95f;
     return (m_type == MobType::Pig) ? 0.45f : 0.70f;
 }
@@ -329,11 +338,149 @@ void Mob::updateStuckResponse(float dt) {
     m_blockedThisFrame = false;
 }
 
-void Mob::updateAI(float dt, const World& world, const glm::vec3& playerPos) {
+void Mob::updateAI(float dt, World& world, const glm::vec3& playerPos, const glm::vec3& playerCamFront) {
     m_stateTimer -= dt;
     updateForwardVector();
 
     const float distToPlayer = glm::distance(m_position, playerPos);
+
+    if (m_hurtTimer > 0.0f) {
+        m_hurtTimer -= dt;
+        if (m_hurtTimer < 0.0f) m_hurtTimer = 0.0f;
+    }
+
+    if (m_attackCooldown > 0.0f) {
+        m_attackCooldown -= dt;
+    }
+
+    // --- ARCHIVIST AI (Weeping Angel mechanic) ---
+    if (m_type == MobType::Archivist) {
+        const glm::vec3 toMob = (m_position + glm::vec3(0.0f, 1.2f, 0.0f)) - (playerPos + glm::vec3(0.0f, 1.62f, 0.0f));
+        const float dist = glm::length(toMob);
+        bool isObserved = false;
+        if (dist < 48.0f && dist > 0.1f) {
+            const glm::vec3 dirToMob = toMob / dist;
+            const float dot = glm::dot(dirToMob, playerCamFront);
+            if (dot > 0.25f) { // Within player FOV (~75 degrees)
+                // Raycast Line of Sight check
+                bool losClear = true;
+                const int steps = static_cast<int>(dist / 0.35f);
+                for (int s = 1; s < steps; ++s) {
+                    const glm::vec3 p = (playerPos + glm::vec3(0.0f, 1.62f, 0.0f)) + dirToMob * (static_cast<float>(s) * 0.35f);
+                    const int bx = static_cast<int>(std::floor(p.x));
+                    const int by = static_cast<int>(std::floor(p.y));
+                    const int bz = static_cast<int>(std::floor(p.z));
+                    if (isOpaque(world.getBlock(bx, by, bz))) {
+                        losClear = false;
+                        break;
+                    }
+                }
+                if (losClear) {
+                    isObserved = true;
+                }
+            }
+        }
+
+        const glm::vec3 toPlayer = playerPos - m_position;
+        if (isObserved) {
+            m_state = MobState::StalkFrozen;
+            m_moveSpeed = 0.0f;
+            m_velocity.x = 0.0f;
+            m_velocity.z = 0.0f;
+            if (glm::length(toPlayer) > 0.1f) {
+                m_targetYaw = glm::degrees(std::atan2(toPlayer.x, toPlayer.z));
+            }
+        } else {
+            // Unobserved: Shadow sprint towards player
+            m_state = MobState::ShadowSprint;
+            m_moveSpeed = 7.5f;
+            if (glm::length(toPlayer) > 0.1f) {
+                m_targetYaw = glm::degrees(std::atan2(toPlayer.x, toPlayer.z));
+            }
+            if (dist <= 1.5f && m_attackCooldown <= 0.0f) {
+                m_attackCooldown = 0.8f;
+            }
+        }
+
+        const float yawDiff = wrapAngle(m_targetYaw - m_yaw);
+        const float rotSpeed = kHostileTurnRate;
+        const float step = std::clamp(yawDiff, -rotSpeed * dt, rotSpeed * dt);
+        m_yaw = wrapAngle(m_yaw + step);
+        updateForwardVector();
+        return;
+    }
+
+    // --- WOOL WEAVER AI (Light Harvester & Scuttler) ---
+    if (m_type == MobType::WoolWeaver) {
+        if (m_state == MobState::RetreatShadows) {
+            m_moveSpeed = 4.0f;
+            if (m_stateTimer <= 0.0f) {
+                m_state = MobState::Wander;
+                m_stateTimer = randomFloat(3.0f, 6.0f);
+            }
+        } else {
+            // Find nearest light source within 24 blocks
+            const int mx = static_cast<int>(std::floor(m_position.x));
+            const int my = static_cast<int>(std::floor(m_position.y));
+            const int mz = static_cast<int>(std::floor(m_position.z));
+            glm::ivec3 nearestLight(0);
+            float bestDistSq = 24.0f * 24.0f;
+            bool foundLight = false;
+
+            for (int dy = -2; dy <= 4; ++dy) {
+                for (int dz = -16; dz <= 16; dz += 2) {
+                    for (int dx = -16; dx <= 16; dx += 2) {
+                        const int tx = mx + dx;
+                        const int ty = my + dy;
+                        const int tz = mz + dz;
+                        const BlockId b = world.getBlock(tx, ty, tz);
+                        if (isLightSource(b)) {
+                            const float dSq = static_cast<float>(dx * dx + dy * dy + dz * dz);
+                            if (dSq < bestDistSq) {
+                                bestDistSq = dSq;
+                                nearestLight = glm::ivec3(tx, ty, tz);
+                                foundLight = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (foundLight) {
+                m_state = MobState::SeekLight;
+                m_moveSpeed = 4.5f;
+                const glm::vec3 toLight = glm::vec3(nearestLight) + glm::vec3(0.5f) - m_position;
+                const float distToLight = glm::length(toLight);
+                m_targetYaw = glm::degrees(std::atan2(toLight.x, toLight.z));
+
+                if (distToLight < 1.4f) {
+                    // Extinguish light
+                    const BlockId b = world.getBlock(nearestLight.x, nearestLight.y, nearestLight.z);
+                    if (b == BlockId::ResonantLantern || b == BlockId::FluorescentLight) {
+                        world.setBlock(nearestLight.x, nearestLight.y, nearestLight.z, BlockId::ChiseledLimestone);
+                    } else {
+                        world.setBlock(nearestLight.x, nearestLight.y, nearestLight.z, BlockId::Air);
+                    }
+                    m_state = MobState::RetreatShadows;
+                    m_stateTimer = randomFloat(3.0f, 6.0f);
+                    m_targetYaw = wrapAngle(m_yaw + 180.0f + randomFloat(-30.0f, 30.0f));
+                }
+            } else {
+                if (m_state != MobState::Wander) {
+                    m_state = MobState::Wander;
+                    m_stateTimer = randomFloat(2.0f, 5.0f);
+                }
+                m_moveSpeed = 1.8f;
+            }
+        }
+
+        const float yawDiff = wrapAngle(m_targetYaw - m_yaw);
+        const float rotSpeed = kPanicTurnRate;
+        const float step = std::clamp(yawDiff, -rotSpeed * dt, rotSpeed * dt);
+        m_yaw = wrapAngle(m_yaw + step);
+        updateForwardVector();
+        return;
+    }
 
     // Look at player if within 6 blocks during idle
     if ((m_goals & AiLookAt) && m_state == MobState::Idle && distToPlayer < 6.0f) {
@@ -355,15 +502,6 @@ void Mob::updateAI(float dt, const World& world, const glm::vec3& playerPos) {
     const int headY = static_cast<int>(std::floor(m_position.y + halfHeight() * 2.0f - 0.1f));
     m_inWater = isLiquid(world.getBlock(bx, feetY, bz)) ||
                 isLiquid(world.getBlock(bx, headY, bz));
-
-    if (m_hurtTimer > 0.0f) {
-        m_hurtTimer -= dt;
-        if (m_hurtTimer < 0.0f) m_hurtTimer = 0.0f;
-    }
-
-    if (m_attackCooldown > 0.0f) {
-        m_attackCooldown -= dt;
-    }
 
     switch (m_state) {
         case MobState::Idle: {
@@ -482,12 +620,14 @@ void Mob::updateAI(float dt, const World& world, const glm::vec3& playerPos) {
             }
             break;
         }
+        default:
+            break;
     }
 
     // Smoothly rotate yaw toward targetYaw
     const float yawDiff = wrapAngle(m_targetYaw - m_yaw);
     float rotSpeed = kWanderTurnRate;
-    if (m_state == MobState::Hostile) rotSpeed = kHostileTurnRate;
+    if (m_state == MobState::Hostile || m_state == MobState::ShadowSprint) rotSpeed = kHostileTurnRate;
     else if (m_state == MobState::Panic) rotSpeed = kPanicTurnRate;
 
     const float step = std::clamp(yawDiff, -rotSpeed * dt, rotSpeed * dt);
@@ -558,12 +698,12 @@ void Mob::updatePhysics(float dt, const World& world) {
     }
 }
 
-void Mob::update(float dt, const World& world, const glm::vec3& playerPos) {
+void Mob::update(float dt, World& world, const glm::vec3& playerPos, const glm::vec3& playerCamFront) {
     if (m_hurtTimer > 0.0f) {
         m_hurtTimer -= dt;
     }
 
-    updateAI(dt, world, playerPos);
+    updateAI(dt, world, playerPos, playerCamFront);
     updatePhysics(dt, world);
     updateStuckResponse(dt);
 }
@@ -605,6 +745,89 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
     rootMat = glm::rotate(rootMat, glm::radians(m_yaw), glm::vec3(0, 1, 0));
 
     const float legSwing = (m_moveSpeed > 0.05f) ? std::sin(m_animTime) * 0.32f : 0.0f;
+    const float bipedSwing = (m_moveSpeed > 0.05f) ? std::sin(m_animTime) * 0.45f : 0.0f;
+    const float archivistSwing = (m_moveSpeed > 0.05f) ? std::sin(m_animTime) * 0.55f : 0.0f;
+    const float crawlerSwing = (m_moveSpeed > 0.05f) ? std::sin(m_animTime * 1.5f) * 0.45f : 0.0f;
+
+    // Check if 3D Blockbench model is available
+    const BBModel* bbModel = BBModelManager::instance().getMobModel(m_type);
+    if (bbModel && bbModel->isValid()) {
+        std::unordered_map<std::string, glm::mat4> boneTransforms;
+        TextureTile defaultTile = TextureTile::PigSkin;
+
+        if (m_type == MobType::Pig) {
+            defaultTile = TextureTile::PigSkin;
+            boneTransforms["head"] = glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(m_headYaw), glm::vec3(0, 1, 0)), glm::radians(m_headPitch), glm::vec3(1, 0, 0));
+            boneTransforms["fl_leg"] = glm::rotate(glm::mat4(1.0f), legSwing, glm::vec3(1, 0, 0));
+            boneTransforms["fr_leg"] = glm::rotate(glm::mat4(1.0f), -legSwing, glm::vec3(1, 0, 0));
+            boneTransforms["bl_leg"] = glm::rotate(glm::mat4(1.0f), -legSwing, glm::vec3(1, 0, 0));
+            boneTransforms["br_leg"] = glm::rotate(glm::mat4(1.0f), legSwing, glm::vec3(1, 0, 0));
+        } else if (m_type == MobType::Cow) {
+            defaultTile = TextureTile::CowSkin;
+            boneTransforms["head"] = glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(m_headYaw), glm::vec3(0, 1, 0)), glm::radians(m_headPitch), glm::vec3(1, 0, 0));
+            boneTransforms["fl_leg"] = glm::rotate(glm::mat4(1.0f), legSwing, glm::vec3(1, 0, 0));
+            boneTransforms["fr_leg"] = glm::rotate(glm::mat4(1.0f), -legSwing, glm::vec3(1, 0, 0));
+            boneTransforms["bl_leg"] = glm::rotate(glm::mat4(1.0f), -legSwing, glm::vec3(1, 0, 0));
+            boneTransforms["br_leg"] = glm::rotate(glm::mat4(1.0f), legSwing, glm::vec3(1, 0, 0));
+        } else if (m_type == MobType::PigmanVillager) {
+            defaultTile = TextureTile::PigmanSkin;
+            float leftArmRot = -bipedSwing;
+            float rightArmRot = bipedSwing;
+            if (m_state == MobState::Hostile) {
+                leftArmRot = -1.25f + std::sin(m_animTime * 2.0f) * 0.15f;
+                rightArmRot = -1.25f - std::sin(m_animTime * 2.0f) * 0.15f;
+            }
+            boneTransforms["head"] = glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(m_headYaw), glm::vec3(0, 1, 0)), glm::radians(m_headPitch), glm::vec3(1, 0, 0));
+            boneTransforms["left_arm"] = glm::rotate(glm::mat4(1.0f), leftArmRot, glm::vec3(1, 0, 0));
+            boneTransforms["right_arm"] = glm::rotate(glm::mat4(1.0f), rightArmRot, glm::vec3(1, 0, 0));
+            boneTransforms["left_leg"] = glm::rotate(glm::mat4(1.0f), bipedSwing, glm::vec3(1, 0, 0));
+            boneTransforms["right_leg"] = glm::rotate(glm::mat4(1.0f), -bipedSwing, glm::vec3(1, 0, 0));
+        } else if (m_type == MobType::Archivist) {
+            defaultTile = TextureTile::ArchivistSkin;
+            std::string animName = "stalk_idle";
+            if (m_state == MobState::ShadowSprint) {
+                animName = "shadow_sprint";
+            } else if (m_state == MobState::StalkFrozen) {
+                animName = "stalk_frozen";
+            } else if (m_moveSpeed > 0.05f) {
+                animName = "walk";
+            }
+
+            const BBAnimation* anim = bbModel->findAnimation(animName);
+            if (anim) {
+                anim->sample(m_animTime, boneTransforms);
+            } else {
+                float leftArmRot = -archivistSwing;
+                float rightArmRot = archivistSwing;
+                if (m_state == MobState::ShadowSprint) {
+                    leftArmRot = -1.45f + std::sin(m_animTime * 2.5f) * 0.20f;
+                    rightArmRot = -1.45f - std::sin(m_animTime * 2.5f) * 0.20f;
+                } else if (m_state == MobState::StalkFrozen) {
+                    leftArmRot = 0.15f;
+                    rightArmRot = -0.15f;
+                }
+                boneTransforms["left_arm"] = glm::rotate(glm::mat4(1.0f), leftArmRot, glm::vec3(1, 0, 0));
+                boneTransforms["right_arm"] = glm::rotate(glm::mat4(1.0f), rightArmRot, glm::vec3(1, 0, 0));
+                boneTransforms["left_leg"] = glm::rotate(glm::mat4(1.0f), archivistSwing, glm::vec3(1, 0, 0));
+                boneTransforms["right_leg"] = glm::rotate(glm::mat4(1.0f), -archivistSwing, glm::vec3(1, 0, 0));
+            }
+
+            // Head tracking look overlay
+            glm::mat4 headLook = glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(m_headYaw), glm::vec3(0, 1, 0)), glm::radians(m_headPitch), glm::vec3(1, 0, 0));
+            boneTransforms["head"] = headLook * boneTransforms["head"];
+        } else if (m_type == MobType::WoolWeaver) {
+            defaultTile = TextureTile::DampOchreWool;
+            boneTransforms["left_leg_1"] = glm::rotate(glm::mat4(1.0f), crawlerSwing, glm::vec3(1, 0, 0));
+            boneTransforms["right_leg_1"] = glm::rotate(glm::mat4(1.0f), -crawlerSwing, glm::vec3(1, 0, 0));
+            boneTransforms["left_leg_2"] = glm::rotate(glm::mat4(1.0f), -crawlerSwing, glm::vec3(1, 0, 0));
+            boneTransforms["right_leg_2"] = glm::rotate(glm::mat4(1.0f), crawlerSwing, glm::vec3(1, 0, 0));
+            boneTransforms["left_leg_3"] = glm::rotate(glm::mat4(1.0f), crawlerSwing, glm::vec3(1, 0, 0));
+            boneTransforms["right_leg_3"] = glm::rotate(glm::mat4(1.0f), -crawlerSwing, glm::vec3(1, 0, 0));
+        }
+
+        bbModel->appendAnimatedGeometry(vertices, rootMat, boneTransforms, defaultTile, light, torchLight, ao);
+        return;
+    }
 
     if (m_type == MobType::Pig) {
         // --- PIG MODEL ---
@@ -761,6 +984,99 @@ void Mob::appendGeometry(std::vector<Vertex>& vertices, const World& world) cons
         rLegMat = glm::rotate(rLegMat, -bipedSwing, glm::vec3(1, 0, 0));
         addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, rLegMat,
                        skin, hoofTile, hoofTile, hoofTile, light, torchLight, ao);
+    } else if (m_type == MobType::Archivist) {
+        // --- ARCHIVIST MODEL (Elongated Humanoid / Weeping Entity) ---
+        const TextureTile skin = TextureTile::ArchivistSkin;
+        const TextureTile face = TextureTile::ArchivistFace;
+        const TextureTile torsoTile = TextureTile::ArchivistTorso;
+
+        const float bipedSwing = (m_moveSpeed > 0.05f) ? std::sin(m_animTime) * 0.55f : 0.0f;
+
+        // 1. Torso: 0.38w x 0.62h x 0.20l (Center Y = 1.25, spans [0.94, 1.56])
+        addOrientedBox(vertices, {0.0f, 1.25f, 0.0f}, {0.38f, 0.62f, 0.20f}, rootMat,
+                       skin, torsoTile, skin, torsoTile, light, torchLight, ao);
+
+        // 2. Head with head yaw/pitch: 0.44w x 0.44h x 0.44l (Neck at Y = 1.56, Center Y = 1.78)
+        glm::mat4 headMat = glm::translate(rootMat, glm::vec3(0.0f, 1.56f, 0.0f));
+        headMat = glm::rotate(headMat, glm::radians(m_headYaw), glm::vec3(0, 1, 0));
+        headMat = glm::rotate(headMat, glm::radians(m_headPitch), glm::vec3(1, 0, 0));
+
+        addOrientedBox(vertices, {0.0f, 0.22f, 0.0f}, {0.44f, 0.44f, 0.44f}, headMat,
+                       skin, skin, skin, face, light, torchLight, ao);
+
+        // 3. Elongated Arms (1.4x length, thin): 0.16w x 0.95h x 0.16l (Shoulder pivot at Y = 1.56, X = ±0.27)
+        const float armW = 0.16f;
+        const float armH = 0.95f;
+        const float armD = 0.16f;
+
+        float leftArmRot = -bipedSwing;
+        float rightArmRot = bipedSwing;
+        if (m_state == MobState::ShadowSprint) {
+            // Predator sprint reach
+            leftArmRot = -1.45f + std::sin(m_animTime * 2.5f) * 0.20f;
+            rightArmRot = -1.45f - std::sin(m_animTime * 2.5f) * 0.20f;
+        } else if (m_state == MobState::StalkFrozen) {
+            leftArmRot = 0.15f;
+            rightArmRot = -0.15f;
+        }
+
+        // Left Arm
+        glm::mat4 lArmMat = glm::translate(rootMat, glm::vec3(-0.27f, 1.56f, 0.0f));
+        lArmMat = glm::rotate(lArmMat, leftArmRot, glm::vec3(1, 0, 0));
+        addOrientedBox(vertices, {0.0f, -armH * 0.5f, 0.0f}, {armW, armH, armD}, lArmMat,
+                       skin, skin, skin, skin, light, torchLight, ao);
+
+        // Right Arm
+        glm::mat4 rArmMat = glm::translate(rootMat, glm::vec3(0.27f, 1.56f, 0.0f));
+        rArmMat = glm::rotate(rArmMat, rightArmRot, glm::vec3(1, 0, 0));
+        addOrientedBox(vertices, {0.0f, -armH * 0.5f, 0.0f}, {armW, armH, armD}, rArmMat,
+                       skin, skin, skin, skin, light, torchLight, ao);
+
+        // 4. Elongated Legs (1.4x length, thin): 0.16w x 0.95h x 0.16l (Hip pivot at Y = 0.95, X = ±0.10)
+        const float legW = 0.16f;
+        const float legH = 0.95f;
+        const float legD = 0.16f;
+
+        // Left Leg
+        glm::mat4 lLegMat = glm::translate(rootMat, glm::vec3(-0.10f, legH, 0.0f));
+        lLegMat = glm::rotate(lLegMat, bipedSwing, glm::vec3(1, 0, 0));
+        addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, lLegMat,
+                       skin, skin, skin, skin, light, torchLight, ao);
+
+        // Right Leg
+        glm::mat4 rLegMat = glm::translate(rootMat, glm::vec3(0.10f, legH, 0.0f));
+        rLegMat = glm::rotate(rLegMat, -bipedSwing, glm::vec3(1, 0, 0));
+        addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, rLegMat,
+                       skin, skin, skin, skin, light, torchLight, ao);
+    } else if (m_type == MobType::WoolWeaver) {
+        // --- WOOL WEAVER MODEL (Low-Profile 6-Legged Crawler) ---
+        const TextureTile skin = TextureTile::DampOchreWool;
+
+        // 1. Low flat carapace body: 0.58w x 0.22h x 0.72l (Center Y = 0.20)
+        addOrientedBox(vertices, {0.0f, 0.20f, 0.0f}, {0.58f, 0.22f, 0.72f}, rootMat,
+                       skin, skin, skin, skin, light, torchLight, ao);
+
+        // 2. 6 Crawler Legs (3 per side)
+        const float legW = 0.08f;
+        const float legH = 0.22f;
+        const float legD = 0.08f;
+        const float crawlerSwing = (m_moveSpeed > 0.05f) ? std::sin(m_animTime * 1.5f) * 0.45f : 0.0f;
+
+        const struct { float x, z, swing; } weaverLegs[6] = {
+            { -0.29f,  0.22f,  crawlerSwing },
+            {  0.29f,  0.22f, -crawlerSwing },
+            { -0.29f,  0.00f, -crawlerSwing },
+            {  0.29f,  0.00f,  crawlerSwing },
+            { -0.29f, -0.22f,  crawlerSwing },
+            {  0.29f, -0.22f, -crawlerSwing },
+        };
+
+        for (const auto& wleg : weaverLegs) {
+            glm::mat4 legMat = glm::translate(rootMat, glm::vec3(wleg.x, legH, wleg.z));
+            legMat = glm::rotate(legMat, wleg.swing, glm::vec3(1, 0, 0));
+            addOrientedBox(vertices, {0.0f, -legH * 0.5f, 0.0f}, {legW, legH, legD}, legMat,
+                           skin, skin, skin, skin, light, torchLight, ao);
+        }
     }
 }
 

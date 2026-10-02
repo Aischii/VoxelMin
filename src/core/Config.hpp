@@ -27,8 +27,8 @@ inline constexpr int CHUNK_SIZE_Z = 16;
 inline constexpr int WORLD_CHUNKS_X = 32;
 inline constexpr int WORLD_CHUNKS_Z = 32;
 
-// Texture atlas layout: 16x16 tiles of 16x16 pixels = 256x256.
-inline constexpr int ATLAS_TILES  = 16;
+// Texture atlas layout: 32x32 tiles of 16x16 pixels = 512x512.
+inline constexpr int ATLAS_TILES  = 32;
 inline constexpr int TILE_PIXELS  = 16;
 inline constexpr int ATLAS_PIXELS = ATLAS_TILES * TILE_PIXELS;
 

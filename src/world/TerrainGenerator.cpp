@@ -213,6 +213,35 @@ float TerrainGenerator::sampleTerrainHeight(float wx, float wz, uint32_t seed, W
     return std::clamp(rawH, 1.0f, static_cast<float>(Chunk::H - 4));
 }
 
+std::string TerrainGenerator::getBiomeName(const glm::vec3& pos, uint32_t seed, WorldType type) {
+    if (type == WorldType::Flat) return "Superflat Plains";
+    if (type == WorldType::Mountainous) return "Craggy Mountains";
+    if (type == WorldType::Cavernous) return "Cavernous Hollows";
+    if (type == WorldType::Island) return "Tropical Island";
+
+    const float cont = sampleContinentalness(pos.x, pos.z, seed);
+    if (cont >= 0.30f) {
+        const float riverVal = sampleRiver(pos.x, pos.z, seed);
+        if (riverVal < 0.024f) {
+            return "River";
+        }
+    }
+
+    if (cont < 0.15f) return "Deep Ocean";
+    if (cont < 0.30f) return "Ocean";
+    if (cont < 0.38f) return "Sandy Beach";
+    if (cont < 0.62f) {
+        const float roll = hash2(static_cast<int>(std::floor(pos.x / 16.0f)),
+                                 static_cast<int>(std::floor(pos.z / 16.0f)),
+                                 seed + 1337);
+        if (roll < 0.35f) return "Oak Forest";
+        if (roll < 0.65f) return "Plains";
+        return "Birch Forest";
+    }
+    if (cont < 0.76f) return "Taiga Highlands";
+    return "Alpine Peaks";
+}
+
 void TerrainGenerator::plantTreeInChunk(Chunk& chunk, int originX, int originZ, int x, int groundY, int z, float cont) const {
     const float styleRoll = hash2(x, z, m_seed + 1337);
     const float varRoll = hash2(x, z, m_seed + 9821);

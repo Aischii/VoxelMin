@@ -28,6 +28,9 @@ enum class SoundId {
     PlayerBurp,
     WaterSplash,
     WaterFlow,
+    StepDampWool,
+    PhantomFootstep,
+    DistantClock,
     Count
 };
 

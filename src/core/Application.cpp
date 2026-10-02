@@ -1,5 +1,6 @@
 #include "core/Application.hpp"
 #include "core/Log.hpp"
+#include "render/BBModel.hpp"
 #include "world/BackroomsGenerator.hpp"
 #include "world/Block.hpp"
 #include "world/Chunk.hpp"
@@ -107,6 +108,7 @@ bool Application::init() {
         return false;
     }
     m_audioEngine.init();
+    BBModelManager::instance().init();
 
     log::info("VoxelMin v%s starting...", config::VERSION);
     log::info("Generating lightweight panorama world for main menu...");
@@ -202,12 +204,47 @@ void Application::run() {
 
         m_player.setHeldItem(m_hotbar[m_selectedSlot].id);
 
-        if (m_bannerTimer > 0.0f) {
-            m_bannerTimer -= dt;
-            if (m_bannerTimer < 0.0f) m_bannerTimer = 0.0f;
+        // Explorer's Title Banner timeline state machine
+        if (m_bannerState != BannerState::Hidden) {
+            m_bannerTimeline += dt;
+            if (m_bannerState == BannerState::FadeIn) {
+                if (m_bannerTimeline >= 0.5f) {
+                    m_bannerState = BannerState::Hold;
+                }
+            } else if (m_bannerState == BannerState::Hold) {
+                if (m_bannerTimeline >= 3.0f) { // 0.5s fade-in + 2.5s hold
+                    m_bannerState = BannerState::FadeOut;
+                }
+            } else if (m_bannerState == BannerState::FadeOut) {
+                if (m_bannerTimeline >= 3.8f) { // 3.0s + 0.8s fade-out
+                    m_bannerState = BannerState::Hidden;
+                }
+            }
         }
 
         if (m_state == GameState::Playing) {
+            // Biome Debounce & Explorer's Title Trigger (3.0s stay hysteresis)
+            const std::string sampledBiome = (m_world.currentDimension() == DimensionId::Backrooms)
+                                             ? "The Ochre Annex"
+                                             : TerrainGenerator::getBiomeName(m_player.position(), m_activeWorldSeed, m_activeWorldType);
+            if (sampledBiome != m_lastAnnouncedBiome) {
+                if (sampledBiome != m_pendingBiome) {
+                    m_pendingBiome = sampledBiome;
+                    m_biomeStayTimer = 0.0f;
+                } else {
+                    m_biomeStayTimer += dt;
+                    if (m_biomeStayTimer >= 3.0f) {
+                        const DimensionInfo dim = getDimensionInfo(m_world.currentDimension());
+                        const glm::vec3 col = getDimensionTitleColor(m_world.currentDimension());
+                        showTitleBanner(dim.title, sampledBiome, col);
+                        m_lastAnnouncedBiome = sampledBiome;
+                    }
+                }
+            } else {
+                m_pendingBiome = sampledBiome;
+                m_biomeStayTimer = 0.0f;
+            }
+
             for (auto& msg : m_chatLog) {
                 if (msg.timeRemaining > 0.0f) {
                     msg.timeRemaining -= static_cast<float>(dt);
@@ -218,7 +255,7 @@ void Application::run() {
             if (m_chatOpen) {
                 handleChatInput();
                 m_player.update(dt, m_input, m_world, &m_audioEngine);
-                m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+                m_entityManager.update(dt, m_world, m_player.position(), m_player.camera().front(), [this](BlockId id, int count) {
                     if (addItem(id, count)) {
                         m_audioEngine.play(SoundId::ItemPickup, 0.9f);
                         return true;
@@ -261,7 +298,7 @@ void Application::run() {
                 m_world.updateStreaming(m_player.position(), m_viewDistanceChunks, m_activeWorldType);
                 handlePlayInput();
                 m_player.update(dt, m_input, m_world, &m_audioEngine);
-                m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+                m_entityManager.update(dt, m_world, m_player.position(), m_player.camera().front(), [this](BlockId id, int count) {
                     if (addItem(id, count)) {
                         m_audioEngine.play(SoundId::ItemPickup, 0.9f);
                         return true;
@@ -297,6 +334,22 @@ void Application::run() {
                         }
                     }
                 }
+
+                // Auditory Paranoia Scheduler (The Ochre Annex)
+                if (m_world.currentDimension() == DimensionId::Backrooms) {
+                    m_paranoiaTimer -= dt;
+                    if (m_paranoiaTimer <= 0.0f) {
+                        m_paranoiaTimer = 45.0f + static_cast<float>(std::rand() % 45);
+                        const float angle = static_cast<float>(std::rand() % 360);
+                        const float rad = glm::radians(angle);
+                        const float dist = 8.0f + static_cast<float>(std::rand() % 7);
+                        const glm::vec3 pPos = m_player.position();
+                        const glm::vec3 soundPos = pPos + glm::vec3(std::cos(rad) * dist, 0.0f, std::sin(rad) * dist);
+                        const SoundId paranoiaSnd = (std::rand() % 2 == 0) ? SoundId::PhantomFootstep : SoundId::DistantClock;
+                        m_audioEngine.play3D(paranoiaSnd, soundPos, m_player.camera().position(), m_player.camera().front(), 0.75f, &m_world);
+                    }
+                }
+
                 updateInteraction(dt);
 
                 if (m_player.isDead()) {
@@ -312,7 +365,7 @@ void Application::run() {
             // Keep the world simulating behind the death screen instead of
             // freezing: mobs wander, items bob, particles drift. takeDamage
             // early-returns while m_isDead, so mobs cannot finish the kill.
-            m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+            m_entityManager.update(dt, m_world, m_player.position(), m_player.camera().front(), [this](BlockId id, int count) {
                 if (addItem(id, count)) {
                     m_audioEngine.play(SoundId::ItemPickup, 0.9f);
                     return true;
@@ -325,7 +378,7 @@ void Application::run() {
         } else if (m_state == GameState::Inventory) {
             handleInventoryInput();
             m_player.update(dt, m_input, m_world, &m_audioEngine);
-            m_entityManager.update(dt, m_world, m_player.position(), [this](BlockId id, int count) {
+            m_entityManager.update(dt, m_world, m_player.position(), m_player.camera().front(), [this](BlockId id, int count) {
                 if (addItem(id, count)) {
                     m_audioEngine.play(SoundId::ItemPickup, 0.9f);
                     return true;
@@ -966,7 +1019,14 @@ void Application::startNewWorld(const std::string& name, uint32_t seed, WorldTyp
     m_state = GameState::Playing;
     setCursorCaptured(true);
     const DimensionInfo dimInfo = getDimensionInfo(m_world.currentDimension());
-    showTitleBanner(dimInfo.title, dimInfo.subtitle, 4.5f);
+    const glm::vec3 titleCol = getDimensionTitleColor(m_world.currentDimension());
+    const std::string initialBiome = (m_world.currentDimension() == DimensionId::Backrooms)
+                                     ? "The Ochre Annex"
+                                     : TerrainGenerator::getBiomeName(m_player.position(), m_activeWorldSeed, m_activeWorldType);
+    m_lastAnnouncedBiome = initialBiome;
+    m_pendingBiome = initialBiome;
+    m_biomeStayTimer = 0.0f;
+    showTitleBanner(dimInfo.title, initialBiome, titleCol);
 }
 
 void Application::loadWorld(const std::string& path) {
@@ -1033,15 +1093,23 @@ void Application::loadWorld(const std::string& path) {
         m_state = GameState::Playing;
         setCursorCaptured(true);
         const DimensionInfo dimInfo = getDimensionInfo(m_world.currentDimension());
-        showTitleBanner(dimInfo.title, dimInfo.subtitle, 4.5f);
+        const glm::vec3 titleCol = getDimensionTitleColor(m_world.currentDimension());
+        const std::string initialBiome = (m_world.currentDimension() == DimensionId::Backrooms)
+                                         ? "The Ochre Annex"
+                                         : TerrainGenerator::getBiomeName(m_player.position(), m_activeWorldSeed, m_activeWorldType);
+        m_lastAnnouncedBiome = initialBiome;
+        m_pendingBiome = initialBiome;
+        m_biomeStayTimer = 0.0f;
+        showTitleBanner(dimInfo.title, initialBiome, titleCol);
     }
 }
 
-void Application::showTitleBanner(const std::string& title, const std::string& subtitle, float duration) {
-    m_bannerTitle = title;
-    m_bannerSubtitle = subtitle;
-    m_bannerTimer = duration;
-    m_bannerDuration = duration;
+void Application::showTitleBanner(const std::string& title, const std::string& subtitle, const glm::vec3& color) {
+    m_activeBannerMain = title;
+    m_activeBannerSub = subtitle;
+    m_activeBannerColor = color;
+    m_bannerTimeline = 0.0f;
+    m_bannerState = BannerState::FadeIn;
 }
 
 glm::vec3 Application::findSafeOverworldReturn(const glm::vec3& nearPos) {
@@ -1096,7 +1164,7 @@ void Application::switchDimension(DimensionId targetDim, const glm::vec3& target
 
     if (targetDim == DimensionId::Backrooms) {
         spawnPos = BackroomsGenerator(m_world.seed()).findSafeSpawn(m_world, static_cast<int>(std::floor(targetPos.x)), static_cast<int>(std::floor(targetPos.z)));
-        m_entityManager.clearMobs();
+        m_entityManager.spawnDefaults(m_world, m_activeWorldSeed);
         m_audioEngine.setInBackrooms(true);
     } else {
         spawnPos = findSafeOverworldReturn(targetPos);
@@ -1108,7 +1176,14 @@ void Application::switchDimension(DimensionId targetDim, const glm::vec3& target
     m_player.setFlying(false);
 
     const DimensionInfo info = getDimensionInfo(targetDim);
-    showTitleBanner(info.title, info.subtitle, 4.5f);
+    const glm::vec3 titleCol = getDimensionTitleColor(targetDim);
+    const std::string initialBiome = (targetDim == DimensionId::Backrooms)
+                                     ? "The Ochre Annex"
+                                     : TerrainGenerator::getBiomeName(spawnPos, m_activeWorldSeed, m_activeWorldType);
+    m_lastAnnouncedBiome = initialBiome;
+    m_pendingBiome = initialBiome;
+    m_biomeStayTimer = 0.0f;
+    showTitleBanner(info.title, initialBiome, titleCol);
     m_audioEngine.play(SoundId::ItemPickup, 1.0f, 0.6f);
 }
 
@@ -3103,7 +3178,28 @@ void Application::updateInteraction(float dt) {
         }
     }
 
-    // 4. Block Placement
+    // 4.5. Spawn Mob Egg (right-click to spawn entity)
+    if (m_input.cursorCaptured() && m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT) && !held.empty() && isSpawnEgg(held.id)) {
+        m_player.triggerSwing();
+        const MobType type = spawnEggMobType(held.id);
+        glm::vec3 spawnPos;
+        if (m_target.hit) {
+            spawnPos = glm::vec3(m_target.block + m_target.normal) + glm::vec3(0.5f, 0.0f, 0.5f);
+        } else {
+            spawnPos = camera.position() + camera.front() * 2.5f;
+        }
+        m_entityManager.addMob(std::make_unique<Mob>(type, spawnPos));
+        m_audioEngine.play3D(SoundId::ItemPickup, spawnPos, camera.position(), camera.front(), 1.0f, &m_world);
+        if (!m_creativeMode) {
+            held.count--;
+            if (held.count <= 0) held.clear();
+        }
+        m_isMining = false;
+        m_miningProgress = 0.0f;
+        return;
+    }
+
+    // 5. Block Placement
     if (m_input.mousePressed(GLFW_MOUSE_BUTTON_RIGHT) && m_target.hit) {
         m_player.triggerSwing();
         if (!held.empty() && isPlaceable(held.id)) {
@@ -3265,7 +3361,7 @@ float Application::computeUiScale() const {
     const float height = static_cast<float>(m_fbHeight);
     const float width = static_cast<float>(m_fbWidth);
     const float metric = std::min(height, width * 0.6f);
-    long scale = std::lround(metric / 280.0f);
+    long scale = std::lround(metric / 360.0f);
     scale = std::clamp<long>(scale, 1, 8);
     return static_cast<float>(scale);
 }
@@ -3545,18 +3641,29 @@ void Application::renderScene() {
                            m_player.health(), m_player.maxHealth(),
                            m_player.hunger(), m_player.maxHunger(),
                            m_player.oxygen(), m_player.maxOxygen(),
+                           m_player.xp(), m_player.neededXp(), m_player.level(),
                            m_player.isInWater(), m_player.hurtTimer(),
-                           static_cast<float>(m_uiTime), m_creativeMode);
+                           static_cast<float>(m_uiTime), m_creativeMode,
+                           m_player.levelUpTimer());
 
-        if (m_bannerTimer > 0.0f) {
+        if (m_bannerState != BannerState::Hidden) {
             float alpha = 1.0f;
-            const float elapsed = m_bannerDuration - m_bannerTimer;
-            if (elapsed < 0.8f) {
-                alpha = elapsed / 0.8f;
-            } else if (m_bannerTimer < 0.8f) {
-                alpha = m_bannerTimer / 0.8f;
+            float yOffset = 0.0f;
+            const float s = computeUiScale();
+            if (m_bannerState == BannerState::FadeIn) {
+                const float t = std::clamp(m_bannerTimeline / 0.5f, 0.0f, 1.0f);
+                alpha = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); // cubic ease-out
+                yOffset = (1.0f - alpha) * -4.0f * s;                 // moves upward by 4px
+            } else if (m_bannerState == BannerState::Hold) {
+                alpha = 1.0f;
+                yOffset = 0.0f;
+            } else if (m_bannerState == BannerState::FadeOut) {
+                const float t = std::clamp((m_bannerTimeline - 3.0f) / 0.8f, 0.0f, 1.0f);
+                alpha = 1.0f - t;
+                yOffset = 0.0f;
             }
-            m_renderer.drawTitleBanner(m_bannerTitle, m_bannerSubtitle, std::clamp(alpha, 0.0f, 1.0f), static_cast<float>(m_uiTime));
+            m_renderer.drawTitleBanner(m_activeBannerMain, m_activeBannerSub, m_activeBannerColor,
+                                       std::clamp(alpha, 0.0f, 1.0f), static_cast<float>(m_uiTime), yOffset);
         }
 
         m_renderer.drawChat(m_chatLog, m_chatOpen, m_chatInput, m_chatCursor,

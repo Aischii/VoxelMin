@@ -83,9 +83,9 @@ void main() {
     float fog = clamp((dist - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
     color = mix(color, uFogColor, fog);
 
-    // Backrooms Liminal Horror Analog Noise & Voltage Flicker
+    // Ochre Annex (Level 0) Horror Analog Atmosphere, Regional Brownouts & Voltage Flicker
     if (uIsBackrooms > 0.5) {
-        // 1. High-frequency analog film grain
+        // 1. High-frequency analog grain
         float grain = fract(sin(dot(gl_FragCoord.xy + vec2(uTime * 140.0, uTime * 83.0), vec2(12.9898, 78.233))) * 43758.5453);
         color += (grain - 0.5) * 0.055;
 
@@ -93,12 +93,17 @@ void main() {
         float scanline = sin(gl_FragCoord.y * 1.8 + uTime * 12.0) * 0.025;
         color -= scanline;
 
-        // 3. Fluorescent ballast micro-voltage flicker
-        float flicker = 1.0 - 0.05 * step(0.965, fract(sin(floor(uTime * 20.0) * 23.41) * 4375.85));
+        // 3. Resonant Lantern regional brownouts (spatial low-frequency wave dips)
+        float brownoutWave = sin(uTime * 0.35 + vWorldPos.x * 0.08 + vWorldPos.z * 0.08);
+        float brownout = 1.0 - 0.30 * smoothstep(0.65, 0.95, brownoutWave);
+        color *= brownout;
+
+        // 4. Resonant Lantern micro-voltage ballast flicker
+        float flicker = 1.0 - 0.08 * step(0.96, fract(sin(floor(uTime * 24.0) * 23.41 + vWorldPos.x * 0.1) * 4375.85));
         color *= flicker;
 
-        // 4. Damp yellowish-green liminal grading
-        color = mix(color, color * vec3(1.08, 1.04, 0.82), 0.40);
+        // 5. Damp ochre / amber liminal color grading
+        color = mix(color, color * vec3(1.10, 1.02, 0.78), 0.45);
     }
 
     FragColor = vec4(color, texel.a);
