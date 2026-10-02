@@ -71,15 +71,16 @@ Ordered milestones. Each is a coherent, shippable increment. Update
 ---
 
 ## v1.M4 -- Sub-Chunk Architecture, MoreCulling Occlusion & Worker Pool
-*Inspired by [Sodium](https://github.com/CaffeineMC/sodium), [MoreCulling](https://github.com/fxmorin/MoreCulling), and [memoryLeakFix](https://github.com/fxmorin/memoryLeakFix)*
+*Inspired by [Sodium](https://github.com/CaffeineMC/sodium), [LearnOpenGL Scene Culling](https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling), [MoreCulling](https://github.com/fxmorin/MoreCulling), and [memoryLeakFix](https://github.com/fxmorin/memoryLeakFix)*
 
-- **Vertical 16x16x16 Sub-Chunks (`ChunkSection`)**:
+- **Vertical 16x16x16 Sub-Chunks (`ChunkSection`) & Sub-Chunk Frustum Culling**:
   - Subdividing vertical chunk columns into $16\times 16\times 16$ sections.
   - Empty air sections consume 0 GPU buffer memory and skip draw calls entirely.
+  - Sub-chunk AABB center-extents frustum culling against 6 normalized clipping planes.
   - Block modifications re-mesh only the affected $16\times 16\times 16$ section ($5\times$ faster updates), allowing world height expansion to $Y=256$.
-- **MoreCulling Block-Level & Entity Occlusion**:
+- **MoreCulling Block-Level & Entity Frustum Occlusion**:
   - Block-face culling across semi-transparent blocks (leaves/glass/fences).
-  - Entity AABB depth-frustum culling avoiding draws for mobs completely occluded behind terrain hills/caves.
+  - Entity AABB depth-frustum and bounding sphere culling avoiding CPU mesh generation and GPU draw calls for out-of-view mobs and items.
 - **Multi-Threaded Worker Pool**:
   - Background worker threads generating noise topography and computing greedy mesh quads off the main thread.
   - Main thread performs only sub-millisecond GPU vertex buffer uploads for stutter-free traversal at 16+ chunk render distance.

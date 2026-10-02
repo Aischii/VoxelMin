@@ -8,6 +8,7 @@
 namespace vox {
 
 class World;
+class Frustum;
 
 class EntityManager {
 public:
@@ -24,7 +25,7 @@ public:
                 const std::function<void(float, const glm::vec3&)>& onPlayerDamage = nullptr);
     Mob* hitTest(const glm::vec3& rayOrigin, const glm::vec3& rayDir, float maxDist);
     void alertNearbyPigmen(const glm::vec3& position, float radius = 14.0f);
-    void buildMesh(std::vector<Vertex>& outVertices, const World& world) const;
+    void buildMesh(std::vector<Vertex>& outVertices, const World& world, const Frustum* frustum = nullptr) const;
 
     const std::vector<std::unique_ptr<Mob>>& mobs() const { return m_mobs; }
     std::vector<std::unique_ptr<Mob>>& mobs() { return m_mobs; }

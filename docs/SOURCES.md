@@ -211,11 +211,25 @@ These are the published algorithms the voxel code implements:
 
 ---
 
-## 19. Core Libraries
+## 19. LearnOpenGL & Scene Frustum Culling Optimization
+- **Tutorial & Guide**: [https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling](https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling)
+- **Author**: Assimp / Joey de Vries / LearnOpenGL Community
+- **Reference Material**: [https://en.wikipedia.org/wiki/Frustum](https://en.wikipedia.org/wiki/Frustum)
+- **Video Reference**: [https://youtu.be/wv3KwDDsEgI?](https://youtu.be/wv3KwDDsEgI?)
+- **Domain**: High-performance view frustum culling using normalized clipping planes and geometric AABB/Sphere intersection tests.
+- **Key Concepts & Implementations in VoxelMin**:
+  - **6-Plane Normalized Extraction**: Extracting and normalizing Left, Right, Bottom, Top, Near, and Far planes from the camera view-projection matrix.
+  - **Branchless Center-Extents AABB Intersection**: Evaluating projected box half-extent radius $r = e_x |\vec{n}_x| + e_y |\vec{n}_y| + e_z |\vec{n}_z|$ against signed plane distance $P(\vec{c})$. Replaces 8-corner loops and branching with fast SIMD-friendly math.
+  - **Bounding Sphere Culling for Dynamic Entities**: Rapid $O(1)$ sphere rejection ($P(\vec{c}) < -r$) for mobs, dropped items, and particle systems.
+  - **Multi-Tier Hierarchical Culling**: Shared chunk AABB culling across opaque and cutout passes, avoiding redundant matrix transformations and GPU vertex buffer transfers for occluded geometry.
+
+---
+
+## 20. Core Libraries
 
 - [GLFW](https://www.glfw.org/) -- Windowing, OpenGL context, and input.
 - [GLEW](https://github.com/nigels-com/glew) -- OpenGL 3.3 extension loading.
 - [GLM](https://github.com/g-truc/glm) -- Maths library (`vec2`/`vec3`/`ivec3`, `mat4`, quaternions).
 - [miniaudio](https://miniaud.io/) -- Audio playback, procedural synthesizers, and DSP filters.
 - [FastNoiseLite](https://github.com/Auburn/FastNoiseLite) -- Fast coherent noise generation library (`src/world/FastNoiseLite.hpp`).
-- [stb](https://github.com/nothings/stb) -- Single-header `stb_image` for PNG decoding and `stb_image_resize` for downscaling.
+- [stb](https://github.com/nothings/stb) -- Single-header `stb_image` for PNG decoding, `stb_truetype` for OTF/TTF fonts, and `stb_image_resize` for downscaling.

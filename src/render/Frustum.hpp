@@ -6,8 +6,11 @@
 namespace vox {
 
 // ---------------------------------------------------------------------------
-// View Frustum extracted from the view-projection matrix.
-// Used for high-performance Chunk AABB Frustum Culling.
+// View Frustum: 6-Plane Extraction and Fast Geometric AABB / Sphere Culling.
+// References:
+// - LearnOpenGL Frustum Culling: https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling
+// - Gribb-Hartmann Plane Extraction: "Fast Extraction of Viewing Frustum Planes"
+// - Wikipedia Viewing Frustum: https://en.wikipedia.org/wiki/Frustum
 // ---------------------------------------------------------------------------
 class Frustum {
 public:
@@ -28,8 +31,8 @@ public:
         }
     };
 
+    // Extracts normalized frustum clipping planes from view-projection matrix
     void update(const glm::mat4& vp) {
-        // Gribb-Hartmann plane extraction
         // Left
         m_planes[0].normal.x = vp[0][3] + vp[0][0];
         m_planes[0].normal.y = vp[1][3] + vp[1][0];
@@ -71,20 +74,47 @@ public:
         }
     }
 
-    bool isBoxVisible(const glm::vec3& minP, const glm::vec3& maxP) const {
+    // Branchless Center-Extents AABB test (LearnOpenGL / Ericson Real-Time Collision)
+    bool isBoxVisibleCenterExtents(const glm::vec3& center, const glm::vec3& extents) const {
         for (const auto& plane : m_planes) {
-            // Find p-vertex (the positive vertex along the normal)
-            glm::vec3 p = minP;
-            if (plane.normal.x >= 0.0f) p.x = maxP.x;
-            if (plane.normal.y >= 0.0f) p.y = maxP.y;
-            if (plane.normal.z >= 0.0f) p.z = maxP.z;
-
-            if (plane.distanceToPoint(p) < 0.0f) {
+            const float r = extents.x * std::abs(plane.normal.x) +
+                            extents.y * std::abs(plane.normal.y) +
+                            extents.z * std::abs(plane.normal.z);
+            if (plane.distanceToPoint(center) < -r) {
                 return false;
             }
         }
         return true;
     }
+
+    // Overload taking minimum and maximum bounding box corners
+    bool isBoxVisible(const glm::vec3& minP, const glm::vec3& maxP) const {
+        const glm::vec3 center = (minP + maxP) * 0.5f;
+        const glm::vec3 extents = (maxP - minP) * 0.5f;
+        return isBoxVisibleCenterExtents(center, extents);
+    }
+
+    // Bounding Sphere Frustum Test (Ideal for rapid mob & particle emitter culling)
+    bool isSphereVisible(const glm::vec3& center, float radius) const {
+        for (const auto& plane : m_planes) {
+            if (plane.distanceToPoint(center) < -radius) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Point Frustum Test
+    bool isPointVisible(const glm::vec3& point) const {
+        for (const auto& plane : m_planes) {
+            if (plane.distanceToPoint(point) < 0.0f) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    const std::array<Plane, 6>& planes() const { return m_planes; }
 
 private:
     std::array<Plane, 6> m_planes;

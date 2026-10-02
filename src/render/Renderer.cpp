@@ -577,16 +577,19 @@ void Renderer::drawWorld(const World& world, const Camera& camera,
 
 void Renderer::drawEntities(const EntityManager& entityManager, const World& world, const Camera& camera,
                             const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
-    if (entityManager.mobs().empty()) return;
-
-    static std::vector<Vertex> entityVertices;
-    entityVertices.clear();
-    entityManager.buildMesh(entityVertices, world);
-
-    if (entityVertices.empty()) return;
+    if (entityManager.mobs().empty() && entityManager.items().empty()) return;
 
     const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
     const glm::mat4 viewProjection = camera.projectionMatrix(aspect) * camera.viewMatrix();
+
+    Frustum frustum;
+    frustum.update(viewProjection);
+
+    static std::vector<Vertex> entityVertices;
+    entityVertices.clear();
+    entityManager.buildMesh(entityVertices, world, &frustum);
+
+    if (entityVertices.empty()) return;
 
     m_chunkShader.use();
     m_chunkShader.setMat4("uVP", viewProjection);
@@ -618,14 +621,24 @@ void Renderer::drawEntities(const EntityManager& entityManager, const World& wor
 
 void Renderer::drawPlayer(const Player& player, const World& world, const Camera& camera,
                           const glm::vec3& fogColor, float fogStart, float fogEnd, float sunlight) {
+    if (player.perspective() == Perspective::FirstPerson) return;
+
+    const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
+    const glm::mat4 viewProjection = camera.projectionMatrix(aspect) * camera.viewMatrix();
+
+    Frustum frustum;
+    frustum.update(viewProjection);
+
+    const glm::vec3 pos = player.position();
+    const glm::vec3 minP(pos.x - 0.45f, pos.y, pos.z - 0.45f);
+    const glm::vec3 maxP(pos.x + 0.45f, pos.y + 1.9f, pos.z + 0.45f);
+    if (!frustum.isBoxVisible(minP, maxP)) return;
+
     static std::vector<Vertex> playerVertices;
     playerVertices.clear();
     player.appendGeometry(playerVertices, world);
 
     if (playerVertices.empty()) return;
-
-    const float aspect = static_cast<float>(m_fbWidth) / static_cast<float>(m_fbHeight);
-    const glm::mat4 viewProjection = camera.projectionMatrix(aspect) * camera.viewMatrix();
 
     m_chunkShader.use();
     m_chunkShader.setMat4("uVP", viewProjection);

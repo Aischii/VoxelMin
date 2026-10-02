@@ -1,4 +1,5 @@
 #include "entity/EntityManager.hpp"
+#include "render/Frustum.hpp"
 #include "world/Block.hpp"
 #include "world/World.hpp"
 
@@ -192,16 +193,31 @@ Mob* EntityManager::hitTest(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
     return closestMob;
 }
 
-void EntityManager::buildMesh(std::vector<Vertex>& outVertices, const World& world) const {
+void EntityManager::buildMesh(std::vector<Vertex>& outVertices, const World& world, const Frustum* frustum) const {
     for (const auto& mob : m_mobs) {
         if (!mob || !mob->isAlive()) continue;
+        if (frustum) {
+            const glm::vec3 pos = mob->position();
+            const float hw = mob->halfWidth();
+            const float hh = mob->halfHeight();
+            const glm::vec3 minP(pos.x - hw, pos.y, pos.z - hw);
+            const glm::vec3 maxP(pos.x + hw, pos.y + hh * 2.0f, pos.z + hw);
+            if (!frustum->isBoxVisible(minP, maxP)) {
+                continue;
+            }
+        }
         mob->appendGeometry(outVertices, world);
     }
     for (const auto& item : m_items) {
         if (!item || !item->isAlive()) continue;
+        if (frustum) {
+            const glm::vec3 pos = item->position();
+            if (!frustum->isSphereVisible(pos, 0.4f)) {
+                continue;
+            }
+        }
         item->appendGeometry(outVertices, world);
     }
 }
-
 
 } // namespace vox
