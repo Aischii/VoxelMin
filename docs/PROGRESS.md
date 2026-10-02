@@ -16,6 +16,7 @@ the table below rather than rewritten.
 
 | Version | Legacy tag | Milestone | Headline |
 |---------|------------|-----------|----------|
+| v1.M1.1 | - | v1.M1 | Complete Environmental Soundscapes (Wind, Crickets, Cave Drone), Crisp High-Res Vector Font Rasterization & Trilinear Mipmapping, Non-Auto Flight Creative Mode, Dynamic Bit-Packed Chunk Palettes |
 | v1.M1.0 | - | v1.M1 | Environmental Sound Physics & Spatial Acoustics, Infinite World Generation & Dynamic Chunk Streaming, Fast Spawn Generation ($<150\text{ ms}$), 4-Corner Per-Vertex Smooth Lighting |
 | v0.M9.0 | - | v0.M9 | 4-Corner Per-Vertex Smooth Dynamic Lighting, Trilinear Entity Lighting, Recipe Discovery Progression, Interactive World Seed Input & Hashing, Third-Person Head Pitch Articulation, Distinct 3x3 Workbench UI |
 | v0.M8.0 | - | v0.M8 | Console Edition Crafting UI, RPG MMO Vitals Card HUD, Moon Phase Lighting Cycle & Darkness, Living Ecology (dirt spread/grass collapse), 3x3 Crafting Table, Item Toss ('Q'/Ctrl+Q), Double-Jump Flight, Non-Freezing Death Simulation, 3D Held Items |

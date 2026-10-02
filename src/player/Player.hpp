@@ -79,7 +79,7 @@ public:
     bool isCreative() const { return m_creative; }
     void setCreative(bool c) {
         m_creative = c;
-        if (c) m_flying = true;
+        if (!c) m_flying = false;
     }
 
     void setHeldItem(BlockId id) { m_heldItem = id; }

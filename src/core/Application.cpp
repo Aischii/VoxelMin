@@ -183,7 +183,8 @@ void Application::run() {
                 m_fluidTickTimer = 0.0f;
                 m_world.tickFluids(glm::ivec3(m_player.position()), 24);
             }
-            m_audioEngine.updateEnvironment(m_world, m_player.camera().position(), m_player.isInWater());
+            const float nightFactor = std::clamp(1.0f - computeSunlight(), 0.0f, 1.0f);
+            m_audioEngine.updateEnvironment(m_world, m_player.camera().position(), m_player.isInWater(), nightFactor);
         }
 
         m_player.setHeldItem(m_hotbar[m_selectedSlot].id);
@@ -1447,9 +1448,8 @@ void Application::toggleCreativeMode() {
     m_creativeMode = !m_creativeMode;
     m_player.setCreative(m_creativeMode);
     if (m_creativeMode) {
-        m_player.setFlying(true); // Automatically enable flight mode in creative!
         m_audioEngine.play(SoundId::ItemPickup, 1.0f, 1.3f);
-        log::info("Creative mode ENABLED (Flying auto-enabled, double-space to toggle)");
+        log::info("Creative mode ENABLED (Double-space to toggle flying)");
     } else {
         m_player.setFlying(false);
         m_audioEngine.play(SoundId::Click, 0.8f, 0.9f);

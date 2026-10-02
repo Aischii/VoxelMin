@@ -124,8 +124,8 @@ public:
     void play3D(SoundId id, const glm::vec3& worldPos, const glm::vec3& listenerPos,
                 const glm::vec3& listenerFront, float volume = 1.0f, const World* world = nullptr);
 
-    // Environmental sound physics update (room size, cave echo probe, underwater state)
-    void updateEnvironment(const World& world, const glm::vec3& listenerPos, bool isUnderwater);
+    // Environmental sound physics update (room size, cave echo probe, underwater state, night/day factor)
+    void updateEnvironment(const World& world, const glm::vec3& listenerPos, bool isUnderwater, float nightFactor = 0.0f);
 
     // Volume adjustments (0.0 to 1.0)
     void setMasterVolume(float v);
@@ -188,8 +188,17 @@ private:
     std::vector<float> m_windLoop;
     float m_windPos = 0.0f;
 
+    std::vector<float> m_cricketLoop;
+    float m_cricketPos = 0.0f;
+
+    std::vector<float> m_caveDroneLoop;
+    float m_caveDronePos = 0.0f;
+
     std::vector<float> m_underwaterLoop;
     float m_underwaterPos = 0.0f;
+
+    float m_nightFactor = 0.0f;
+    float m_caveFactor = 0.0f;
 
     // Background music stereo PCM buffers (interleaved L, R)
     std::vector<float> m_menuMusicPcm;

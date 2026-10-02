@@ -48,19 +48,20 @@ bool Font::buildFromTtf(const std::string& fontPath) {
         return false;
     }
 
-    m_atlasWidth = 256;
-    m_atlasHeight = 256;
-    m_fontHeight = 14.0f; // Normalized line height
+    m_atlasWidth = 512;
+    m_atlasHeight = 512;
+    const float bakeHeight = 48.0f; // High-res bake height for crisp vector glyph rasterization
+    m_fontHeight = 8.0f;           // Logical unit height matching original UI layout proportions
 
     int ascent = 0, descent = 0, lineGap = 0;
     stbtt_GetFontVMetrics(&info, &ascent, &descent, &lineGap);
-    const float fontScale = stbtt_ScaleForPixelHeight(&info, m_fontHeight);
+    const float fontScale = stbtt_ScaleForPixelHeight(&info, bakeHeight);
     const float fontAscent = static_cast<float>(ascent) * fontScale;
 
     std::vector<uint8_t> bitmap(static_cast<size_t>(m_atlasWidth) * m_atlasHeight, 0);
     stbtt_bakedchar chardata[96]; // ASCII 32..127
 
-    const int res = stbtt_BakeFontBitmap(ttfBuffer.data(), 0, m_fontHeight,
+    const int res = stbtt_BakeFontBitmap(ttfBuffer.data(), 0, bakeHeight,
                                          bitmap.data(), m_atlasWidth, m_atlasHeight,
                                          32, 96, chardata);
     if (res <= 0) {
@@ -73,6 +74,7 @@ bool Font::buildFromTtf(const std::string& fontPath) {
 
     const float invW = 1.0f / static_cast<float>(m_atlasWidth);
     const float invH = 1.0f / static_cast<float>(m_atlasHeight);
+    const float normFactor = m_fontHeight / bakeHeight;
 
     for (int i = 0; i < 96; ++i) {
         const unsigned char c = static_cast<unsigned char>(32 + i);
@@ -87,11 +89,11 @@ bool Font::buildFromTtf(const std::string& fontPath) {
         const float gw = static_cast<float>(bc.x1 - bc.x0);
         const float gh = static_cast<float>(bc.y1 - bc.y0);
 
-        m_glyphs[i].x0 = bc.xoff;
-        m_glyphs[i].y0 = -(fontAscent + bc.yoff);
-        m_glyphs[i].x1 = bc.xoff + gw;
-        m_glyphs[i].y1 = -(fontAscent + bc.yoff) - gh;
-        m_glyphs[i].xadvance = bc.xadvance;
+        m_glyphs[i].x0 = bc.xoff * normFactor;
+        m_glyphs[i].y0 = -(fontAscent + bc.yoff) * normFactor;
+        m_glyphs[i].x1 = (bc.xoff + gw) * normFactor;
+        m_glyphs[i].y1 = (-(fontAscent + bc.yoff) - gh) * normFactor;
+        m_glyphs[i].xadvance = bc.xadvance * normFactor;
     }
 
     glGenTextures(1, &m_texture);
@@ -99,14 +101,15 @@ bool Font::buildFromTtf(const std::string& fontPath) {
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, m_atlasWidth, m_atlasHeight, 0,
                  GL_RED, GL_UNSIGNED_BYTE, bitmap.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    log::info("Loaded TrueType/OpenType font: '%s' (%dx%d atlas, size %.1fpx)",
-              fontPath.c_str(), m_atlasWidth, m_atlasHeight, m_fontHeight);
+    log::info("Loaded TrueType/OpenType font: '%s' (%dx%d atlas, baked at %.1fpx, base height %.1fpx)",
+              fontPath.c_str(), m_atlasWidth, m_atlasHeight, bakeHeight, m_fontHeight);
     return true;
 }
 

@@ -245,9 +245,10 @@ void AudioEngine::scanAndLoadMusic() {
     synthesizeBackroomsMusic();
 }
 
-void AudioEngine::updateEnvironment(const World& world, const glm::vec3& listenerPos, bool isUnderwater) {
+void AudioEngine::updateEnvironment(const World& world, const glm::vec3& listenerPos, bool isUnderwater, float nightFactor) {
     std::lock_guard<std::mutex> lock(m_envMutex);
     m_isUnderwater = isUnderwater;
+    m_nightFactor = std::clamp(nightFactor, 0.0f, 1.0f);
 
     // 14 acoustic probe rays
     const glm::vec3 PROBE_DIRS[14] = {
@@ -292,6 +293,7 @@ void AudioEngine::updateEnvironment(const World& world, const glm::vec3& listene
     }
 
     const float avgDist = totalDist / 14.0f;
+    m_caveFactor = std::clamp((static_cast<float>(solidHits) - 4.0f) / 7.0f, 0.0f, 1.0f);
 
     if (solidHits >= 6) {
         // Enclosed space / Cave echo
@@ -510,7 +512,7 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
         }
     }
 
-    // 2. Seamless ambient wind / underwater ambience
+    // 2. Seamless ambient wind / nocturnal crickets / cave drone / underwater ambience
     if (m_inGame && m_ambientVolume > 0.001f) {
         const float ambVol = m_masterVolume * m_ambientVolume;
 
@@ -526,17 +528,43 @@ void AudioEngine::mixAudio(float* output, size_t frameCount, size_t channels) {
                 output[f * channels + 0] += sample;
                 if (channels > 1) output[f * channels + 1] += sample;
             }
-        } else if (!m_windLoop.empty()) {
+        } else {
+            const float caveGain = m_caveFactor;
+            const float surfaceGain = 1.0f - caveGain;
+            const float nightGain = surfaceGain * m_nightFactor;
+            const float dayGain = surfaceGain * (1.0f - m_nightFactor);
+
             const size_t windLen = m_windLoop.size();
+            const size_t cricketLen = m_cricketLoop.size();
+            const size_t caveLen = m_caveDroneLoop.size();
+
             for (size_t f = 0; f < frameCount; ++f) {
-                size_t idx = static_cast<size_t>(m_windPos);
-                float sample = m_windLoop[idx % windLen] * ambVol;
-                m_windPos += 1.0f;
-                if (m_windPos >= static_cast<float>(windLen)) {
-                    m_windPos -= static_cast<float>(windLen);
+                float sample = 0.0f;
+                if (dayGain > 0.001f && windLen > 0) {
+                    const size_t idx = static_cast<size_t>(m_windPos) % windLen;
+                    sample += m_windLoop[idx] * dayGain;
                 }
+                if (nightGain > 0.001f && cricketLen > 0) {
+                    const size_t idx = static_cast<size_t>(m_cricketPos) % cricketLen;
+                    sample += m_cricketLoop[idx] * nightGain;
+                }
+                if (caveGain > 0.001f && caveLen > 0) {
+                    const size_t idx = static_cast<size_t>(m_caveDronePos) % caveLen;
+                    sample += m_caveDroneLoop[idx] * caveGain;
+                }
+
+                sample *= ambVol;
                 output[f * channels + 0] += sample;
                 if (channels > 1) output[f * channels + 1] += sample;
+
+                m_windPos += 1.0f;
+                if (windLen > 0 && m_windPos >= static_cast<float>(windLen)) m_windPos -= static_cast<float>(windLen);
+
+                m_cricketPos += 1.0f;
+                if (cricketLen > 0 && m_cricketPos >= static_cast<float>(cricketLen)) m_cricketPos -= static_cast<float>(cricketLen);
+
+                m_caveDronePos += 1.0f;
+                if (caveLen > 0 && m_caveDronePos >= static_cast<float>(caveLen)) m_caveDronePos -= static_cast<float>(caveLen);
             }
         }
     }
@@ -914,6 +942,43 @@ void AudioEngine::precomputeSounds() {
             const float bubble1 = 0.08f * std::sin(2.0f * PI * (240.0f + 30.0f * std::sin(2.0f * PI * 1.5f * t)) * t);
             const float bubble2 = 0.06f * std::sin(2.0f * PI * (360.0f + 45.0f * std::cos(2.0f * PI * 2.2f * t)) * t);
             m_underwaterLoop[i] = (lp * 0.6f + bubble1 + bubble2) * 0.32f;
+        }
+    }
+
+    // Ambient Nocturnal Cricket Chorus (8 seconds)
+    {
+        const int n = 8 * SAMPLE_RATE;
+        m_cricketLoop.resize(n);
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float cycle = std::fmod(t, 0.18f);
+            float chirpEnv = 0.0f;
+            if (cycle < 0.08f) {
+                chirpEnv = std::sin(PI * (cycle / 0.08f));
+                chirpEnv *= chirpEnv;
+            }
+            const float cricket1 = std::sin(2.0f * PI * 4600.0f * t) * chirpEnv * 0.12f;
+            const float cricket2 = std::sin(2.0f * PI * 4950.0f * t) * chirpEnv * 0.08f;
+            const float cricket3 = std::sin(2.0f * PI * 5200.0f * t) * chirpEnv * 0.05f;
+            m_cricketLoop[i] = (cricket1 + cricket2 + cricket3) * 0.35f;
+        }
+    }
+
+    // Ambient Subterranean Cave Drone (12 seconds)
+    {
+        const int n = 12 * SAMPLE_RATE;
+        m_caveDroneLoop.resize(n);
+        std::mt19937 rng(303);
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        float lp = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            const float t = static_cast<float>(i) / SAMPLE_RATE;
+            const float noise = dist(rng);
+            lp += (noise - lp) * 0.005f;
+            const float sub1 = 0.15f * std::sin(2.0f * PI * 55.0f * t + 0.5f * std::sin(2.0f * PI * 0.2f * t));
+            const float sub2 = 0.10f * std::sin(2.0f * PI * 110.0f * t);
+            const float airHiss = lp * 0.3f;
+            m_caveDroneLoop[i] = (sub1 + sub2 + airHiss) * 0.32f;
         }
     }
 }

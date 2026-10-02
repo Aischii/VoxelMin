@@ -7,7 +7,7 @@ Ordered milestones. Each is a coherent, shippable increment. Update
 
 # Version 1.0 Milestone Series
 
-## v1.M1 -- Environmental Sound Physics & Spatial Acoustics (IN PROGRESS)
+## v1.M1 -- Environmental Sound Physics & Spatial Acoustics (DELIVERED)
 *Inspired by [Sound Physics Remastered](https://github.com/henkelmax/sound-physics-remastered), [Presence Footsteps](https://github.com/Sollace/Presence-Footsteps), and [AmbientSounds](https://github.com/CreativeMD/AmbientSounds)*
 
 - **Ray-Traced Acoustic Occlusion**:
